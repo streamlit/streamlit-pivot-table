@@ -15,7 +15,8 @@
 
 """Shared Playwright fixtures and pytest hooks for E2E tests."""
 
-from typing import Any, Dict, Generator
+from collections.abc import Generator
+from typing import Any
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page
@@ -24,13 +25,14 @@ from playwright.sync_api import Browser, BrowserContext, Page
 @pytest.fixture(scope="function")
 def context(browser: Browser) -> Generator[BrowserContext, None, None]:
     """Create a new browser context with custom settings."""
-    context_options: Dict[str, Any] = {
+    context_options: dict[str, Any] = {
         "accept_downloads": True,
         "service_workers": "block"
         if browser.browser_type.name == "chromium"
         else "allow",
-        "permissions": ["clipboard-read", "clipboard-write"],
     }
+    if browser.browser_type.name == "chromium":
+        context_options["permissions"] = ["clipboard-read", "clipboard-write"]
 
     context = browser.new_context(**context_options)
     context.set_default_timeout(30000)
