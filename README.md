@@ -1,0 +1,553 @@
+# streamlit-pivot-table
+
+Pivot table component for [Streamlit](https://streamlit.io). Built with Streamlit Components V2, React, and TypeScript.
+
+Supports multi-dimensional pivoting, interactive sorting and filtering, subtotals with collapse/expand, conditional formatting, data export, drill-down detail panels, and more.
+
+## Installation
+
+```sh
+pip install streamlit-pivot-table
+```
+
+**Requirements:** Python >= 3.10, Streamlit >= 1.51
+
+## Quick Start
+
+```python
+import pandas as pd
+import streamlit as st
+from streamlit_pivot_table import st_pivot_table
+
+df = pd.read_csv("sales.csv")
+
+result = st_pivot_table(
+    df,
+    key="my_pivot",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    aggregation="sum",
+    show_totals=True,
+)
+```
+
+The `data` parameter accepts the same input types as `st.dataframe` — Pandas DataFrames, Polars DataFrames, NumPy arrays, dicts, lists of records, and more. Data is automatically converted to a Pandas DataFrame internally.
+
+If `rows`, `columns`, and `values` are all omitted, the component auto-detects dimensions (categorical + low-cardinality numeric columns) and measures (high-cardinality numeric columns) from the data.
+
+---
+
+## API Reference
+
+### `st_pivot_table(data, *, ...)`
+
+Creates a pivot table component. All parameters except `data` are keyword-only.
+
+Returns a `PivotTableResult` dict containing the current `config` state.
+
+#### Core Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | DataFrame-like | *(required)* | Source data. Accepts the same types as `st.dataframe`: Pandas/Polars DataFrame or Series, NumPy array, dict, list of records, PyArrow Table, etc. |
+| `key` | `str \| None` | `None` | Unique component key. Required for state persistence across reruns. |
+| `rows` | `list[str] \| None` | `None` | Column names to use as row dimensions. |
+| `columns` | `list[str] \| None` | `None` | Column names to use as column dimensions. |
+| `values` | `list[str] \| None` | `None` | Column names to aggregate as measures. |
+| `synthetic_measures` | `list[dict] \| None` | `None` | Derived measures computed from source-field sums (for example, ratio of sums). See [Synthetic Measures](#synthetic-measures-v1). |
+| `aggregation` | `str` | `"sum"` | Aggregation function. See [Aggregation Functions](#aggregation-functions). |
+| `interactive` | `bool` | `True` | Enable toolbar controls for reconfiguring the pivot. |
+
+#### Totals and Subtotals
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `show_totals` | `bool` | `True` | Show grand total rows and columns. Acts as default for `show_row_totals` and `show_column_totals`. |
+| `show_row_totals` | `bool \| list[str] \| None` | `None` | Row totals visibility: `True` all measures, `False` none, `["Revenue"]` only listed measures. Defaults to `show_totals` when `None`. |
+| `show_column_totals` | `bool \| list[str] \| None` | `None` | Column totals visibility with the same semantics as `show_row_totals`. |
+| `show_subtotals` | `bool \| list[str]` | `False` | Subtotal visibility per row dimension: `True` all parent dimensions, `False` none, or a list of dimension names. |
+| `repeat_row_labels` | `bool` | `False` | Repeat row dimension labels on every row instead of merging. |
+
+#### Sorting
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `row_sort` | `dict \| None` | `None` | Initial sort for rows. See [Sort Configuration](#sort-configuration). |
+| `col_sort` | `dict \| None` | `None` | Initial sort for columns. Same shape as `row_sort` (without `col_key`). |
+
+#### Display and Formatting
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `number_format` | `str \| dict[str, str] \| None` | `None` | Number format pattern(s). See [Number Format Patterns](#number-format-patterns). |
+| `column_alignment` | `dict[str, str] \| None` | `None` | Per-field text alignment: `"left"`, `"center"`, or `"right"`. |
+| `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
+| `conditional_formatting` | `list[dict] \| None` | `None` | Visual formatting rules. See [Conditional Formatting](#conditional-formatting). |
+| `empty_cell_value` | `str` | `"-"` | Display string for cells with no data. |
+
+#### Layout
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `height` | `int \| None` | `None` | Fixed height in pixels. `None` means auto-size (capped by `max_height`). |
+| `max_height` | `int` | `500` | Maximum auto-size height in pixels. Table becomes scrollable when content exceeds this. Ignored when `height` is set. |
+| `sticky_headers` | `bool` | `True` | Column headers stick to the top of the scroll container. |
+
+#### Interactivity and Callbacks
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `on_cell_click` | `Callable[[], None] \| None` | `None` | Called when a user clicks a data cell. Read the payload from `st.session_state[key]`. |
+| `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config via the toolbar. |
+| `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
+| `locked` | `bool` | `False` | Freeze toolbar config controls (rows/columns/values/aggregation/settings). Sorting and filtering via header menus remain available. |
+| `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
+
+#### Data Control
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `null_handling` | `str \| dict[str, str] \| None` | `None` | How to treat null/NaN values. See [Null Handling](#null-handling). |
+| `hidden_attributes` | `list[str] \| None` | `None` | Column names to hide entirely from the UI. |
+| `hidden_from_aggregators` | `list[str] \| None` | `None` | Column names hidden from the values/aggregators dropdown only. |
+| `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone. |
+| `sorters` | `dict[str, list[str]] \| None` | `None` | Custom sort orderings per dimension. Maps column name to ordered list of values. |
+| `menu_limit` | `int \| None` | `None` | Max items in the header-menu filter checklist. Defaults to 50. |
+
+---
+
+## Feature Guide
+
+### Aggregation Functions
+
+| Function | Value | Description |
+|----------|-------|-------------|
+| Sum | `"sum"` | Sum of values |
+| Average | `"avg"` | Arithmetic mean |
+| Count | `"count"` | Number of records |
+| Min | `"min"` | Minimum value |
+| Max | `"max"` | Maximum value |
+| Count Distinct | `"count_distinct"` | Number of unique values |
+| Median | `"median"` | Median value |
+| 90th Percentile | `"percentile_90"` | 90th percentile |
+| First | `"first"` | First value encountered |
+| Last | `"last"` | Last value encountered |
+
+### Synthetic Measures (V1)
+
+Synthetic measures let you render derived metrics alongside regular value fields. They are computed from source-field sums at each cell/total context.
+
+Supported operations:
+
+- `sum_over_sum` -> `sum(numerator) / sum(denominator)` (returns empty cell value when denominator is 0)
+- `difference` -> `sum(numerator) - sum(denominator)`
+
+Optional synthetic-measure fields:
+
+- `format` -> number format pattern applied only to that synthetic measure (for example `.1%`, `$,.0f`, or `,.2f`)
+
+```python
+st_pivot_table(
+    df,
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    synthetic_measures=[
+        {
+            "id": "revenue_per_unit",
+            "label": "Revenue / Unit",
+            "operation": "sum_over_sum",
+            "numerator": "Revenue",
+            "denominator": "Units",
+            "format": ".1%",
+        },
+        {
+            "id": "revenue_minus_cost",
+            "label": "Revenue - Cost",
+            "operation": "difference",
+            "numerator": "Revenue",
+            "denominator": "Cost",
+            "format": "$,.0f",
+        },
+    ],
+)
+```
+
+`aggregation="sum_over_sum"` is no longer supported as a table-wide aggregation mode. Use `synthetic_measures` for ratio-of-sums behavior.
+In the interactive builder, the **Format** input includes presets (Percent, Currency, Number) and validates custom patterns before save.
+
+### Sort Configuration
+
+Sort rows or columns by label or by aggregated value.
+
+```python
+row_sort = {
+    "by": "value",           # "key" (alphabetical) or "value" (by measure)
+    "direction": "desc",     # "asc" or "desc"
+    "value_field": "Revenue", # required when by="value"
+    "col_key": ["2023"],     # optional: sort within a specific column
+}
+
+col_sort = {
+    "by": "key",
+    "direction": "asc",
+}
+```
+
+Users can also sort interactively via the column header menu (click the **&#8942;** icon).
+
+### Show Values As
+
+Display measures as percentages instead of raw numbers.
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| Raw | `"raw"` | Display the aggregated number (default) |
+| % of Grand Total | `"pct_of_total"` | Cell / Grand Total |
+| % of Row Total | `"pct_of_row"` | Cell / Row Total |
+| % of Column Total | `"pct_of_col"` | Cell / Column Total |
+
+```python
+st_pivot_table(
+    df,
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    show_values_as={"Revenue": "pct_of_total"},
+)
+```
+
+Users can also change this interactively via the value header menu (**&#8942;** icon on a value label header).
+Synthetic measures are always rendered as raw derived values (`show_values_as` does not apply to them).
+
+### Number Format Patterns
+
+Patterns follow a lightweight d3-style syntax.
+
+| Pattern | Example Output | Description |
+|---------|---------------|-------------|
+| `$,.0f` | $12,345 | US currency, no decimals |
+| `,.2f` | 12,345.67 | Comma-grouped, 2 decimals |
+| `.1%` | 34.5% | Percentage, 1 decimal |
+| `€,.2f` | &euro;12,345.67 | Euro via symbol |
+| `£,.0f` | &pound;12,345 | GBP |
+
+A single string applies to all value fields. A dict maps field names to patterns. Use `"__all__"` as a dict key for a default pattern.
+
+```python
+# Per-field formatting
+st_pivot_table(
+    df,
+    values=["Revenue", "Profit"],
+    number_format={"Revenue": "$,.0f", "Profit": ",.2f"},
+)
+
+# Global format for all fields
+st_pivot_table(df, values=["Revenue"], number_format="$,.0f")
+```
+
+### Conditional Formatting
+
+Apply visual formatting rules to value cells. Three rule types are supported:
+
+#### Color Scale
+
+Gradient fill between 2 or 3 colors based on min/mid/max values in the column.
+
+```python
+{
+    "type": "color_scale",
+    "apply_to": ["Revenue"],      # field names, or [] for all
+    "min_color": "#ffffff",       # required
+    "max_color": "#2e7d32",       # required
+    "mid_color": "#a5d6a7",       # optional (3-color scale)
+    "include_totals": False,      # optional, default False
+}
+```
+
+#### Data Bars
+
+Horizontal bar fill proportional to the cell value.
+
+```python
+{
+    "type": "data_bars",
+    "apply_to": ["Revenue"],
+    "color": "#1976d2",           # optional bar color
+    "fill": "gradient",           # "gradient" or "solid"
+}
+```
+
+#### Threshold
+
+Highlight cells matching a numeric condition.
+
+```python
+{
+    "type": "threshold",
+    "apply_to": ["Profit"],
+    "conditions": [
+        {
+            "operator": "gt",     # "gt", "gte", "lt", "lte", "eq", "between"
+            "value": 5000,        # threshold value (or [lo, hi] for "between")
+            "background": "#c8e6c9",
+            "color": "#1b5e20",
+            "bold": True,         # optional
+        },
+    ],
+}
+```
+
+Multiple rules can be combined:
+
+```python
+st_pivot_table(
+    df,
+    values=["Revenue", "Profit", "Units"],
+    conditional_formatting=[
+        {"type": "data_bars", "apply_to": ["Revenue"], "color": "#1976d2", "fill": "gradient"},
+        {"type": "color_scale", "apply_to": ["Profit"], "min_color": "#fff", "max_color": "#2e7d32"},
+        {"type": "threshold", "apply_to": ["Units"], "conditions": [
+            {"operator": "gt", "value": 250, "background": "#bbdefb", "color": "#0d47a1", "bold": True},
+        ]},
+    ],
+)
+```
+
+### Null Handling
+
+Control how null/NaN values in the source data are treated.
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| Exclude | `"exclude"` | Rows with null dimension values are excluded (default) |
+| Zero | `"zero"` | Null measure values are treated as 0 |
+| Separate | `"separate"` | Null dimension values are grouped as "(null)" |
+
+```python
+# Global mode
+st_pivot_table(df, null_handling="zero")
+
+# Per-field modes
+st_pivot_table(df, null_handling={"Region": "separate", "Revenue": "zero"})
+```
+
+### Subtotals and Row Grouping
+
+With 2+ row dimensions, enable subtotals to see group-level aggregations with collapsible groups.
+
+```python
+st_pivot_table(
+    df,
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue"],
+    show_subtotals=True,
+    repeat_row_labels=False,
+)
+```
+
+- Each group shows a subtotal row with a collapse/expand toggle (+/&minus;).
+- Collapsed groups hide child rows but keep the subtotal visible.
+- Expand All / Collapse All controls are available in the Settings popover (gear icon in the toolbar).
+
+### Column Group Collapse/Expand
+
+With 2+ column dimensions, column groups can be collapsed into subtotal columns.
+
+```python
+st_pivot_table(
+    df,
+    rows=["Region"],
+    columns=["Year", "Category"],
+    values=["Revenue"],
+)
+```
+
+Hover over a parent column header to reveal the collapse toggle.
+
+### Data Export
+
+Export the pivot table as CSV, TSV, or copy to clipboard. Available via the toolbar utility menu (download icon) when `interactive=True`.
+
+- **Format**: CSV, TSV, or Clipboard (tab-separated for pasting into spreadsheets)
+- **Content**: Formatted (display values with currency, percentages, etc.) or Raw (unformatted numbers)
+- **Filename**: Customizable via `export_filename`. The date (`YYYY-MM-DD`) and file extension are appended automatically. Defaults to `"pivot-table"` (e.g. `pivot-table_2026-03-09.csv`).
+
+Export always outputs the full expanded table regardless of any collapsed row/column groups.
+
+### Drill-Down Detail Panel
+
+Click any data or total cell to open an inline panel below the table showing the source records that contributed to that cell's aggregated value.
+
+```python
+result = st_pivot_table(
+    df,
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue"],
+    enable_drilldown=True,
+    on_cell_click=lambda: None,
+    key="my_pivot",
+)
+```
+
+- The panel displays up to 500 matching records.
+- Close with the **&times;** button or by pressing **Escape**.
+- Set `enable_drilldown=False` to disable (the `on_cell_click` callback still fires).
+
+### Locked Mode
+
+Freeze toolbar config controls so end-users cannot change rows, columns, values, aggregation, or display settings. The entire utility menu (reset, swap, config import/export, data export, settings) is hidden. Sorting and filtering via header menus remain available.
+
+```python
+st_pivot_table(
+    df,
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    locked=True,
+)
+```
+
+### Toolbar Utility Menu
+
+When `interactive=True`, hovering over the top-right of the toolbar reveals utility actions:
+
+| Action | Description |
+|--------|-------------|
+| **Reset** | Resets to the original Python-supplied config (only visible when config has changed) |
+| **Swap** | Transposes row and column dimensions |
+| **Copy Config** | Copies the current config as JSON to clipboard |
+| **Import Config** | Paste a JSON config to apply |
+| **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
+| **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
+
+In **locked mode**, the entire utility menu (including Settings) is hidden. Only sorting and filtering via header menus remain available.
+
+---
+
+## Callbacks and State
+
+This component uses Streamlit Components V2 (CCv2). Callbacks are called with **no arguments**. Read updated values from `st.session_state[key]` after the callback fires.
+
+```python
+def on_click():
+    payload = st.session_state["my_pivot"].get("cell_click")
+    st.write("Clicked:", payload)
+
+def on_config():
+    config = st.session_state["my_pivot"].get("config")
+    st.write("Config changed:", config)
+
+result = st_pivot_table(
+    df,
+    key="my_pivot",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    on_cell_click=on_click,
+    on_config_change=on_config,
+)
+```
+
+### Cell Click Payload
+
+When a cell is clicked, the payload has this shape:
+
+```python
+{
+    "rowKey": ["East"],           # row dimension values
+    "colKey": ["2023"],           # column dimension values
+    "value": 12345.0,            # aggregated cell value (or None)
+    "valueField": "Revenue",     # clicked value field or synthetic measure id
+    "filters": {                  # dimension filters for drill-down
+        "Region": "East",
+        "Year": "2023",
+    },
+}
+```
+
+For total cells, `rowKey` or `colKey` will be `["Total"]` and the corresponding dimension is omitted from `filters`.
+
+### Config State
+
+The returned `config` dict contains the full current configuration including any changes the user made via the toolbar. Use this to persist user customizations or synchronize multiple components.
+
+---
+
+## Keyboard Accessibility
+
+The component follows WAI-ARIA patterns for all interactive elements:
+
+- **Toolbar**: Arrow keys navigate between toolbar buttons (roving tabindex). Space/Enter activates.
+- **Header menus**: Escape closes. Arrow keys navigate options. Space/Enter selects.
+- **Export/Import popovers**: Focus is automatically placed on the first interactive element when opened. Tab/Shift+Tab moves between controls; tabbing out closes the popover.
+- **Settings popover** (gear icon): Focus moves to first checkbox on open. Escape closes. Tab navigates between toggles.
+- **Radio groups** (export format/content): Arrow keys move focus between options. Space/Enter selects.
+- **Drill-down panel**: Focus moves to the close button on open. Escape closes.
+- **Data cells**: Focusable via Tab. Space/Enter triggers cell click.
+
+---
+
+## Development
+
+### Development install (editable)
+
+Install in editable mode with Streamlit so you can run the example app:
+
+```sh
+uv pip install -e '.[with-streamlit]' --force-reinstall
+```
+
+### Running the example app
+
+```sh
+uv run streamlit run streamlit_app.py
+```
+
+The example app (`streamlit_app.py`) contains 12 sections demonstrating every feature with interactive examples and inline documentation.
+
+### Building the frontend
+
+```sh
+cd streamlit_pivot_table/frontend
+npm install
+npm run build
+```
+
+### Running tests
+
+```sh
+cd streamlit_pivot_table/frontend
+npx vitest run
+```
+
+### Build a wheel
+
+1. Build the frontend assets:
+
+   ```sh
+   cd streamlit_pivot_table/frontend
+   npm install
+   npm run build
+   ```
+
+2. Build the Python wheel:
+
+   ```sh
+   uv build
+   ```
+
+Output: `dist/streamlit_pivot_table-0.0.1-py3-none-any.whl`
+
+### Requirements
+
+- Python >= 3.10
+- Node.js >= 24 (LTS)
+- Streamlit >= 1.51
+
+## License
+
+Apache 2.0

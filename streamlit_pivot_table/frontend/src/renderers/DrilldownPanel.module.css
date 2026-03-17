@@ -1,0 +1,144 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.panel {
+  border: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.2));
+  border-radius: var(--st-base-radius);
+  background: var(--st-background-color);
+  overflow: hidden;
+  margin-top: 8px;
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 340px;
+    opacity: 1;
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--st-secondary-background-color);
+  border-bottom: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.2));
+  gap: 8px;
+  min-height: 40px;
+}
+
+.headerInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.headerTitle {
+  font-weight: 600;
+  font-size: 0.88em;
+  white-space: nowrap;
+}
+
+.headerContext {
+  font-size: 0.82em;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerCount {
+  font-size: 0.78em;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.closeButton {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--st-text-color);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--st-base-radius, 4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.closeButton:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-secondary-background-color) 80%, transparent);
+}
+
+.closeButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+}
+
+.emptyMessage {
+  padding: 16px;
+  text-align: center;
+  font-size: 0.88em;
+  opacity: 0.6;
+}
+
+.tableWrapper {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84em;
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--st-dataframe-header-background-color, var(--st-secondary-background-color));
+  color: var(--st-text-color);
+  font-weight: 600;
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.2));
+  white-space: nowrap;
+}
+
+.td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.1));
+  white-space: nowrap;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.altRow {
+  background: color-mix(in srgb, var(--st-secondary-background-color) 30%, transparent);
+}

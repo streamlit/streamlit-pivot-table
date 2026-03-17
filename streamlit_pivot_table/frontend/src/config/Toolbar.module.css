@@ -1,0 +1,837 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.toolbar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0;
+  margin-bottom: 8px;
+  font-family: var(--st-font);
+  font-size: var(--st-base-font-size);
+  align-items: stretch;
+}
+
+.toolbarLocked {
+  opacity: 0.75;
+}
+
+/* --- Section cards (Rows/Columns/Values/Aggregate/Options) --- */
+
+.fieldGroup {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 100px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 15%, transparent);
+  border-radius: var(--st-base-radius);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sectionTitle {
+  font-weight: 600;
+  font-size: 1em;
+  color: var(--st-text-color);
+}
+
+.dropdownToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--st-base-radius);
+  background: none;
+  color: var(--st-text-color);
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.dropdownToggle:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
+}
+
+.dropdownToggle:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.dropdownAnchor {
+  position: relative;
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.countBadge {
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--st-primary-color) 12%, transparent);
+  color: var(--st-primary-color);
+  font-size: 0.68em;
+  font-weight: 700;
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+/* --- Dropdown panel (shared by multi-select and single-select) --- */
+
+.dropdownPanel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 140px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 4px;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+}
+
+.dropdownItem {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  cursor: pointer;
+  font-size: 0.84em;
+  white-space: nowrap;
+  color: var(--st-text-color);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--st-font);
+}
+
+.dropdownItem:hover {
+  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
+}
+
+.dropdownItemDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.dropdownItem:focus-visible,
+.dropdownItem:has(:focus-visible) {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.dropdownItem input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--st-primary-color);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.dropdownItem input[type="checkbox"]:focus-visible {
+  outline: none;
+}
+
+.dropdownItemActive {
+  background: var(--st-secondary-background-color);
+  font-weight: 500;
+}
+
+.aggIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 0.85em;
+  font-weight: 700;
+  opacity: 0.6;
+}
+
+.emptyHint {
+  padding: 8px;
+  font-size: 0.78em;
+  opacity: 0.5;
+  text-align: center;
+}
+
+/* --- Chips row (shows selected items below section header) --- */
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px 3px 9px;
+  border-radius: 12px;
+  background: var(--st-secondary-background-color);
+  color: var(--st-text-color);
+  font-size: 0.875em;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chipRemove {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--st-text-color);
+  opacity: 0.5;
+  padding: 0 2px;
+  font-size: 1.1em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 50%;
+}
+
+.chipRemove:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+.chipRemove:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+  opacity: 1;
+}
+
+.aggChipIcon {
+  font-weight: 700;
+  font-size: 0.9em;
+  opacity: 0.6;
+  margin-right: 2px;
+}
+
+.chipSortIndicator {
+  font-size: 0.9em;
+  color: var(--st-primary-color);
+  opacity: 1;
+  margin-left: 1px;
+}
+
+.chipShowAsBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  padding: 0 4px;
+  min-width: 14px;
+  height: 14px;
+  font-size: 0.68em;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--st-primary-color);
+  background: color-mix(in srgb, var(--st-primary-color) 12%, transparent);
+  border-radius: 7px;
+}
+
+.chipFilterDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-primary-color);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+/* --- Checkbox styles (used inside settings popover) --- */
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9em;
+  color: var(--st-text-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.checkboxLabel input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--st-primary-color);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.checkboxLabel input[type="checkbox"]:indeterminate {
+  accent-color: #808080;
+}
+
+.checkboxLabel input[type="checkbox"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline-offset: 1px;
+}
+
+.checkboxLabel:has(input:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.checkboxLabel input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+/* --- Subtotal expand/collapse action buttons --- */
+
+.subtotalActions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.subtotalActionBtn {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 15%, transparent);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.78em;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.subtotalActionBtn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
+}
+
+.subtotalActionBtn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+  opacity: 1;
+}
+
+/* --- Dropdown group labels/dividers (for aggregation groups) --- */
+
+.dropdownGroupLabel {
+  padding: 4px 8px 2px;
+  font-size: 0.7em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--st-text-color);
+  opacity: 0.45;
+}
+
+.dropdownGroupDivider {
+  height: 1px;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+/* --- Toolbar action bar (visible on hover, floating overlay) --- */
+
+.utilGroup {
+  position: absolute;
+  top: -24px;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--st-background-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-popover-shadow, 0px 4px 16px rgba(0, 0, 0, 0.16));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms, background 120ms;
+}
+
+.toolbar:hover > .utilGroup,
+.toolbar:active > .utilGroup,
+.utilGroup:hover,
+.utilGroup:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.utilButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.8em;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.86;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.utilButton:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
+}
+
+.utilButton:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+  opacity: 1;
+}
+
+/* --- Icon buttons (export / import) --- */
+
+.iconButton {
+  padding: 6px;
+  line-height: 0;
+}
+
+.iconButton svg {
+  display: block;
+}
+
+.iconButtonActive {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+/* --- Tooltip (CSS-only, shown on hover via data-tooltip attr) --- */
+
+.tooltipWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltipWrap::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: var(--st-base-radius);
+  background: var(--st-text-color);
+  color: var(--st-background-color);
+  font-family: var(--st-font);
+  font-size: 0.72em;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms 400ms;
+  z-index: 30;
+}
+
+.tooltipWrap:hover::after {
+  opacity: 1;
+}
+
+/* --- Import popover --- */
+
+.importWrapper {
+  position: relative;
+}
+
+.importPopover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+}
+
+.importPopover:focus {
+  outline: none;
+}
+
+.importTextarea {
+  padding: 6px 8px;
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  background-color: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: monospace;
+  font-size: 0.82em;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.importTextarea:focus {
+  border-color: var(--st-primary-color);
+  outline: none;
+}
+
+.importTextarea:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+}
+
+.importError {
+  font-size: 0.78em;
+  color: var(--st-text-color);
+  opacity: 0.8;
+  padding: 2px 4px;
+  background-color: var(--st-yellow-background-color, var(--st-secondary-background-color));
+  border-radius: var(--st-base-radius);
+}
+
+.syntheticBuilderMenuRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px 4px;
+}
+
+.syntheticAddButton {
+  opacity: 1;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--st-primary-color) 88%, #000 12%);
+  color: white;
+  font-weight: 600;
+}
+
+.syntheticAddButton:hover {
+  background: color-mix(in srgb, var(--st-primary-color) 80%, #000 20%);
+}
+
+.syntheticAddButton:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 55%, transparent);
+}
+
+.syntheticBuilderPopover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 22;
+  width: auto;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+}
+
+.syntheticBuilderField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.syntheticBuilderFieldLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82em;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+}
+
+.syntheticBuilderInput,
+.syntheticBuilderSelect {
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.92em;
+  line-height: 1.2;
+}
+
+.syntheticBuilderInput:focus,
+.syntheticBuilderSelect:focus {
+  border-color: var(--st-primary-color);
+  outline: none;
+}
+
+.syntheticBuilderInput:focus-visible,
+.syntheticBuilderSelect:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
+}
+
+.syntheticFormulaHint {
+  display: inline-block;
+  font-size: 0.76em;
+  color: color-mix(in srgb, var(--st-text-color) 84%, transparent);
+  margin-top: 4px;
+  padding: 5px 8px;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: color-mix(in srgb, var(--st-secondary-background-color) 75%, transparent);
+}
+
+.syntheticFormatPresets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.syntheticFormatPresetBtn {
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
+  border-radius: 999px;
+  background: var(--st-secondary-background-color);
+  color: var(--st-text-color);
+  font-size: 0.76em;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.syntheticFormatPresetBtn:hover {
+  background: color-mix(in srgb, var(--st-text-color) 8%, var(--st-secondary-background-color));
+}
+
+.syntheticFormatPresetBtnActive {
+  border-color: color-mix(in srgb, var(--st-primary-color) 60%, transparent);
+  background: color-mix(in srgb, var(--st-primary-color) 14%, var(--st-secondary-background-color));
+}
+
+.syntheticFormatPreview {
+  font-size: 0.77em;
+  color: color-mix(in srgb, var(--st-text-color) 80%, transparent);
+  padding: 2px 0 0;
+}
+
+.syntheticBuilderActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.syntheticBuilderButton {
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.8em;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.syntheticBuilderButton:hover {
+  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
+}
+
+.syntheticBuilderButton:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.syntheticBuilderButtonPrimary {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--st-primary-color) 88%, #000 12%);
+  color: white;
+}
+
+.syntheticBuilderButtonPrimary:hover {
+  background: color-mix(in srgb, var(--st-primary-color) 80%, #000 20%);
+}
+
+.fieldHint {
+  font-size: 0.75em;
+  color: var(--st-text-color);
+  opacity: 0.6;
+  padding: 2px 0;
+  line-height: 1.3;
+}
+
+/* --- Settings (gear) popover --- */
+
+.settingsWrapper {
+  position: relative;
+}
+
+.settingsPopover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+}
+
+.settingsPopover:focus {
+  outline: none;
+}
+
+.settingsSectionTitle {
+  font-weight: 600;
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--st-text-color);
+  opacity: 0.5;
+  margin-top: 4px;
+}
+
+.settingsSectionTitle:first-child {
+  margin-top: 0;
+}
+
+.settingsDivider {
+  height: 1px;
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+/* Export data popover */
+.exportRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.exportLabel {
+  font-size: 0.82em;
+  color: var(--st-text-color);
+  opacity: 0.85;
+  min-width: 50px;
+}
+
+.exportToggleGroup {
+  display: flex;
+  gap: 4px;
+}
+
+.exportToggle {
+  background: transparent;
+  border: 1px solid var(--st-border-color, rgba(128, 128, 128, 0.3));
+  border-radius: var(--st-base-radius, 4px);
+  color: var(--st-text-color);
+  font-size: 0.8em;
+  padding: 5px 11px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background 0.15s, opacity 0.15s, border-color 0.15s;
+}
+
+.exportToggle::after {
+  content: attr(data-label);
+  display: block;
+  height: 0;
+  overflow: hidden;
+  font-weight: 600;
+  visibility: hidden;
+}
+
+.exportToggle:hover {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--st-text-color) 30%, transparent);
+}
+
+.exportToggle:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.exportToggleActive {
+  border-color: color-mix(in srgb, var(--st-text-color) 30%, transparent);
+  background: var(--st-secondary-background-color);
+  opacity: 1;
+  font-weight: 600;
+}
+
+.exportActionButton {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--st-button-radius, var(--st-base-radius, 4px));
+  background: var(--st-primary-color);
+  color: var(--st-background-color);
+  font-family: var(--st-font);
+  font-size: 0.85em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  margin-top: 2px;
+}
+
+.exportActionButton:hover {
+  opacity: 0.85;
+}
+
+.exportActionButton:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}

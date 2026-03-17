@@ -1,0 +1,417 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.tableWrapper {
+  width: 100%;
+  overflow: auto;
+  border-radius: var(--st-base-radius);
+  border: 1px solid var(--st-dataframe-border-color);
+}
+
+.pivotTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--st-font);
+  font-size: var(--st-base-font-size);
+  color: var(--st-text-color);
+  background-color: var(--st-background-color);
+  table-layout: auto;
+}
+
+.headerCell {
+  padding: 8px 12px;
+  text-align: center;
+  font-weight: 600;
+  background-color: var(--st-dataframe-header-background-color, var(--st-secondary-background-color));
+  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+  border-bottom: 1px solid var(--st-dataframe-border-color);
+  border-right: 1px solid var(--st-dataframe-border-color);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Opt out of sticky positioning */
+.noSticky .headerCell,
+.noSticky .valueLabel,
+.noSticky .emptyCorner {
+  position: static;
+}
+
+.rowHeaderCell {
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 500;
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 92%, var(--st-background-color));
+  color: var(--st-text-color);
+  border-right: 1px solid var(--st-dataframe-border-color);
+  border-bottom: 1px solid var(--st-dataframe-border-color);
+  white-space: nowrap;
+}
+
+.rowHeaderCellPinned {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  box-shadow: 1px 0 0 0 color-mix(in srgb, var(--st-text-color) 20%, transparent);
+}
+
+.rowHeaderCellPinned::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--st-text-color) 22%, transparent);
+  pointer-events: none;
+}
+
+.dataCell {
+  padding: 8px 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--st-dataframe-border-color);
+  border-right: 1px solid var(--st-dataframe-border-color);
+}
+
+/* Full-row hover highlight for cross-row tracking */
+.pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover td,
+.pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover th {
+  background-color: color-mix(in srgb, var(--st-primary-color) 6%, var(--st-background-color));
+}
+
+/* Conditionally formatted cells have inline background-color that overrides
+   the row hover rule above. A neutral inset shadow tints toward mid-gray,
+   giving visible hover feedback on both light AND dark backgrounds. */
+.pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover .condFormatted {
+  box-shadow: inset 0 0 0 100vmax rgba(128, 128, 128, 0.1);
+}
+
+.dataCell[role="gridcell"] {
+  cursor: pointer;
+}
+
+.dataCell:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+  z-index: 1;
+  position: relative;
+}
+
+.excludedTotal {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.totalsRow {
+  font-weight: 600;
+}
+
+.totalsRow td,
+.totalsRow th {
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 94%, var(--st-background-color));
+  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
+}
+
+.totalsCol {
+  font-weight: 600;
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 90%, var(--st-background-color));
+}
+
+.totalsCol.dataCell {
+  text-align: right;
+}
+
+.pivotTable tbody tr:nth-child(even) td:not(.totalsCol) {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 15%,
+    var(--st-background-color)
+  );
+}
+
+/* Remove bottom border on the last row in the table */
+.pivotTable tbody tr:last-child td,
+.pivotTable tbody tr:last-child th {
+  border-bottom: none;
+}
+
+/* Remove right border on the last cell in each row */
+.pivotTable th:last-child,
+.pivotTable td:last-child {
+  border-right: none;
+}
+
+/* Remove bottom border on cells in the row before the totals row to avoid double */
+.pivotTable tbody tr:has(+ .totalsRow) td,
+.pivotTable tbody tr:has(+ .totalsRow) th {
+  border-bottom: none;
+}
+
+.emptyCorner {
+  background-color: var(--st-secondary-background-color);
+  border-right: 1px solid var(--st-dataframe-border-color);
+  border-bottom: 1px solid var(--st-dataframe-border-color);
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 4;
+}
+
+.headerRowPinned {
+  left: 0;
+  z-index: 3;
+}
+
+.valueLabel {
+  font-size: 0.86em;
+  color: color-mix(in srgb, var(--st-text-color) 80%, transparent);
+  padding: 5px 12px;
+  text-align: center;
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 80%, var(--st-background-color));
+  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 10%, transparent);
+  border-bottom: 1px solid var(--st-dataframe-border-color);
+  border-right: 1px solid var(--st-dataframe-border-color);
+  position: sticky;
+  /* top is set via inline style from renderColumnHeaders based on number of
+     column-dimension header rows above this value-label row. */
+  z-index: 2;
+}
+
+.emptyState {
+  padding: 24px;
+  text-align: center;
+  color: var(--st-text-color);
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.emptyFilterRow {
+  padding: 16px;
+  text-align: center;
+  color: var(--st-text-color);
+  opacity: 0.55;
+  font-style: italic;
+}
+
+/* --- Header cell content wrapper (for menu button) --- */
+
+.headerCellInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  position: relative;
+  padding-right: 16px;
+}
+
+.headerMenuBtn {
+  display: inline-flex;
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
+  color: var(--st-text-color);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.4;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.headerCell:hover .headerMenuBtn,
+.emptyCorner:hover .headerMenuBtn,
+.valueLabel:hover .headerMenuBtn {
+  opacity: 0.85;
+}
+
+.headerMenuBtn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 15%, transparent);
+}
+
+.headerMenuBtn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+  opacity: 1;
+}
+
+/* Active state indicator on header cells */
+
+.headerFiltered::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st-primary-color);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.headerFiltered {
+  color: var(--st-text-color);
+  font-weight: 600;
+}
+
+.headerSorted {
+  border-bottom-color: color-mix(in srgb, var(--st-primary-color) 55%, var(--st-dataframe-border-color));
+}
+
+.sortIndicator {
+  display: inline-block;
+  vertical-align: middle;
+  color: var(--st-primary-color);
+  flex-shrink: 0;
+}
+
+/* --- Subtotal rows (Phase 3a) --- */
+
+.subtotalRow {
+  font-weight: 600;
+}
+
+.subtotalRow td,
+.subtotalRow th {
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 86%, var(--st-background-color));
+  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
+}
+
+.subtotalHeaderCell {
+  font-weight: 700;
+}
+
+.subtotalLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.subtotalRow[data-level="1"] .subtotalHeaderCell {
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 78%, var(--st-background-color));
+}
+
+.subtotalRow[data-level="2"] .subtotalHeaderCell {
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-background-color));
+}
+
+.groupToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-right: 6px;
+  border: none;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
+  color: var(--st-text-color);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.1s;
+}
+
+.groupToggle:hover {
+  background: color-mix(in srgb, var(--st-text-color) 15%, transparent);
+}
+
+.groupToggle:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.groupToggle svg {
+  stroke-width: 1.8;
+}
+
+.groupToggleCell {
+  cursor: pointer;
+  user-select: none;
+}
+
+.groupToggleCell:hover {
+  background-color: color-mix(in srgb, var(--st-text-color) 6%, var(--st-secondary-background-color)) !important;
+}
+
+.groupToggleCell:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.groupToggleIcon {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+  opacity: 0.6;
+  stroke-width: 1.8;
+  flex-shrink: 0;
+}
+
+/* --- Dimension-level collapse toggle --- */
+
+.dimensionToggleCell {
+  cursor: pointer;
+  user-select: none;
+}
+
+.dimensionToggleCell:hover {
+  background-color: color-mix(in srgb, var(--st-text-color) 8%, var(--st-dataframe-header-background-color, var(--st-secondary-background-color)));
+}
+
+.dimensionToggleCell:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.dimensionToggleDisabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.dimensionToggleDisabled:hover {
+  background-color: inherit;
+}
+
+.dimensionToggleIcon {
+  flex-shrink: 0;
+  opacity: 0.6;
+  stroke-width: 1.8;
+  margin-right: 2px;
+}
+
+/* Column dimension label in corner area */
+.colDimLabel {
+  text-align: left;
+}
+
+/* --- Header menu overlay container --- */
+
+.headerMenuOverlay {
+  position: fixed;
+  z-index: 30;
+}

@@ -1,0 +1,27 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.banner {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background-color: var(--st-yellow-background-color, var(--st-secondary-background-color));
+  border: 1px solid var(--st-yellow-color, var(--st-border-color));
+  border-radius: var(--st-base-radius);
+  color: var(--st-yellow-text-color, var(--st-text-color));
+  font-size: 0.9em;
+  font-family: var(--st-font);
+}

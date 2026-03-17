@@ -1,0 +1,268 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.headerMenu {
+  min-width: 210px;
+  max-width: 280px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 8px 24px rgba(0, 0, 0, 0.12));
+  font-family: var(--st-font);
+  font-size: var(--st-base-font-size);
+}
+
+.menuTitle {
+  padding: 4px 12px 6px;
+  font-weight: 600;
+  font-size: 0.82em;
+  color: color-mix(in srgb, var(--st-text-color) 72%, transparent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Sort section ---- */
+
+.sortSection {
+  display: flex;
+  flex-direction: column;
+  padding: 0 4px;
+}
+
+.menuItem {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.84em;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.menuItem:hover {
+  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
+}
+
+.menuItem:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.menuItemActive {
+  background: var(--st-secondary-background-color);
+  font-weight: 500;
+  color: var(--st-primary-color);
+}
+
+.menuItemLabel {
+  flex: 1;
+}
+
+.checkIcon {
+  flex-shrink: 0;
+  color: var(--st-primary-color);
+  margin-left: auto;
+}
+
+.sortValueConfig {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 12px 4px 34px;
+}
+
+.sortValueLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8em;
+  color: color-mix(in srgb, var(--st-text-color) 78%, transparent);
+}
+
+.sortValueSelect {
+  flex: 1;
+  padding: 2px 4px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 1em;
+}
+
+.sortValueSelect:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+/* ---- Display section (value fields only) ---- */
+
+.displaySection {
+  display: flex;
+  flex-direction: column;
+  padding: 0 4px;
+}
+
+.sectionLabel {
+  padding: 4px 8px 2px;
+  font-weight: 600;
+  font-size: 0.72em;
+  color: color-mix(in srgb, var(--st-text-color) 64%, transparent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.menuSectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #666);
+  padding: 4px 8px 2px;
+  display: block;
+}
+
+/* ---- Divider ---- */
+
+.divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: color-mix(in srgb, var(--st-text-color) 12%, transparent);
+}
+
+/* ---- Filter section ---- */
+
+.filterSection {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 6px;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.searchInput {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.82em;
+  outline: none;
+}
+
+.searchInput:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+}
+
+.actionRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.actionButton {
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 15%, transparent);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.76em;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: var(--st-base-radius);
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.actionButton:hover {
+  background: var(--st-secondary-background-color);
+  border-color: color-mix(in srgb, var(--st-text-color) 25%, transparent);
+}
+
+.actionButton:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.itemList {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  max-height: 180px;
+}
+
+.filterItem {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  cursor: pointer;
+  font-size: 0.82em;
+  color: var(--st-text-color);
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filterItem:hover {
+  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
+}
+
+.filterItem:focus-visible,
+.filterItem:has(:focus-visible) {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.filterItem input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--st-primary-color);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.filterItem input[type="checkbox"]:focus-visible {
+  outline: none;
+}
+
+.moreIndicator {
+  padding: 4px 6px;
+  font-size: 0.75em;
+  opacity: 0.5;
+  text-align: center;
+}

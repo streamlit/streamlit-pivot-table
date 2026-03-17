@@ -1,0 +1,56 @@
+########################################################################
+# Python
+########################################################################
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+.venv/
+
+# Unit test / coverage reports
+.coverage
+.coverage\.*
+.pytest_cache/
+.mypy_cache/
+test-reports
+
+# Pyenv
+.python-version
+
+########################################################################
+# macOS
+########################################################################
+.DS_Store
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+########################################################################
+# Node
+########################################################################
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+node_modules/
+coverage/
+
+########################################################################
+# IDE
+########################################################################
+.idea
+.vscode/
+
+########################################################################
+# Project-specific
+########################################################################
+# uv lockfiles (regenerated locally)
+uv.lock

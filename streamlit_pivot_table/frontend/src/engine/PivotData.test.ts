@@ -1,0 +1,1432 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { describe, expect, it } from "vitest";
+import { PivotData, type DataRecord, mixedCompare } from "./PivotData";
+import {
+  AGGREGATOR_CLASS,
+  type AggregationType,
+  type PivotConfigV1,
+} from "./types";
+import { measureSync, DEFAULT_BUDGETS } from "./perf";
+
+function makeConfig(overrides: Partial<PivotConfigV1> = {}): PivotConfigV1 {
+  return {
+    version: 1,
+    rows: ["region"],
+    columns: ["year"],
+    values: ["revenue"],
+    aggregation: "sum",
+    show_totals: true,
+    empty_cell_value: "-",
+    interactive: true,
+    ...overrides,
+  };
+}
+
+const SAMPLE_DATA: DataRecord[] = [
+  { region: "US", year: "2023", revenue: 100, profit: 40 },
+  { region: "US", year: "2024", revenue: 150, profit: 60 },
+  { region: "EU", year: "2023", revenue: 200, profit: 80 },
+  { region: "EU", year: "2024", revenue: 250, profit: 100 },
+  { region: "US", year: "2023", revenue: 50, profit: 20 },
+];
+
+describe("PivotData - basic computation", () => {
+  it("computes row and column keys", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getRowKeys()).toEqual([["EU"], ["US"]]);
+    expect(pd.getColKeys()).toEqual([["2023"], ["2024"]]);
+  });
+
+  it("computes cell aggregates for sum", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getAggregator(["US"], ["2023"]).value()).toBe(150);
+    expect(pd.getAggregator(["US"], ["2024"]).value()).toBe(150);
+    expect(pd.getAggregator(["EU"], ["2023"]).value()).toBe(200);
+    expect(pd.getAggregator(["EU"], ["2024"]).value()).toBe(250);
+  });
+
+  it("computes row totals", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getRowTotal(["US"]).value()).toBe(300);
+    expect(pd.getRowTotal(["EU"]).value()).toBe(450);
+  });
+
+  it("computes column totals", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getColTotal(["2023"]).value()).toBe(350);
+    expect(pd.getColTotal(["2024"]).value()).toBe(400);
+  });
+
+  it("computes grand total", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getGrandTotal().value()).toBe(750);
+  });
+
+  it("returns empty aggregator for non-existent key", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    const agg = pd.getAggregator(["XX"], ["9999"]);
+    expect(agg.value()).toBeNull();
+    expect(agg.count()).toBe(0);
+  });
+});
+
+describe("PivotData - multiple values", () => {
+  it("supports per-field aggregation", () => {
+    const config = makeConfig({ values: ["revenue", "profit"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    expect(pd.getAggregator(["US"], ["2023"], "revenue").value()).toBe(150);
+    expect(pd.getAggregator(["US"], ["2023"], "profit").value()).toBe(60);
+    expect(pd.getRowTotal(["US"], "profit").value()).toBe(120);
+  });
+
+  it("computes per-field grand totals", () => {
+    const config = makeConfig({ values: ["revenue", "profit"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const revenueTotal = SAMPLE_DATA.reduce(
+      (s, r) => s + (r.revenue as number),
+      0,
+    );
+    const profitTotal = SAMPLE_DATA.reduce(
+      (s, r) => s + (r.profit as number),
+      0,
+    );
+    expect(pd.getGrandTotal("revenue").value()).toBe(revenueTotal);
+    expect(pd.getGrandTotal("profit").value()).toBe(profitTotal);
+    expect(pd.getGrandTotal("revenue").value()).not.toBe(
+      pd.getGrandTotal("profit").value(),
+    );
+  });
+});
+
+describe("PivotData - multi-level keys", () => {
+  it("handles multi-level row keys", () => {
+    const data: DataRecord[] = [
+      { country: "US", state: "CA", year: "2023", revenue: 100 },
+      { country: "US", state: "NY", year: "2023", revenue: 200 },
+      { country: "EU", state: "DE", year: "2023", revenue: 300 },
+    ];
+    const config = makeConfig({
+      rows: ["country", "state"],
+      columns: ["year"],
+      values: ["revenue"],
+    });
+    const pd = new PivotData(data, config);
+    expect(pd.getRowKeys()).toEqual([
+      ["EU", "DE"],
+      ["US", "CA"],
+      ["US", "NY"],
+    ]);
+  });
+});
+
+describe("PivotData - aggregator-class-specific totals invariants", () => {
+  describe("additive (sum, count)", () => {
+    it.each(["sum", "count"] as const)(
+      "%s: grand total == sum of row totals == sum of col totals",
+      (aggType) => {
+        const config = makeConfig({ aggregation: aggType });
+        const pd = new PivotData(SAMPLE_DATA, config);
+        const grand = pd.getGrandTotal().value()!;
+
+        const rowTotalSum = pd
+          .getRowKeys()
+          .reduce((acc, rk) => acc + (pd.getRowTotal(rk).value() ?? 0), 0);
+        const colTotalSum = pd
+          .getColKeys()
+          .reduce((acc, ck) => acc + (pd.getColTotal(ck).value() ?? 0), 0);
+
+        expect(grand).toBeCloseTo(rowTotalSum, 10);
+        expect(grand).toBeCloseTo(colTotalSum, 10);
+      },
+    );
+  });
+
+  describe("idempotent (min, max)", () => {
+    it("min: grand total <= every row total", () => {
+      const config = makeConfig({ aggregation: "min" });
+      const pd = new PivotData(SAMPLE_DATA, config);
+      const grand = pd.getGrandTotal().value()!;
+      for (const rk of pd.getRowKeys()) {
+        const rowTotal = pd.getRowTotal(rk).value()!;
+        expect(grand).toBeLessThanOrEqual(rowTotal);
+      }
+    });
+
+    it("max: grand total >= every row total", () => {
+      const config = makeConfig({ aggregation: "max" });
+      const pd = new PivotData(SAMPLE_DATA, config);
+      const grand = pd.getGrandTotal().value()!;
+      for (const rk of pd.getRowKeys()) {
+        const rowTotal = pd.getRowTotal(rk).value()!;
+        expect(grand).toBeGreaterThanOrEqual(rowTotal);
+      }
+    });
+
+    it("min: grand total <= every col total", () => {
+      const config = makeConfig({ aggregation: "min" });
+      const pd = new PivotData(SAMPLE_DATA, config);
+      const grand = pd.getGrandTotal().value()!;
+      for (const ck of pd.getColKeys()) {
+        const colTotal = pd.getColTotal(ck).value()!;
+        expect(grand).toBeLessThanOrEqual(colTotal);
+      }
+    });
+
+    it("max: grand total >= every col total", () => {
+      const config = makeConfig({ aggregation: "max" });
+      const pd = new PivotData(SAMPLE_DATA, config);
+      const grand = pd.getGrandTotal().value()!;
+      for (const ck of pd.getColKeys()) {
+        const colTotal = pd.getColTotal(ck).value()!;
+        expect(grand).toBeGreaterThanOrEqual(colTotal);
+      }
+    });
+  });
+
+  describe("non-additive (avg)", () => {
+    it("avg: grand total is recomputed from all raw data", () => {
+      const config = makeConfig({ aggregation: "avg" });
+      const pd = new PivotData(SAMPLE_DATA, config);
+      const grand = pd.getGrandTotal().value()!;
+      const expectedAvg =
+        SAMPLE_DATA.reduce((s, r) => s + (r.revenue as number), 0) /
+        SAMPLE_DATA.length;
+      expect(grand).toBeCloseTo(expectedAvg, 10);
+    });
+  });
+});
+
+describe("PivotData - edge cases", () => {
+  it("handles empty records", () => {
+    const pd = new PivotData([], makeConfig());
+    expect(pd.getRowKeys()).toEqual([]);
+    expect(pd.getColKeys()).toEqual([]);
+    expect(pd.getGrandTotal().value()).toBeNull();
+    expect(pd.recordCount).toBe(0);
+  });
+
+  it("handles single record", () => {
+    const data = [{ region: "US", year: "2023", revenue: 100 }];
+    const pd = new PivotData(data, makeConfig());
+    expect(pd.getRowKeys()).toEqual([["US"]]);
+    expect(pd.getColKeys()).toEqual([["2023"]]);
+    expect(pd.getGrandTotal().value()).toBe(100);
+  });
+
+  it("handles records with all null values", () => {
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", revenue: null },
+      { region: "EU", year: "2024", revenue: null },
+    ];
+    const pd = new PivotData(data, makeConfig());
+    expect(pd.getGrandTotal().value()).toBeNull();
+    expect(pd.getAggregator(["US"], ["2023"]).value()).toBeNull();
+  });
+
+  it("handles no rows/columns dimensions", () => {
+    const config = makeConfig({ rows: [], columns: [] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    expect(pd.getRowKeys()).toEqual([[]]);
+    expect(pd.getColKeys()).toEqual([[]]);
+    expect(pd.getGrandTotal().value()).toBe(750);
+  });
+
+  it("reports metadata", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.recordCount).toBe(5);
+    expect(pd.uniqueRowKeyCount).toBe(2);
+    expect(pd.uniqueColKeyCount).toBe(2);
+    expect(pd.totalCellCount).toBe(4);
+  });
+});
+
+describe("PivotData - all aggregation types", () => {
+  const types: AggregationType[] = ["sum", "avg", "count", "min", "max"];
+
+  it.each(types)("%s: does not throw with sample data", (aggType) => {
+    const config = makeConfig({ aggregation: aggType });
+    expect(() => new PivotData(SAMPLE_DATA, config)).not.toThrow();
+  });
+
+  it.each(types)("%s: grand total matches expected", (aggType) => {
+    const config = makeConfig({ aggregation: aggType });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const values = SAMPLE_DATA.map((r) => r.revenue as number);
+
+    const grand = pd.getGrandTotal().value()!;
+    switch (aggType) {
+      case "sum":
+        expect(grand).toBe(values.reduce((a, b) => a + b, 0));
+        break;
+      case "avg":
+        expect(grand).toBeCloseTo(
+          values.reduce((a, b) => a + b, 0) / values.length,
+          10,
+        );
+        break;
+      case "count":
+        expect(grand).toBe(values.length);
+        break;
+      case "min":
+        expect(grand).toBe(Math.min(...values));
+        break;
+      case "max":
+        expect(grand).toBe(Math.max(...values));
+        break;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 features
+// ---------------------------------------------------------------------------
+
+describe("PivotData - filtering", () => {
+  it("returns all data when no filters set", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getGrandTotal().value()).toBe(750);
+  });
+
+  it("include filter limits to specified values", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { region: { include: ["US"] } } }),
+    );
+    expect(pd.getRowKeys()).toEqual([["US"]]);
+    expect(pd.getGrandTotal().value()).toBe(300);
+  });
+
+  it("exclude filter removes specified values", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { region: { exclude: ["US"] } } }),
+    );
+    expect(pd.getRowKeys()).toEqual([["EU"]]);
+    expect(pd.getGrandTotal().value()).toBe(450);
+  });
+
+  it("include takes precedence over exclude", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { region: { include: ["EU"], exclude: ["EU"] } } }),
+    );
+    expect(pd.getRowKeys()).toEqual([["EU"]]);
+  });
+
+  it("filter on non-existent field is a no-op", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { nonexistent: { include: ["x"] } } }),
+    );
+    expect(pd.getGrandTotal().value()).toBeNull();
+    expect(pd.uniqueRowKeyCount).toBe(0);
+  });
+
+  it("all-excluded returns empty pivot", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { region: { exclude: ["US", "EU"] } } }),
+    );
+    expect(pd.getRowKeys()).toEqual([]);
+    expect(pd.getColKeys()).toEqual([]);
+  });
+
+  it("empty include array returns all data", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { region: { include: [] } } }),
+    );
+    expect(pd.getGrandTotal().value()).toBe(750);
+  });
+
+  it("filters on column dimensions", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { year: { include: ["2023"] } } }),
+    );
+    expect(pd.getColKeys()).toEqual([["2023"]]);
+    expect(pd.getGrandTotal().value()).toBe(350);
+  });
+});
+
+describe("PivotData - sorting", () => {
+  it("key asc matches default alphabetical order", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ row_sort: { by: "key", direction: "asc" } }),
+    );
+    expect(pd.getRowKeys()).toEqual([["EU"], ["US"]]);
+  });
+
+  it("key desc reverses alphabetical order", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ row_sort: { by: "key", direction: "desc" } }),
+    );
+    expect(pd.getRowKeys()).toEqual([["US"], ["EU"]]);
+  });
+
+  it("value asc sorts by row total ascending", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ row_sort: { by: "value", direction: "asc" } }),
+    );
+    // US=300, EU=450 -> [US, EU]
+    expect(pd.getRowKeys()).toEqual([["US"], ["EU"]]);
+  });
+
+  it("value desc sorts by row total descending", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ row_sort: { by: "value", direction: "desc" } }),
+    );
+    expect(pd.getRowKeys()).toEqual([["EU"], ["US"]]);
+  });
+
+  it("col_sort key desc reverses column order", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ col_sort: { by: "key", direction: "desc" } }),
+    );
+    expect(pd.getColKeys()).toEqual([["2024"], ["2023"]]);
+  });
+
+  it("col_sort value desc sorts columns by total descending", () => {
+    // 2023 total=350, 2024 total=400
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ col_sort: { by: "value", direction: "desc" } }),
+    );
+    expect(pd.getColKeys()).toEqual([["2024"], ["2023"]]);
+  });
+
+  it("value sort with specific value_field", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        values: ["revenue", "profit"],
+        row_sort: { by: "value", direction: "desc", value_field: "profit" },
+      }),
+    );
+    // EU profit total = 180, US profit total = 120
+    expect(pd.getRowKeys()).toEqual([["EU"], ["US"]]);
+  });
+
+  it("value sort with col_key sorts by specific cell", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        row_sort: { by: "value", direction: "asc", col_key: ["2023"] },
+      }),
+    );
+    // US 2023 = 150, EU 2023 = 200 -> [US, EU]
+    expect(pd.getRowKeys()).toEqual([["US"], ["EU"]]);
+  });
+
+  it("custom sorter overrides alphabetical order", () => {
+    const data: DataRecord[] = [
+      { month: "Mar", revenue: 30 },
+      { month: "Jan", revenue: 10 },
+      { month: "Feb", revenue: 20 },
+    ];
+    const pd = new PivotData(
+      data,
+      makeConfig({ rows: ["month"], columns: [], values: ["revenue"] }),
+      { sorters: { month: ["Jan", "Feb", "Mar"] } },
+    );
+    expect(pd.getRowKeys()).toEqual([["Jan"], ["Feb"], ["Mar"]]);
+  });
+
+  it("custom sorter puts unknown values last", () => {
+    const data: DataRecord[] = [
+      { month: "Apr", revenue: 40 },
+      { month: "Jan", revenue: 10 },
+      { month: "Feb", revenue: 20 },
+    ];
+    const pd = new PivotData(
+      data,
+      makeConfig({ rows: ["month"], columns: [], values: ["revenue"] }),
+      { sorters: { month: ["Jan", "Feb", "Mar"] } },
+    );
+    expect(pd.getRowKeys()).toEqual([["Jan"], ["Feb"], ["Apr"]]);
+  });
+});
+
+describe("PivotData - dimension-targeted key sort", () => {
+  const MULTI_DATA: DataRecord[] = [
+    { region: "US", category: "B", revenue: 10 },
+    { region: "US", category: "A", revenue: 20 },
+    { region: "EU", category: "B", revenue: 30 },
+    { region: "EU", category: "A", revenue: 40 },
+  ];
+
+  it("sort Z→A on child dimension only reorders children, not parents", () => {
+    const pd = new PivotData(
+      MULTI_DATA,
+      makeConfig({
+        rows: ["region", "category"],
+        columns: [],
+        row_sort: { by: "key", direction: "desc", dimension: "category" },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    expect(keys).toEqual([
+      ["EU", "B"],
+      ["EU", "A"],
+      ["US", "B"],
+      ["US", "A"],
+    ]);
+  });
+
+  it("sort Z→A on parent dimension only reorders parents, children stay ascending", () => {
+    const pd = new PivotData(
+      MULTI_DATA,
+      makeConfig({
+        rows: ["region", "category"],
+        columns: [],
+        row_sort: { by: "key", direction: "desc", dimension: "region" },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    expect(keys).toEqual([
+      ["US", "A"],
+      ["US", "B"],
+      ["EU", "A"],
+      ["EU", "B"],
+    ]);
+  });
+
+  it("sort without dimension targets all levels (backward compat)", () => {
+    const pd = new PivotData(
+      MULTI_DATA,
+      makeConfig({
+        rows: ["region", "category"],
+        columns: [],
+        row_sort: { by: "key", direction: "desc" },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    expect(keys).toEqual([
+      ["US", "B"],
+      ["US", "A"],
+      ["EU", "B"],
+      ["EU", "A"],
+    ]);
+  });
+});
+
+describe("PivotData - null handling", () => {
+  const DATA_WITH_NULLS: DataRecord[] = [
+    { region: "US", year: "2023", revenue: 100 },
+    { region: null, year: "2023", revenue: 50 },
+    { region: "EU", year: "2024", revenue: null },
+    { region: "EU", year: "2024", revenue: 200 },
+  ];
+
+  it("exclude mode (default) skips null aggregation values", () => {
+    const pd = new PivotData(
+      DATA_WITH_NULLS,
+      makeConfig({ rows: ["region"], columns: ["year"], values: ["revenue"] }),
+    );
+    // null region -> "" key; EU 2024 has one null revenue (skipped by aggregator)
+    expect(pd.getAggregator(["EU"], ["2024"]).value()).toBe(200);
+  });
+
+  it("zero mode treats null values as 0", () => {
+    const pd = new PivotData(
+      DATA_WITH_NULLS,
+      makeConfig({ rows: ["region"], columns: ["year"], values: ["revenue"] }),
+      { nullHandling: "zero" },
+    );
+    // EU 2024: null revenue becomes 0, so sum = 0 + 200 = 200
+    expect(pd.getAggregator(["EU"], ["2024"]).value()).toBe(200);
+    expect(pd.getAggregator(["EU"], ["2024"]).count()).toBe(2);
+  });
+
+  it("separate mode creates (null) bucket for dimension values", () => {
+    const pd = new PivotData(
+      DATA_WITH_NULLS,
+      makeConfig({ rows: ["region"], columns: ["year"], values: ["revenue"] }),
+      { nullHandling: "separate" },
+    );
+    const rowKeys = pd.getRowKeys().map((k) => k[0]);
+    expect(rowKeys).toContain("(null)");
+    expect(pd.getAggregator(["(null)"], ["2023"]).value()).toBe(50);
+  });
+
+  it("per-field config applies different modes", () => {
+    const pd = new PivotData(
+      DATA_WITH_NULLS,
+      makeConfig({ rows: ["region"], columns: ["year"], values: ["revenue"] }),
+      { nullHandling: { region: "separate", revenue: "zero" } },
+    );
+    const rowKeys = pd.getRowKeys().map((k) => k[0]);
+    expect(rowKeys).toContain("(null)");
+    // revenue null -> 0, so EU 2024 count = 2
+    expect(pd.getAggregator(["EU"], ["2024"]).count()).toBe(2);
+  });
+});
+
+describe("PivotData - getUniqueValues", () => {
+  it("returns sorted unique values for a field", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getUniqueValues("region")).toEqual(["EU", "US"]);
+  });
+
+  it("returns sorted unique values for column dimension", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    expect(pd.getUniqueValues("year")).toEqual(["2023", "2024"]);
+  });
+
+  it("includes all original values regardless of filters", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ filters: { region: { include: ["US"] } } }),
+    );
+    // getUniqueValues scans raw records, not filtered
+    expect(pd.getUniqueValues("region")).toEqual(["EU", "US"]);
+  });
+});
+
+describe("PivotData - filter + sort interaction", () => {
+  it("filter and sort work together correctly", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        filters: { year: { include: ["2023"] } },
+        row_sort: { by: "value", direction: "desc" },
+      }),
+    );
+    expect(pd.getColKeys()).toEqual([["2023"]]);
+    const rowKeys = pd.getRowKeys();
+    expect(rowKeys).toHaveLength(2);
+    // EU 2023 = 200, US 2023 = 150 → desc: [EU, US]
+    expect(rowKeys).toEqual([["EU"], ["US"]]);
+  });
+
+  it("filter narrows data then sort orders within the filtered set", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        filters: { region: { include: ["US"] } },
+        col_sort: { by: "value", direction: "asc" },
+      }),
+    );
+    expect(pd.getRowKeys()).toEqual([["US"]]);
+    // US: 2023=150, 2024=150 → asc order is stable
+    const colKeys = pd.getColKeys();
+    expect(colKeys).toHaveLength(2);
+  });
+
+  it("filtering out all values results in empty pivot regardless of sort", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        filters: { region: { exclude: ["US", "EU"] } },
+        row_sort: { by: "key", direction: "asc" },
+      }),
+    );
+    expect(pd.getRowKeys()).toEqual([]);
+  });
+});
+
+describe("PivotData - mixed-type sort", () => {
+  it("sorts numeric strings numerically, not lexicographically", () => {
+    const data: DataRecord[] = [
+      { item: "2", revenue: 10 },
+      { item: "10", revenue: 20 },
+      { item: "1", revenue: 30 },
+    ];
+    const pd = new PivotData(
+      data,
+      makeConfig({
+        rows: ["item"],
+        columns: [],
+        values: ["revenue"],
+        row_sort: { by: "key", direction: "asc" },
+      }),
+    );
+    expect(pd.getRowKeys()).toEqual([["1"], ["2"], ["10"]]);
+  });
+
+  it("places numbers before strings in ascending order", () => {
+    const data: DataRecord[] = [
+      { item: "banana", revenue: 10 },
+      { item: "3", revenue: 20 },
+      { item: "apple", revenue: 30 },
+      { item: "1", revenue: 40 },
+    ];
+    const pd = new PivotData(
+      data,
+      makeConfig({
+        rows: ["item"],
+        columns: [],
+        values: ["revenue"],
+        row_sort: { by: "key", direction: "asc" },
+      }),
+    );
+    const keys = pd.getRowKeys().map((k) => k[0]);
+    expect(keys).toEqual(["1", "3", "apple", "banana"]);
+  });
+
+  it("places empty strings last", () => {
+    const data: DataRecord[] = [
+      { item: "b", revenue: 10 },
+      { item: "", revenue: 20 },
+      { item: "a", revenue: 30 },
+    ];
+    const pd = new PivotData(
+      data,
+      makeConfig({
+        rows: ["item"],
+        columns: [],
+        values: ["revenue"],
+        row_sort: { by: "key", direction: "asc" },
+      }),
+    );
+    const keys = pd.getRowKeys().map((k) => k[0]);
+    expect(keys).toEqual(["a", "b", ""]);
+  });
+
+  it("value sort places null values last", () => {
+    const data: DataRecord[] = [
+      { region: "A", year: "2023", revenue: 100 },
+      { region: "B", year: "2023", revenue: null },
+      { region: "C", year: "2023", revenue: 50 },
+    ];
+    const pd = new PivotData(
+      data,
+      makeConfig({
+        rows: ["region"],
+        columns: ["year"],
+        values: ["revenue"],
+        row_sort: { by: "value", direction: "asc" },
+      }),
+    );
+    const keys = pd.getRowKeys().map((k) => k[0]);
+    // C=50, A=100, B=null(last)
+    expect(keys).toEqual(["C", "A", "B"]);
+  });
+});
+
+describe("mixedCompare", () => {
+  it("equal strings return 0", () => {
+    expect(mixedCompare("abc", "abc")).toBe(0);
+  });
+
+  it("empty string sorts last", () => {
+    expect(mixedCompare("", "a")).toBe(1);
+    expect(mixedCompare("a", "")).toBe(-1);
+  });
+
+  it("numeric strings are compared numerically", () => {
+    expect(mixedCompare("2", "10")).toBeLessThan(0);
+    expect(mixedCompare("100", "20")).toBeGreaterThan(0);
+  });
+
+  it("numbers sort before strings", () => {
+    expect(mixedCompare("5", "abc")).toBeLessThan(0);
+    expect(mixedCompare("xyz", "3")).toBeGreaterThan(0);
+  });
+
+  it("strings are compared with localeCompare", () => {
+    expect(mixedCompare("apple", "banana")).toBeLessThan(0);
+    expect(mixedCompare("banana", "apple")).toBeGreaterThan(0);
+  });
+});
+
+describe("PivotData - sort stability", () => {
+  it("equal values retain insertion order from data", () => {
+    const data: DataRecord[] = [
+      { region: "C", revenue: 100 },
+      { region: "A", revenue: 100 },
+      { region: "B", revenue: 100 },
+    ];
+    const pd = new PivotData(
+      data,
+      makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        row_sort: { by: "value", direction: "asc" },
+      }),
+    );
+    const keys = pd.getRowKeys().map((k) => k[0]);
+    // All values equal (100) – Array.sort is stable in modern JS, so the
+    // insertion order from the data (C, A, B) is preserved when all
+    // comparisons return 0.
+    expect(keys).toEqual(["C", "A", "B"]);
+  });
+});
+
+describe("PivotData - hierarchical value sort", () => {
+  // Regression: value sort with 3+ row dimensions must preserve grouping.
+  // Without hierarchical sort, leaf-level value ordering interleaves parent
+  // groups (e.g., "Ming Li" appears twice under the same L4 Manager).
+  const HIER_DATA: DataRecord[] = [
+    { l4: "Mohit", l5: "Ming", name: "Andrew", prs: 124 },
+    { l4: "Mohit", l5: "Ming", name: "Stephen", prs: 57 },
+    { l4: "Mohit", l5: "Sanchit", name: "Nolan", prs: 44 },
+    { l4: "Mohit", l5: "Sanchit", name: "Anoushka", prs: 41 },
+    { l4: "Mohit", l5: "Ming", name: "David", prs: 35 },
+    { l4: "Mohit", l5: "Ming", name: "Yao", prs: 33 },
+    { l4: "Mohit", l5: "Sanchit", name: "Saurav", prs: 30 },
+  ];
+
+  it("value desc preserves parent grouping with 3 row dimensions", () => {
+    const pd = new PivotData(
+      HIER_DATA,
+      makeConfig({
+        rows: ["l4", "l5", "name"],
+        columns: [],
+        values: ["prs"],
+        row_sort: { by: "value", direction: "desc" },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    const l5Values = keys.map((k) => k[1]);
+    // Ming subtotal (124+57+35+33=249) > Sanchit subtotal (44+41+30=115),
+    // so all Ming rows must come before all Sanchit rows — no interleaving.
+    const firstSanchitIdx = l5Values.indexOf("Sanchit");
+    const lastMingIdx = l5Values.lastIndexOf("Ming");
+    expect(lastMingIdx).toBeLessThan(firstSanchitIdx);
+  });
+
+  it("value asc preserves parent grouping with 3 row dimensions", () => {
+    const pd = new PivotData(
+      HIER_DATA,
+      makeConfig({
+        rows: ["l4", "l5", "name"],
+        columns: [],
+        values: ["prs"],
+        row_sort: { by: "value", direction: "asc" },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    const l5Values = keys.map((k) => k[1]);
+    // Asc: Sanchit (115) < Ming (249), so Sanchit first, then Ming
+    const lastSanchitIdx = l5Values.lastIndexOf("Sanchit");
+    const firstMingIdx = l5Values.indexOf("Ming");
+    expect(lastSanchitIdx).toBeLessThan(firstMingIdx);
+  });
+
+  it("leaf rows are sorted by value within each parent group", () => {
+    const pd = new PivotData(
+      HIER_DATA,
+      makeConfig({
+        rows: ["l4", "l5", "name"],
+        columns: [],
+        values: ["prs"],
+        row_sort: { by: "value", direction: "desc" },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    // Ming group: Andrew(124), Stephen(57), David(35), Yao(33)
+    const mingRows = keys.filter((k) => k[1] === "Ming");
+    const mingValues = mingRows.map((k) => k[2]);
+    expect(mingValues).toEqual(["Andrew", "Stephen", "David", "Yao"]);
+    // Sanchit group: Nolan(44), Anoushka(41), Saurav(30)
+    const sanchitRows = keys.filter((k) => k[1] === "Sanchit");
+    const sanchitValues = sanchitRows.map((k) => k[2]);
+    expect(sanchitValues).toEqual(["Nolan", "Anoushka", "Saurav"]);
+  });
+
+  it("grouped rows have no duplicate subtotal groups", () => {
+    const pd = new PivotData(
+      HIER_DATA,
+      makeConfig({
+        rows: ["l4", "l5", "name"],
+        columns: [],
+        values: ["prs"],
+        row_sort: { by: "value", direction: "desc" },
+        show_subtotals: true,
+      }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    const subtotals = grouped
+      .filter((e) => e.type === "subtotal")
+      .map((e) => e.key.join("/"));
+    // Each L5 manager should appear exactly once as a subtotal
+    expect(subtotals.filter((s) => s === "Mohit/Ming")).toHaveLength(1);
+    expect(subtotals.filter((s) => s === "Mohit/Sanchit")).toHaveLength(1);
+  });
+});
+
+describe("PivotData - performance budgets", () => {
+  function generateRecords(
+    n: number,
+    regions: number,
+    years: number,
+  ): DataRecord[] {
+    const recs: DataRecord[] = [];
+    for (let i = 0; i < n; i++) {
+      recs.push({
+        region: `R${i % regions}`,
+        year: `${2000 + (i % years)}`,
+        revenue: Math.random() * 10000,
+      });
+    }
+    return recs;
+  }
+
+  it("small dataset (1K rows) computes within 100ms", () => {
+    const records = generateRecords(1000, 10, 5);
+    const config = makeConfig();
+    const { elapsedMs } = measureSync(() => new PivotData(records, config));
+    expect(elapsedMs).toBeLessThan(100);
+  });
+
+  it("medium dataset (50K rows) computes within maxComputeMs budget", () => {
+    const records = generateRecords(50000, 100, 20);
+    const config = makeConfig();
+    const { elapsedMs } = measureSync(() => new PivotData(records, config));
+    expect(elapsedMs).toBeLessThan(DEFAULT_BUDGETS.maxComputeMs);
+  });
+
+  it("getRowKeys/getColKeys are fast after computation", () => {
+    const records = generateRecords(50000, 100, 20);
+    const config = makeConfig();
+    const pd = new PivotData(records, config);
+    const { elapsedMs: rowMs } = measureSync(() => pd.getRowKeys());
+    const { elapsedMs: colMs } = measureSync(() => pd.getColKeys());
+    expect(rowMs).toBeLessThan(10);
+    expect(colMs).toBeLessThan(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3a: Subtotals + Collapse/Expand
+// ---------------------------------------------------------------------------
+
+const MULTI_ROW_DATA: DataRecord[] = [
+  { region: "US", state: "CA", year: "2023", revenue: 100 },
+  { region: "US", state: "CA", year: "2024", revenue: 150 },
+  { region: "US", state: "NY", year: "2023", revenue: 80 },
+  { region: "US", state: "NY", year: "2024", revenue: 120 },
+  { region: "EU", state: "DE", year: "2023", revenue: 200 },
+  { region: "EU", state: "DE", year: "2024", revenue: 250 },
+  { region: "EU", state: "FR", year: "2023", revenue: 180 },
+  { region: "EU", state: "FR", year: "2024", revenue: 220 },
+];
+
+describe("PivotData - subtotals (Phase 3a)", () => {
+  function multiRowConfig(
+    overrides: Partial<PivotConfigV1> = {},
+  ): PivotConfigV1 {
+    return makeConfig({
+      rows: ["region", "state"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+      ...overrides,
+    });
+  }
+
+  it("getSubtotalAggregator computes correct sum for parent group", () => {
+    const pd = new PivotData(MULTI_ROW_DATA, multiRowConfig());
+    // US subtotal for 2023 = CA(100) + NY(80) = 180
+    expect(pd.getSubtotalAggregator(["US"], ["2023"], "revenue").value()).toBe(
+      180,
+    );
+    // EU subtotal for 2024 = DE(250) + FR(220) = 470
+    expect(pd.getSubtotalAggregator(["EU"], ["2024"], "revenue").value()).toBe(
+      470,
+    );
+  });
+
+  it("getSubtotalAggregator returns empty aggregator for non-existent group", () => {
+    const pd = new PivotData(MULTI_ROW_DATA, multiRowConfig());
+    expect(
+      pd.getSubtotalAggregator(["APAC"], ["2023"], "revenue").value(),
+    ).toBeNull();
+  });
+
+  it("getSubtotalAggregator row total sums all columns for parent", () => {
+    const pd = new PivotData(MULTI_ROW_DATA, multiRowConfig());
+    // US total = 100+150+80+120 = 450
+    expect(pd.getSubtotalAggregator(["US"], [], "revenue").value()).toBe(450);
+    // EU total = 200+250+180+220 = 850
+    expect(pd.getSubtotalAggregator(["EU"], [], "revenue").value()).toBe(850);
+  });
+
+  it("subtotals are correct for non-additive aggregator (avg)", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      multiRowConfig({ aggregation: "avg" }),
+    );
+    // US avg for 2023 = (100+80)/2 = 90
+    expect(pd.getSubtotalAggregator(["US"], ["2023"], "revenue").value()).toBe(
+      90,
+    );
+    // EU avg for 2023 = (200+180)/2 = 190
+    expect(pd.getSubtotalAggregator(["EU"], ["2023"], "revenue").value()).toBe(
+      190,
+    );
+  });
+
+  it("getGroupedRowKeys returns data rows and subtotal rows", () => {
+    const pd = new PivotData(MULTI_ROW_DATA, multiRowConfig());
+    const grouped = pd.getGroupedRowKeys();
+    const types = grouped.map((g) => g.type);
+    // Data rows for EU (DE, FR) + EU subtotal + Data rows for US (CA, NY) + US subtotal
+    expect(types).toEqual([
+      "data",
+      "data",
+      "subtotal",
+      "data",
+      "data",
+      "subtotal",
+    ]);
+  });
+
+  it("collapsed groups hide children but keep subtotal row", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      multiRowConfig({
+        collapsed_groups: ["EU"],
+      }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    // EU children hidden, EU subtotal remains; US children + subtotal visible
+    const entries = grouped.map((g) => `${g.type}:${g.key.join("/")}`);
+    expect(entries).toEqual([
+      "subtotal:EU",
+      "data:US/CA",
+      "data:US/NY",
+      "subtotal:US",
+    ]);
+  });
+
+  it("__ALL__ marker collapses all top-level groups", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      multiRowConfig({
+        collapsed_groups: ["__ALL__"],
+      }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    // Only subtotal rows visible
+    expect(grouped).toEqual([
+      { type: "subtotal", key: ["EU"], level: 0 },
+      { type: "subtotal", key: ["US"], level: 0 },
+    ]);
+  });
+
+  it("no subtotals when less than 2 row dimensions", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      makeConfig({
+        rows: ["region"],
+        show_subtotals: true,
+      }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    expect(grouped.every((g) => g.type === "data")).toBe(true);
+  });
+
+  it("no subtotals when show_subtotals is false", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      multiRowConfig({ show_subtotals: false }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    expect(grouped.every((g) => g.type === "data")).toBe(true);
+  });
+
+  it("3-level nesting produces subtotals at each parent level", () => {
+    const data: DataRecord[] = [
+      { a: "X", b: "1", c: "i", v: 10 },
+      { a: "X", b: "1", c: "ii", v: 20 },
+      { a: "X", b: "2", c: "i", v: 30 },
+      { a: "Y", b: "1", c: "i", v: 40 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b", "c"],
+      columns: [],
+      values: ["v"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(data, config);
+    const grouped = pd.getGroupedRowKeys();
+    const typeKeys = grouped.map(
+      (g) => `${g.type}[${g.level}]:${g.key.join("/")}`,
+    );
+    // X/1/i, X/1/ii, subtotal X/1, X/2/i, subtotal X/2, subtotal X,
+    // Y/1/i, subtotal Y/1, subtotal Y
+    expect(typeKeys).toEqual([
+      "data[2]:X/1/i",
+      "data[2]:X/1/ii",
+      "subtotal[1]:X/1",
+      "data[2]:X/2/i",
+      "subtotal[1]:X/2",
+      "subtotal[0]:X",
+      "data[2]:Y/1/i",
+      "subtotal[1]:Y/1",
+      "subtotal[0]:Y",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3a: Column-group subtotals (collapse/expand columns)
+// ---------------------------------------------------------------------------
+
+const MULTI_COL_DATA: DataRecord[] = [
+  { region: "US", year: "2023", quarter: "Q1", revenue: 100 },
+  { region: "US", year: "2023", quarter: "Q2", revenue: 120 },
+  { region: "US", year: "2024", quarter: "Q1", revenue: 200 },
+  { region: "EU", year: "2023", quarter: "Q1", revenue: 80 },
+  { region: "EU", year: "2023", quarter: "Q2", revenue: 90 },
+  { region: "EU", year: "2024", quarter: "Q1", revenue: 150 },
+];
+
+describe("PivotData - column group subtotals (Phase 3a)", () => {
+  function multiColConfig(
+    overrides: Partial<PivotConfigV1> = {},
+  ): PivotConfigV1 {
+    return makeConfig({
+      rows: ["region"],
+      columns: ["year", "quarter"],
+      values: ["revenue"],
+      ...overrides,
+    });
+  }
+
+  it("getColGroupSubtotal sums all children within a column group for a row", () => {
+    const pd = new PivotData(MULTI_COL_DATA, multiColConfig());
+    // US, year=2023: Q1(100) + Q2(120) = 220
+    expect(pd.getColGroupSubtotal(["US"], ["2023"], "revenue").value()).toBe(
+      220,
+    );
+    // EU, year=2023: Q1(80) + Q2(90) = 170
+    expect(pd.getColGroupSubtotal(["EU"], ["2023"], "revenue").value()).toBe(
+      170,
+    );
+    // US, year=2024: Q1(200) = 200
+    expect(pd.getColGroupSubtotal(["US"], ["2024"], "revenue").value()).toBe(
+      200,
+    );
+  });
+
+  it("getColGroupGrandSubtotal sums all rows for a column group", () => {
+    const pd = new PivotData(MULTI_COL_DATA, multiColConfig());
+    // All rows, year=2023: 100+120+80+90 = 390
+    expect(pd.getColGroupGrandSubtotal(["2023"], "revenue").value()).toBe(390);
+    // All rows, year=2024: 200+150 = 350
+    expect(pd.getColGroupGrandSubtotal(["2024"], "revenue").value()).toBe(350);
+  });
+
+  it("getSubtotalColGroupAgg computes cross-section subtotals (row-group x col-group)", () => {
+    const data: DataRecord[] = [
+      { region: "US", state: "CA", year: "2023", quarter: "Q1", revenue: 10 },
+      { region: "US", state: "CA", year: "2023", quarter: "Q2", revenue: 20 },
+      { region: "US", state: "NY", year: "2023", quarter: "Q1", revenue: 30 },
+      { region: "EU", state: "DE", year: "2023", quarter: "Q1", revenue: 40 },
+    ];
+    const config = makeConfig({
+      rows: ["region", "state"],
+      columns: ["year", "quarter"],
+      values: ["revenue"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(data, config);
+    // US subtotal for year=2023: CA(10+20) + NY(30) = 60
+    expect(pd.getSubtotalColGroupAgg(["US"], ["2023"], "revenue").value()).toBe(
+      60,
+    );
+    // EU subtotal for year=2023: DE(40) = 40
+    expect(pd.getSubtotalColGroupAgg(["EU"], ["2023"], "revenue").value()).toBe(
+      40,
+    );
+  });
+
+  it("returns empty aggregator for non-existent column group", () => {
+    const pd = new PivotData(MULTI_COL_DATA, multiColConfig());
+    expect(
+      pd.getColGroupSubtotal(["US"], ["2025"], "revenue").value(),
+    ).toBeNull();
+  });
+
+  it("column group subtotals correct for non-additive aggregator (avg)", () => {
+    const pd = new PivotData(
+      MULTI_COL_DATA,
+      multiColConfig({ aggregation: "avg" }),
+    );
+    // US, year=2023, avg: (100+120)/2 = 110
+    expect(pd.getColGroupSubtotal(["US"], ["2023"], "revenue").value()).toBe(
+      110,
+    );
+    // EU, year=2023, avg: (80+90)/2 = 85
+    expect(pd.getColGroupSubtotal(["EU"], ["2023"], "revenue").value()).toBe(
+      85,
+    );
+  });
+
+  it("does not build col subtotals for single column dimension", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig({ columns: ["year"] }));
+    // Single col dim — getColGroupSubtotal returns empty aggregator
+    expect(
+      pd.getColGroupSubtotal(["US"], ["2023"], "revenue").value(),
+    ).toBeNull();
+  });
+});
+
+describe("PivotData - synthetic measures", () => {
+  it("computes synthetic ratio and difference alongside raw measures", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue"],
+      synthetic_measures: [
+        {
+          id: "rev_per_profit",
+          label: "Revenue / Profit",
+          operation: "sum_over_sum",
+          numerator: "revenue",
+          denominator: "profit",
+        },
+        {
+          id: "rev_minus_profit",
+          label: "Revenue - Profit",
+          operation: "difference",
+          numerator: "revenue",
+          denominator: "profit",
+        },
+      ],
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    expect(pd.getAggregator(["EU"], ["2023"], "revenue").value()).toBe(200);
+    expect(pd.getAggregator(["EU"], ["2023"], "rev_per_profit").value()).toBe(
+      2.5,
+    );
+    expect(pd.getAggregator(["EU"], ["2023"], "rev_minus_profit").value()).toBe(
+      120,
+    );
+  });
+
+  it("supports synthetic source fields hidden from visible values", () => {
+    const config = makeConfig({
+      values: ["revenue"],
+      synthetic_measures: [
+        {
+          id: "rev_minus_profit",
+          label: "Revenue - Profit",
+          operation: "difference",
+          numerator: "revenue",
+          denominator: "profit",
+        },
+      ],
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    expect(pd.getAggregator(["EU"], ["2023"], "rev_minus_profit").value()).toBe(
+      120,
+    );
+  });
+
+  it("returns null for synthetic ratio when denominator is zero", () => {
+    const data: DataRecord[] = [
+      { region: "US", year: "2024", revenue: 30, profit: 0 },
+    ];
+    const config = makeConfig({
+      values: ["revenue"],
+      synthetic_measures: [
+        {
+          id: "rev_per_profit",
+          label: "Revenue / Profit",
+          operation: "sum_over_sum",
+          numerator: "revenue",
+          denominator: "profit",
+        },
+      ],
+    });
+    const pd = new PivotData(data, config);
+    expect(
+      pd.getAggregator(["US"], ["2024"], "rev_per_profit").value(),
+    ).toBeNull();
+  });
+
+  it("computes synthetic row/column/grand totals from sums", () => {
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 100, profit: 25 },
+      { region: "US", year: "2024", revenue: 150, profit: 75 },
+      { region: "EU", year: "2023", revenue: 200, profit: 100 },
+      { region: "EU", year: "2024", revenue: 250, profit: 50 },
+    ];
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue"],
+      synthetic_measures: [
+        {
+          id: "rev_per_profit",
+          label: "Revenue / Profit",
+          operation: "sum_over_sum",
+          numerator: "revenue",
+          denominator: "profit",
+        },
+      ],
+    });
+    const pd = new PivotData(data, config);
+
+    expect(pd.getRowTotal(["US"], "rev_per_profit").value()).toBeCloseTo(
+      2.5,
+      10,
+    );
+    expect(pd.getRowTotal(["EU"], "rev_per_profit").value()).toBeCloseTo(3, 10);
+    expect(pd.getColTotal(["2023"], "rev_per_profit").value()).toBeCloseTo(
+      2.4,
+      10,
+    );
+    expect(pd.getColTotal(["2024"], "rev_per_profit").value()).toBeCloseTo(
+      3.2,
+      10,
+    );
+    expect(pd.getGrandTotal("rev_per_profit").value()).toBeCloseTo(2.8, 10);
+  });
+
+  it("computes synthetic subtotal aggregators from subtotal sums", () => {
+    const data: DataRecord[] = [
+      { region: "US", team: "A", year: "2023", revenue: 10, profit: 2 },
+      { region: "US", team: "B", year: "2023", revenue: 30, profit: 15 },
+      { region: "US", team: "A", year: "2024", revenue: 20, profit: 10 },
+      { region: "US", team: "B", year: "2024", revenue: 40, profit: 5 },
+      { region: "EU", team: "A", year: "2023", revenue: 50, profit: 25 },
+      { region: "EU", team: "B", year: "2023", revenue: 10, profit: 5 },
+    ];
+    const config = makeConfig({
+      rows: ["region", "team"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+      synthetic_measures: [
+        {
+          id: "rev_per_profit",
+          label: "Revenue / Profit",
+          operation: "sum_over_sum",
+          numerator: "revenue",
+          denominator: "profit",
+        },
+      ],
+    });
+    const pd = new PivotData(data, config);
+
+    // US subtotal at 2023: (10 + 30) / (2 + 15) = 40 / 17
+    expect(
+      pd.getSubtotalAggregator(["US"], ["2023"], "rev_per_profit").value(),
+    ).toBeCloseTo(40 / 17, 10);
+    // US subtotal row total: (10+30+20+40) / (2+15+10+5) = 100 / 32
+    expect(
+      pd.getSubtotalAggregator(["US"], [], "rev_per_profit").value(),
+    ).toBeCloseTo(100 / 32, 10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getMatchingRecords
+// ---------------------------------------------------------------------------
+
+describe("PivotData - getMatchingRecords", () => {
+  const DATA: DataRecord[] = [
+    { region: "US", year: "2023", revenue: 100 },
+    { region: "US", year: "2024", revenue: 150 },
+    { region: "EU", year: "2023", revenue: 200 },
+    { region: "EU", year: "2024", revenue: 250 },
+    { region: "US", year: "2023", revenue: 50 },
+  ];
+
+  it("returns all matching records for a single dimension filter", () => {
+    const pd = new PivotData(DATA, makeConfig());
+    const result = pd.getMatchingRecords({ region: "US" });
+    expect(result.totalCount).toBe(3);
+    expect(result.records).toHaveLength(3);
+    expect(result.records.every((r) => r.region === "US")).toBe(true);
+  });
+
+  it("returns matching records for multi-dimension filter", () => {
+    const pd = new PivotData(DATA, makeConfig());
+    const result = pd.getMatchingRecords({ region: "US", year: "2023" });
+    expect(result.totalCount).toBe(2);
+    expect(result.records).toHaveLength(2);
+  });
+
+  it("respects the limit parameter", () => {
+    const pd = new PivotData(DATA, makeConfig());
+    const result = pd.getMatchingRecords({ region: "US" }, 1);
+    expect(result.totalCount).toBe(3);
+    expect(result.records).toHaveLength(1);
+  });
+
+  it("returns empty result for non-matching filters", () => {
+    const pd = new PivotData(DATA, makeConfig());
+    const result = pd.getMatchingRecords({ region: "APAC" });
+    expect(result.totalCount).toBe(0);
+    expect(result.records).toHaveLength(0);
+  });
+
+  it("returns all records when filters is empty", () => {
+    const pd = new PivotData(DATA, makeConfig());
+    const result = pd.getMatchingRecords({});
+    expect(result.totalCount).toBe(5);
+    expect(result.records).toHaveLength(5);
+  });
+
+  it("respects config-level filters on top of cell-click filters", () => {
+    const pd = new PivotData(
+      DATA,
+      makeConfig({
+        filters: { year: { include: ["2023"] } },
+      }),
+    );
+    const result = pd.getMatchingRecords({ region: "US" });
+    expect(result.totalCount).toBe(2);
+    expect(
+      result.records.every((r) => r.year === "2023" && r.region === "US"),
+    ).toBe(true);
+  });
+
+  it("matches null-dimension records when null_handling is separate", () => {
+    const nullData: DataRecord[] = [
+      { region: null, year: "2023", revenue: 100 },
+      { region: "US", year: "2023", revenue: 200 },
+      { region: "", year: "2024", revenue: 50 },
+    ];
+    const pd = new PivotData(nullData, makeConfig(), {
+      nullHandling: { region: "separate" },
+    });
+    const result = pd.getMatchingRecords({ region: "(null)" });
+    expect(result.totalCount).toBe(2);
+    expect(result.records).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getColumnNames
+// ---------------------------------------------------------------------------
+
+describe("PivotData - getColumnNames", () => {
+  it("returns all column names from records", () => {
+    const pd = new PivotData(SAMPLE_DATA, makeConfig());
+    const cols = pd.getColumnNames();
+    expect(cols).toContain("region");
+    expect(cols).toContain("year");
+    expect(cols).toContain("revenue");
+    expect(cols).toContain("profit");
+    expect(cols).toHaveLength(4);
+  });
+});

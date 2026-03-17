@@ -1,0 +1,71 @@
+name: TS Unit Tests
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-ts-tests
+  cancel-in-progress: true
+
+jobs:
+  ts-tests:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout streamlit-pivot-table code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          submodules: "recursive"
+          fetch-depth: 2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "**/package-lock.json"
+      - name: Install frontend dependencies
+        run: |
+          cd streamlit_pivot_table/frontend
+          npm ci
+      - name: Run frontend tests
+        run: |
+          cd streamlit_pivot_table/frontend
+          npm test
+      - name: Audit frontend licenses
+        run: python scripts/audit_frontend_licenses.py
+      - name: Validate NOTICES
+        run: |
+          python scripts/make_notices.py
+
+          git_status=$(git status --porcelain -- NOTICES)
+          if [[ -n $git_status ]]; then
+            echo "::error::The NOTICES file is out of date! Please run \`make notices\` and commit the result."
+            echo "::group::git diff NOTICES"
+            git diff NOTICES
+            echo "::endgroup::"
+            exit 1
+          else
+            echo "NOTICES is up to date."
+          fi
+      - name: Upload new NOTICES
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: NOTICES
+          path: NOTICES
