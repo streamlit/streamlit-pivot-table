@@ -280,7 +280,7 @@ def _noop_callback(*_args: Any, **_kwargs: Any) -> None:
 def st_pivot_table(
     data: Any,
     *,
-    key: str | None = None,
+    key: str,
     rows: list[str] | None = None,
     columns: list[str] | None = None,
     values: list[str] | None = None,
@@ -328,12 +328,11 @@ def st_pivot_table(
         ``st.dataframe``: Pandas DataFrame/Series, Polars DataFrame/Series,
         NumPy arrays, dicts, lists of dicts, pyarrow Tables, and any object
         supporting the DataFrame Interchange Protocol or ``to_pandas()``.
-    key : str or None
-        An optional key that uniquely identifies this component instance.
-        Required for state persistence: when ``key`` is provided, user
-        config changes made via the frontend are hydrated from
-        ``st.session_state[key]`` on rerun.  Without a key, the component
-        resets to the Python-supplied args on every rerun.
+    key : str
+        **Required.** A unique string that identifies this component
+        instance.  Used for state persistence: user config changes made
+        via the frontend are hydrated from ``st.session_state[key]`` on
+        rerun.  Each pivot table on a page must have a distinct key.
     rows : list[str] or None
         Column names from *data* to use as row dimensions.
     columns : list[str] or None
@@ -443,6 +442,12 @@ def st_pivot_table(
     PivotTableResult
         A dict containing the current ``config`` state.
     """
+    if not isinstance(key, str) or not key:
+        raise TypeError(
+            "key is required: pass a unique string that identifies this "
+            "pivot table instance (e.g. key='my_pivot')"
+        )
+
     # --- Convert data to pandas DataFrame ---
     try:
         data = convert_anything_to_pandas_df(data)
@@ -774,11 +779,10 @@ def st_pivot_table(
     # CCv2 stores state as BidiComponentResult (AttributeDictionary subclass),
     # which supports both dict-style .get() and attribute access.
     persisted_config = None
-    if key is not None:
-        try:
-            persisted_config = st.session_state.get(key, {}).get("config")
-        except (AttributeError, TypeError):
-            pass
+    try:
+        persisted_config = st.session_state.get(key, {}).get("config")
+    except (AttributeError, TypeError):
+        pass
     config_to_send = (
         persisted_config if persisted_config is not None else initial_config
     )

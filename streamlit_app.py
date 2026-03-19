@@ -84,6 +84,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="basic",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue"],
@@ -137,6 +138,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="sorting",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit"],
@@ -205,6 +207,7 @@ with st.expander("View Code"):
 # Interactive with custom dimension ordering
 st_pivot_table(
     df,
+    key="filtering",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue"],
@@ -215,6 +218,7 @@ st_pivot_table(
 # Locked — users cannot change configuration
 st_pivot_table(
     df,
+    key="locked",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue"],
@@ -269,6 +273,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="subtotals",
     rows=["Region", "Category"],
     columns=["Year"],
     values=["Revenue"],
@@ -371,6 +376,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="advanced_agg",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit"],
@@ -447,6 +453,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="cond_fmt",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit", "Units"],
@@ -519,6 +526,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="formatting",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit"],
@@ -566,6 +574,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="col_collapse",
     rows=["Region"],
     columns=["Year", "Category"],
     values=["Revenue"],
@@ -644,6 +653,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df_synth_demo,
+    key="synthetic_measures_v1",
     rows=["Region"],
     columns=["Year"],
     values=["Total PRs", "People"],
@@ -717,6 +727,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="sticky_off",
     rows=["Region", "Category"],
     columns=["Year"],
     values=["Revenue", "Profit"],
@@ -774,6 +785,7 @@ with st.expander("View Code"):
         """
 st_pivot_table(
     df,
+    key="export_demo",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit"],
@@ -829,6 +841,7 @@ with st.expander("View Code"):
         """
 result = st_pivot_table(
     df,
+    key="drilldown_demo",
     rows=["Region", "Category"],
     columns=["Year"],
     values=["Revenue"],

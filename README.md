@@ -51,7 +51,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `data` | DataFrame-like | *(required)* | Source data. Accepts the same types as `st.dataframe`: Pandas/Polars DataFrame or Series, NumPy array, dict, list of records, PyArrow Table, etc. |
-| `key` | `str \| None` | `None` | Unique component key. Required for state persistence across reruns. |
+| `key` | `str` | *(required)* | **Required.** Unique component key for state persistence across reruns. Each pivot table on a page must have a distinct key. |
 | `rows` | `list[str] \| None` | `None` | Column names to use as row dimensions. |
 | `columns` | `list[str] \| None` | `None` | Column names to use as column dimensions. |
 | `values` | `list[str] \| None` | `None` | Column names to aggregate as measures. |
