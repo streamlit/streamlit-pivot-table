@@ -35,7 +35,7 @@ IGNORE_PATTERN = re.compile(
     # Exclude images.
     r"|\.(?:png|jpg|jpeg|gif|ttf|woff|otf|eot|woff2|ico|svg)$"
     # Exclude files, because they make it obvious which product they relate to.
-    r"|(LICENSE|NOTICES|CODE_OF_CONDUCT\.md|README\.md)$"
+    r"|(LICENSE|NOTICES|CODE_OF_CONDUCT\.md|README\.md|SKILL\.md)$"
     # Exclude files, because they do not support comments
     r"|\.(json|prettierrc|nvmrc)$"
     # Exclude yarn.lock
