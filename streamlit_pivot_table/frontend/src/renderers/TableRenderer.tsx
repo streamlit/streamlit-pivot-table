@@ -578,11 +578,20 @@ export function renderColumnHeaders(
         config.rows.forEach((dim, dimIdx) => {
           const isFiltered = !!config.filters?.[dim];
           const isFirstRowDim = dimIdx === 0;
+          const hasSubtotals =
+            !!config.show_subtotals && config.rows.length >= 2;
           const sortTargetDim = config.row_sort?.dimension;
+          const sortTargetIdx = sortTargetDim
+            ? config.rows.indexOf(sortTargetDim)
+            : -1;
           const showSortOnThisDim = config.row_sort
             ? sortTargetDim
-              ? sortTargetDim === dim
-              : isFirstRowDim
+              ? hasSubtotals
+                ? dimIdx >= sortTargetIdx && sortTargetIdx !== -1
+                : sortTargetDim === dim
+              : hasSubtotals
+                ? true
+                : isFirstRowDim
             : false;
           const rowSortDir = showSortOnThisDim
             ? config.row_sort!.direction
@@ -608,10 +617,12 @@ export function renderColumnHeaders(
               : false;
           const canToggleThisDim = showRowDimToggle && !isInnermost;
           const dimToggleEnabled = canToggleThisDim && !parentCollapsed;
+          const isGroupingDimHeader =
+            !!config.show_subtotals && config.rows.length >= 2 && !isInnermost;
           cells.push(
             <th
               key={`row-dim-${dimIdx}`}
-              className={`${styles.headerCell} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""}`}
+              className={`${styles.headerCell} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
               rowSpan={dimCellRowSpan}
               style={stickyTop}
               data-testid={
@@ -960,6 +971,37 @@ export function computeRowHeaderSpans(rowKeys: string[][]): number[][] {
   return spans;
 }
 
+function GroupToggleIcon({ isCollapsed }: { isCollapsed: boolean }) {
+  return (
+    <svg
+      className={styles.groupToggleIcon}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    >
+      {isCollapsed ? (
+        <>
+          <line x1="5" y1="1" x2="5" y2="9" />
+          <line x1="1" y1="5" x2="9" y2="5" />
+        </>
+      ) : (
+        <line x1="1" y1="5" x2="9" y2="5" />
+      )}
+    </svg>
+  );
+}
+
+export interface GroupContext {
+  onToggleGroup?: (groupKey: string) => void;
+  collapsedSet?: Set<string>;
+  subtotalsEnabled?: boolean;
+  numGroupingDims?: number;
+}
+
 export function renderDataRow(
   rowKey: string[],
   colSlots: ColSlot[],
@@ -978,6 +1020,8 @@ export function renderDataRow(
     | undefined,
   colRange?: [number, number],
   headerSpans?: number[],
+  groupBoundaryLevel?: number,
+  groupContext?: GroupContext,
 ): ReactElement {
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
@@ -987,20 +1031,67 @@ export function renderDataRow(
     ? renderedValueFields
     : [renderedValueFields[0] ?? ""];
   const interactive = !!onCellClick;
+  const subtotalsOn = groupContext?.subtotalsEnabled && config.rows.length >= 2;
+  const numGroupingDims = groupContext?.numGroupingDims ?? 0;
+  const leafDimIdx = config.rows.length - 1;
+  const boundaryClass =
+    groupBoundaryLevel !== undefined
+      ? (styles[
+          `groupBoundaryL${Math.min(groupBoundaryLevel, 2)}` as keyof typeof styles
+        ] ?? "")
+      : "";
   return (
-    <tr key={rowKey.join("\x00")} data-testid="pivot-data-row">
+    <tr
+      key={rowKey.join("\x00")}
+      data-testid="pivot-data-row"
+      className={boundaryClass || undefined}
+    >
       {rowKey.map((part, dimIdx) => {
         const span = headerSpans ? headerSpans[dimIdx] : 1;
         if (span === 0) return null;
+        const isGroupingDim = subtotalsOn && dimIdx < leafDimIdx;
+        const isLeafDim = subtotalsOn && dimIdx === leafDimIdx;
+        const showToggle =
+          isGroupingDim && span > 1 && groupContext?.onToggleGroup;
+        const groupKeyStr = showToggle
+          ? rowKey.slice(0, dimIdx + 1).join("\x00")
+          : "";
+        const isCollapsed = showToggle
+          ? (groupContext.collapsedSet?.has(groupKeyStr) ?? false)
+          : false;
+        const dimClasses = [
+          styles.rowHeaderCell,
+          dimIdx === 0 ? styles.rowHeaderCellPinned : "",
+          isGroupingDim ? styles.groupingDimCell : "",
+          isLeafDim ? styles.leafDimCell : "",
+          showToggle ? styles.groupToggleCell : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
         return (
           <th
             key={dimIdx}
             scope="row"
-            className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""}`}
+            className={dimClasses}
             data-testid="pivot-row-header"
             rowSpan={span > 1 ? span : undefined}
             data-dim-index={dimIdx}
+            {...(showToggle
+              ? {
+                  onClick: () => groupContext.onToggleGroup!(groupKeyStr),
+                  role: "button",
+                  tabIndex: 0,
+                  onKeyDown: (e: KeyboardEvent) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      groupContext.onToggleGroup!(groupKeyStr);
+                    }
+                  },
+                  "aria-expanded": !isCollapsed,
+                }
+              : {})}
           >
+            {showToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
             {part || "(empty)"}
           </th>
         );
@@ -1232,6 +1323,7 @@ export function renderSubtotalRow(
     value: number | null,
     valueField: string,
   ) => void,
+  headerSpans?: number[],
 ): ReactElement {
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
@@ -1252,20 +1344,31 @@ export function renderSubtotalRow(
       aria-label={`Subtotal for ${parentKey.join(" / ")}`}
       data-level={level}
     >
-      {/* Row header cells: span from level to numRowDims */}
       {Array.from({ length: numRowDims }, (_, dimIdx) => {
+        const span = headerSpans ? headerSpans[dimIdx] : 1;
+        if (span === 0) return null;
+
         if (dimIdx < level) {
-          return null; // spanned by parent
+          // Parent dimension cell — show value from parentKey
+          return (
+            <th
+              key={`sub-hdr-${dimIdx}`}
+              scope="row"
+              className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.groupingDimCell}`}
+              rowSpan={span > 1 ? span : undefined}
+              data-dim-index={dimIdx}
+            >
+              {parentKey[dimIdx] || "(empty)"}
+            </th>
+          );
         }
         if (dimIdx === level) {
-          const colSpan = numRowDims - level;
           const canToggle = !!onToggleGroup;
           return (
             <th
               key={`sub-hdr-${dimIdx}`}
               scope="row"
-              className={`${styles.rowHeaderCell} ${styles.rowHeaderCellPinned} ${styles.subtotalHeaderCell} ${canToggle ? styles.groupToggleCell : ""}`}
-              colSpan={colSpan > 1 ? colSpan : undefined}
+              className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.subtotalHeaderCell} ${canToggle ? styles.groupToggleCell : ""}`}
               {...(canToggle
                 ? {
                     onClick: () => onToggleGroup(groupKeyStr),
@@ -1287,37 +1390,19 @@ export function renderSubtotalRow(
                 canToggle ? `pivot-group-toggle-${groupKeyStr}` : undefined
               }
             >
-              {canToggle && (
-                <svg
-                  className={styles.groupToggleIcon}
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                >
-                  {isCollapsed ? (
-                    <>
-                      <line x1="5" y1="1" x2="5" y2="9" />
-                      <line x1="1" y1="5" x2="9" y2="5" />
-                    </>
-                  ) : (
-                    <line x1="1" y1="5" x2="9" y2="5" />
-                  )}
-                </svg>
-              )}
-              <span
-                className={styles.subtotalLabel}
-                style={{ paddingInlineStart: `${level * 6}px` }}
-              >
-                {label} Total
-              </span>
+              {canToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
+              <span className={styles.subtotalLabel}>{label} Total</span>
             </th>
           );
         }
-        return null;
+        // Inner dimensions (dimIdx > level): empty cell
+        return (
+          <th
+            key={`sub-hdr-${dimIdx}`}
+            scope="row"
+            className={styles.rowHeaderCell}
+          />
+        );
       })}
       {/* Data cells: subtotal values */}
       {visibleSlots.map((slot) =>
@@ -1689,10 +1774,12 @@ const TableRenderer: FC<TableRendererProps> = ({
     [useSubtotals, pivotData],
   );
 
-  // Compute spans for data rows inside grouped (subtotals) mode.
-  // rowSpan must count ALL <tr> elements (data + subtotal) within each group
-  // so that parent cells correctly cover interleaved subtotal rows.
-  const groupedDataSpans = useMemo(() => {
+  // Compute row spans for ALL rows (data + subtotal) in grouped mode.
+  // Subtotals at their own level are standalone (span=1) so their label
+  // cell always renders.  Parent cells in subtotal rows participate in
+  // normal span groups so that the parent dimension value is shared with
+  // adjacent data rows or other subtotals in the same parent group.
+  const groupedRowSpans = useMemo(() => {
     if (!groupedRows || config.repeat_row_labels) return null;
     const sliced =
       maxRows != null ? groupedRows.slice(0, maxRows) : groupedRows;
@@ -1701,31 +1788,48 @@ const TableRenderer: FC<TableRendererProps> = ({
 
     const map = new Map<number, number[]>();
     for (let i = 0; i < sliced.length; i++) {
-      if (sliced[i].type === "data") {
-        map.set(i, new Array(numDims).fill(0));
-      }
+      map.set(i, new Array(numDims).fill(1));
+    }
+
+    function getPrefix(entry: GroupedRow, d: number): string[] | null {
+      if (entry.type === "data") return entry.key.slice(0, d + 1);
+      return entry.level >= d ? entry.key.slice(0, d + 1) : null;
     }
 
     for (let d = 0; d < numDims; d++) {
       let i = 0;
       while (i < sliced.length) {
-        while (i < sliced.length && sliced[i].type !== "data") i++;
-        if (i >= sliced.length) break;
+        const entry = sliced[i];
 
-        const prefix = sliced[i].key.slice(0, d + 1);
+        // Subtotals at their own level are standalone at that dimension
+        if (entry.type === "subtotal" && entry.level === d) {
+          map.get(i)![d] = 1;
+          i++;
+          continue;
+        }
+
+        const prefix = getPrefix(entry, d);
+        if (prefix === null) {
+          map.get(i)![d] = 1;
+          i++;
+          continue;
+        }
+
         const groupStart = i;
         let j = i + 1;
         while (j < sliced.length) {
-          const e = sliced[j];
-          if (e.type === "data") {
-            if (!e.key.slice(0, d + 1).every((v, idx) => v === prefix[idx]))
-              break;
-          } else if (e.level <= d) {
-            break;
-          }
+          const next = sliced[j];
+          // Subtotal at its own level or shallower breaks the group
+          if (next.type === "subtotal" && next.level <= d) break;
+          const np = getPrefix(next, d);
+          if (np === null || !prefix.every((v, k) => np[k] === v)) break;
           j++;
         }
+
         map.get(groupStart)![d] = j - groupStart;
+        for (let k = groupStart + 1; k < j; k++) {
+          map.get(k)![d] = 0;
+        }
         i = j;
       }
     }
@@ -1813,10 +1917,21 @@ const TableRenderer: FC<TableRendererProps> = ({
     );
   }
 
+  const numGroupingDims = useSubtotals ? config.rows.length - 1 : 0;
+  const grpContext: GroupContext | undefined = useSubtotals
+    ? {
+        onToggleGroup: onConfigChange ? handleToggleGroup : undefined,
+        collapsedSet,
+        subtotalsEnabled: true,
+        numGroupingDims,
+      }
+    : undefined;
+
   const renderBody = () => {
     if (groupedRows) {
       const sliced =
         maxRows != null ? groupedRows.slice(0, maxRows) : groupedRows;
+      let prevDataKey: string[] | null = null;
       return sliced.map((entry, idx) => {
         if (entry.type === "subtotal") {
           return renderSubtotalRow(
@@ -1831,8 +1946,19 @@ const TableRenderer: FC<TableRendererProps> = ({
             undefined,
             onCellClick,
             onCellClick ? handleCellKeyDown : undefined,
+            groupedRowSpans?.get(idx),
           );
         }
+        let boundaryLevel: number | undefined;
+        if (prevDataKey) {
+          for (let d = 0; d < numGroupingDims; d++) {
+            if (entry.key[d] !== prevDataKey[d]) {
+              boundaryLevel = d;
+              break;
+            }
+          }
+        }
+        prevDataKey = entry.key;
         return renderDataRow(
           entry.key,
           colSlots,
@@ -1842,7 +1968,9 @@ const TableRenderer: FC<TableRendererProps> = ({
           onCellClick,
           onCellClick ? handleCellKeyDown : undefined,
           undefined,
-          groupedDataSpans?.get(idx),
+          groupedRowSpans?.get(idx),
+          boundaryLevel,
+          grpContext,
         );
       });
     }

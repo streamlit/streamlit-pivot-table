@@ -206,6 +206,7 @@ row_sort = {
     "direction": "desc",     # "asc" or "desc"
     "value_field": "Revenue", # required when by="value"
     "col_key": ["2023"],     # optional: sort within a specific column
+    "dimension": "Category", # optional: scope sort to this level and below
 }
 
 col_sort = {
@@ -214,7 +215,15 @@ col_sort = {
 }
 ```
 
+**Scoped sorting:** When `dimension` is set and subtotals are enabled, only the
+targeted level and its children reorder — parent groups maintain their existing
+order.  For example, with `rows=["Region", "Category", "Product"]` and
+`dimension="Category"`, Region groups stay in their default (ascending by
+subtotal) order while Categories within each Region sort descending.  Omit
+`dimension` for a global sort that applies to all levels.
+
 Users can also sort interactively via the column header menu (click the **&#8942;** icon).
+When sorting from a specific dimension header, `dimension` is set automatically.
 
 ### Show Values As
 
@@ -374,6 +383,19 @@ st_pivot_table(
 - Collapsed groups hide child rows but keep the subtotal visible.
 - Expand All / Collapse All controls are available in the Settings popover (gear icon in the toolbar).
 - Pass a list of dimension names to `show_subtotals` to enable subtotals only for specific levels (e.g., `show_subtotals=["Region"]`).
+
+**Grouping vs. leaf dimensions:** When subtotals are on, all dimensions except
+the innermost are *grouping dimensions*.  They define collapsible groups and
+receive visual hierarchy cues:
+
+- **Bold tinted cells** on grouping dimension columns to distinguish them from
+  detail data.
+- **Indented leaf cells** — the innermost dimension is visually subordinated
+  within its parent group.
+- **Group boundary borders** — a subtle top border appears between data rows
+  that belong to different groups, reinforcing the hierarchy.
+- **Inline collapse/expand toggles** on the first data row of each group (on
+  the merged grouping cell), not just on subtotal rows.
 
 ### Column Group Collapse/Expand
 

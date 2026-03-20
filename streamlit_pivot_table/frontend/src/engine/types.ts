@@ -171,6 +171,11 @@ function validateSortConfig(
       }
       sc.col_key = o.col_key as string[];
     }
+    if (o.dimension !== undefined) {
+      if (typeof o.dimension !== "string")
+        throw new Error(`'${fieldName}.dimension' must be a string`);
+      sc.dimension = o.dimension;
+    }
     return sc;
   }
   throw new Error(

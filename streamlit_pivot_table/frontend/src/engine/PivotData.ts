@@ -333,29 +333,39 @@ export class PivotData {
 
     if (by === "value") {
       const numDims = dimensions.length;
+      // When dimension is set, only apply the requested direction at and
+      // below that level; parent levels use ascending (sign=1) so their
+      // existing group order is preserved.  This gives BI-standard scoped
+      // sorting: sorting from a specific dimension header only reorders
+      // that level and its children.
+      const targetDimIdx = sortConfig?.dimension
+        ? dimensions.indexOf(sortConfig.dimension)
+        : -1;
       if (numDims >= 2 && getSubtotalForSort) {
-        // Hierarchical value sort: compare subtotals at each parent level
-        // before the leaf value, so that grouping is preserved.
         return (a, b) => {
           for (let level = 0; level < numDims - 1; level++) {
             if (a[level] === b[level]) continue;
+            const levelSign =
+              targetDimIdx === -1 || level >= targetDimIdx ? sign : 1;
             const prefixA = a.slice(0, level + 1);
             const prefixB = b.slice(0, level + 1);
             const va = getSubtotalForSort(prefixA);
             const vb = getSubtotalForSort(prefixB);
             if (va == null && vb == null)
-              return mixedCompare(a[level], b[level]) * sign;
+              return mixedCompare(a[level], b[level]) * levelSign;
             if (va == null) return 1;
             if (vb == null) return -1;
-            if (va !== vb) return (va - vb) * sign;
-            return mixedCompare(a[level], b[level]) * sign;
+            if (va !== vb) return (va - vb) * levelSign;
+            return mixedCompare(a[level], b[level]) * levelSign;
           }
+          const leafSign =
+            targetDimIdx === -1 || numDims - 1 >= targetDimIdx ? sign : 1;
           const va = getValueForSort(a);
           const vb = getValueForSort(b);
           if (va == null && vb == null) return 0;
           if (va == null) return 1;
           if (vb == null) return -1;
-          return (va - vb) * sign;
+          return (va - vb) * leafSign;
         };
       }
       return (a, b) => {

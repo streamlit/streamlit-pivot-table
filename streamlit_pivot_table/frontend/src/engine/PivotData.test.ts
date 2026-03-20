@@ -16,7 +16,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { PivotData, type DataRecord, mixedCompare } from "./PivotData";
+import {
+  PivotData,
+  type DataRecord,
+  type GroupedRow,
+  mixedCompare,
+} from "./PivotData";
 import {
   AGGREGATOR_CLASS,
   type AggregationType,
@@ -865,6 +870,179 @@ describe("PivotData - hierarchical value sort", () => {
     // Each L5 manager should appear exactly once as a subtotal
     expect(subtotals.filter((s) => s === "Mohit/Ming")).toHaveLength(1);
     expect(subtotals.filter((s) => s === "Mohit/Sanchit")).toHaveLength(1);
+  });
+});
+
+describe("PivotData - scoped value sort", () => {
+  // Two L4 groups with different subtotals so we can verify parent order.
+  // L4 subtotals: Alpha=10+20+5=35, Beta=50+30+15=95
+  // L5 subtotals within Alpha: X=10+20=30, Y=5
+  // L5 subtotals within Beta:  X=50, Y=30+15=45
+  const SCOPED_DATA: DataRecord[] = [
+    { l4: "Alpha", l5: "X", name: "A1", v: 10 },
+    { l4: "Alpha", l5: "X", name: "A2", v: 20 },
+    { l4: "Alpha", l5: "Y", name: "A3", v: 5 },
+    { l4: "Beta", l5: "X", name: "B1", v: 50 },
+    { l4: "Beta", l5: "Y", name: "B2", v: 30 },
+    { l4: "Beta", l5: "Y", name: "B3", v: 15 },
+  ];
+
+  it("global value sort without dimension sorts all levels desc", () => {
+    const pd = new PivotData(
+      SCOPED_DATA,
+      makeConfig({
+        rows: ["l4", "l5", "name"],
+        columns: [],
+        values: ["v"],
+        row_sort: { by: "value", direction: "desc" },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    // Beta(95) > Alpha(35) — Beta first
+    expect(keys[0][0]).toBe("Beta");
+    // Within Beta: X(50) > Y(45) — X first
+    const betaRows = keys.filter((k) => k[0] === "Beta");
+    expect(betaRows[0][1]).toBe("X");
+    // Within Alpha: X(30) > Y(5) — X first
+    const alphaRows = keys.filter((k) => k[0] === "Alpha");
+    expect(alphaRows[0][1]).toBe("X");
+  });
+
+  it("scoped value sort from middle dim preserves parent group order", () => {
+    const pd = new PivotData(
+      SCOPED_DATA,
+      makeConfig({
+        rows: ["l4", "l5", "name"],
+        columns: [],
+        values: ["v"],
+        row_sort: {
+          by: "value",
+          direction: "desc",
+          value_field: "v",
+          dimension: "l5",
+        },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    // L4 groups should be in DEFAULT (ascending) order: Alpha < Beta
+    expect(keys[0][0]).toBe("Alpha");
+    const betaRows = keys.filter((k) => k[0] === "Beta");
+    expect(betaRows.length).toBeGreaterThan(0);
+    const lastAlphaIdx = keys.findIndex((k) => k[0] === "Beta") - 1;
+    expect(keys[lastAlphaIdx][0]).toBe("Alpha");
+    // L5 groups within each L4 should be desc by subtotal
+    const alphaRows = keys.filter((k) => k[0] === "Alpha");
+    expect(alphaRows[0][1]).toBe("X"); // X(30) > Y(5)
+    expect(betaRows[0][1]).toBe("X"); // X(50) > Y(45)
+    // Leaf rows within each L5 should also be desc
+    const alphaX = alphaRows.filter((k) => k[1] === "X");
+    expect(alphaX.map((k) => k[2])).toEqual(["A2", "A1"]); // 20, 10
+  });
+
+  it("scoped value sort from leaf dim preserves all parent orders", () => {
+    const pd = new PivotData(
+      SCOPED_DATA,
+      makeConfig({
+        rows: ["l4", "l5", "name"],
+        columns: [],
+        values: ["v"],
+        row_sort: {
+          by: "value",
+          direction: "desc",
+          value_field: "v",
+          dimension: "name",
+        },
+      }),
+    );
+    const keys = pd.getRowKeys();
+    // L4 groups in ascending-by-subtotal order: Alpha(35) < Beta(95)
+    expect(keys[0][0]).toBe("Alpha");
+    // L5 groups within each L4 in ascending-by-subtotal order:
+    // Alpha: Y(5) < X(30);  Beta: Y(45) < X(50)
+    const alphaRows = keys.filter((k) => k[0] === "Alpha");
+    expect(alphaRows[0][1]).toBe("Y");
+    expect(alphaRows[alphaRows.length - 1][1]).toBe("X");
+    // Only leaf rows (name) sort desc within each L5 group
+    const alphaX = alphaRows.filter((k) => k[1] === "X");
+    expect(alphaX.map((k) => k[2])).toEqual(["A2", "A1"]); // 20 > 10
+    const betaY = keys.filter((k) => k[0] === "Beta" && k[1] === "Y");
+    expect(betaY.map((k) => k[2])).toEqual(["B2", "B3"]); // 30 > 15
+  });
+});
+
+describe("PivotData - group boundary detection", () => {
+  const BOUNDARY_DATA: DataRecord[] = [
+    { region: "East", cat: "A", prod: "P1", v: 1 },
+    { region: "East", cat: "A", prod: "P2", v: 2 },
+    { region: "East", cat: "B", prod: "P3", v: 3 },
+    { region: "West", cat: "A", prod: "P4", v: 4 },
+    { region: "West", cat: "B", prod: "P5", v: 5 },
+  ];
+
+  function detectBoundaries(grouped: GroupedRow[], numGroupingDims: number) {
+    const result: { idx: number; level: number }[] = [];
+    let prevDataKey: string[] | null = null;
+    for (let i = 0; i < grouped.length; i++) {
+      if (grouped[i].type === "subtotal") {
+        continue;
+      }
+      if (prevDataKey) {
+        for (let d = 0; d < numGroupingDims; d++) {
+          if (grouped[i].key[d] !== prevDataKey[d]) {
+            result.push({ idx: i, level: d });
+            break;
+          }
+        }
+      }
+      prevDataKey = grouped[i].key;
+    }
+    return result;
+  }
+
+  it("detects L0 boundary when region changes in 2-level hierarchy", () => {
+    const pd = new PivotData(
+      BOUNDARY_DATA,
+      makeConfig({
+        rows: ["region", "cat"],
+        columns: [],
+        values: ["v"],
+        show_subtotals: true,
+      }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    const boundaries = detectBoundaries(grouped, 1);
+    expect(boundaries.some((b) => b.level === 0)).toBe(true);
+  });
+
+  it("detects L1 boundary when cat changes within same region in 3-level hierarchy", () => {
+    const pd = new PivotData(
+      BOUNDARY_DATA,
+      makeConfig({
+        rows: ["region", "cat", "prod"],
+        columns: [],
+        values: ["v"],
+        show_subtotals: true,
+      }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    const boundaries = detectBoundaries(grouped, 2);
+    const l1Boundaries = boundaries.filter((b) => b.level === 1);
+    expect(l1Boundaries.length).toBeGreaterThan(0);
+  });
+
+  it("no boundaries when only one group exists", () => {
+    const pd = new PivotData(
+      BOUNDARY_DATA.filter((r) => r.region === "East" && r.cat === "A"),
+      makeConfig({
+        rows: ["region", "cat"],
+        columns: [],
+        values: ["v"],
+        show_subtotals: true,
+      }),
+    );
+    const grouped = pd.getGroupedRowKeys();
+    const boundaries = detectBoundaries(grouped, 1);
+    expect(boundaries).toHaveLength(0);
   });
 });
 

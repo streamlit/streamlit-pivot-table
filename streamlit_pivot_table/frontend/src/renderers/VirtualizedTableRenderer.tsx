@@ -209,6 +209,48 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   });
 
   const totalVirtualRows = groupedRows ? groupedRows.length : allRowKeys.length;
+  const numGroupingDims = useSubtotals ? config.rows.length - 1 : 0;
+
+  const grpContext = useMemo(
+    () =>
+      useSubtotals
+        ? {
+            onToggleGroup: onConfigChange ? handleToggleGroup : undefined,
+            collapsedSet,
+            subtotalsEnabled: true,
+            numGroupingDims,
+          }
+        : undefined,
+    [
+      useSubtotals,
+      onConfigChange,
+      handleToggleGroup,
+      collapsedSet,
+      numGroupingDims,
+    ],
+  );
+
+  const groupBoundaryMap = useMemo(() => {
+    if (!groupedRows || numGroupingDims === 0) return null;
+    const map = new Map<number, number>();
+    let prevDataKey: string[] | null = null;
+    for (let i = 0; i < groupedRows.length; i++) {
+      const entry = groupedRows[i];
+      if (entry.type === "subtotal") {
+        continue;
+      }
+      if (prevDataKey) {
+        for (let d = 0; d < numGroupingDims; d++) {
+          if (entry.key[d] !== prevDataKey[d]) {
+            map.set(i, d);
+            break;
+          }
+        }
+      }
+      prevDataKey = entry.key;
+    }
+    return map;
+  }, [groupedRows, numGroupingDims]);
 
   const renderRow = useCallback(
     (rowIndex: number, visibleColRange: [number, number]): ReactElement => {
@@ -238,6 +280,9 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
           onCellClick,
           onCellClick ? handleCellKeyDown : undefined,
           visibleColRange,
+          undefined,
+          groupBoundaryMap?.get(rowIndex),
+          grpContext,
         );
       }
       const rowKey = allRowKeys[rowIndex];
@@ -264,6 +309,8 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       collapsedSet,
       onConfigChange,
       handleToggleGroup,
+      groupBoundaryMap,
+      grpContext,
     ],
   );
 

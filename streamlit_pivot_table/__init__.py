@@ -395,7 +395,10 @@ def st_pivot_table(
     row_sort : dict or None
         Initial sort configuration for rows. Dict with keys ``by``
         ("key" or "value"), ``direction`` ("asc" or "desc"), and
-        optionally ``value_field`` (str) and ``col_key`` (list[str]).
+        optionally ``value_field`` (str), ``col_key`` (list[str]), and
+        ``dimension`` (str).  When ``dimension`` is set and subtotals
+        are enabled, only the targeted level and below sort — parent
+        groups keep their existing order (scoped sorting).
     col_sort : dict or None
         Initial sort configuration for columns. Same shape as row_sort
         (without ``col_key``).

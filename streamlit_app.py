@@ -854,6 +854,164 @@ result = st_pivot_table(
     )
 
 # ---------------------------------------------------------------------------
+# Section 13: Grouping Hierarchy and Sorting
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("13. Grouping Hierarchy and Scoped Sorting")
+
+st.markdown(
+    """
+When **subtotals** are enabled with multiple row dimensions, the component
+treats the data as a **grouped hierarchy**:
+
+- **Grouping dimensions** (all but the innermost row) define collapsible
+  groups. Their cells use bolder styling and a subtle background tint.
+- The **leaf dimension** (the innermost row) shows detail data, visually
+  indented within its parent group.
+- **Group boundary borders** appear between consecutive data rows that belong
+  to different groups, giving clear visual separation.
+- **Scoped sorting:** When you sort by value from a specific dimension header,
+  only that level and its children reorder — parent groups stay put.
+
+Compare the tables below to see the hierarchy in action.
+"""
+)
+
+hier_cols = st.columns(2)
+
+with hier_cols[0]:
+    st.markdown("**Subtotals ON — 3-level hierarchy**")
+    st_pivot_table(
+        df_medium,
+        key="hier_subtotals_on",
+        rows=["Region", "Category", "Product"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        show_subtotals=True,
+        show_totals=True,
+        max_height=500,
+    )
+
+with hier_cols[1]:
+    st.markdown("**Subtotals OFF — flat table for comparison**")
+    st_pivot_table(
+        df_medium,
+        key="hier_subtotals_off",
+        rows=["Region", "Category", "Product"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        show_subtotals=False,
+        show_totals=True,
+        max_height=500,
+    )
+
+st.markdown("---")
+st.markdown("**Scoped value sort — sort Category desc, Regions stay in place**")
+st_pivot_table(
+    df_medium,
+    key="hier_scoped_sort",
+    rows=["Region", "Category", "Product"],
+    columns=[],
+    values=["Revenue"],
+    aggregation="sum",
+    show_subtotals=True,
+    show_totals=True,
+    row_sort={
+        "by": "value",
+        "direction": "desc",
+        "value_field": "Revenue",
+        "dimension": "Category",
+    },
+    max_height=500,
+)
+
+st.markdown(
+    """
+↑ **What to observe:** Region groups are in their default (ascending by
+subtotal) order. Categories *within* each Region are sorted descending by
+Revenue subtotal. Products within each Category are also descending.
+
+Compare with the **global** value sort below — all levels sort descending:
+"""
+)
+
+st_pivot_table(
+    df_medium,
+    key="hier_global_sort",
+    rows=["Region", "Category", "Product"],
+    columns=[],
+    values=["Revenue"],
+    aggregation="sum",
+    show_subtotals=True,
+    show_totals=True,
+    row_sort={"by": "value", "direction": "desc", "value_field": "Revenue"},
+    max_height=500,
+)
+
+st.markdown("---")
+st.markdown("**Per-dimension subtotals — only Region grouped**")
+st_pivot_table(
+    df_medium,
+    key="hier_partial_subtotals",
+    rows=["Region", "Category", "Product"],
+    columns=[],
+    values=["Revenue"],
+    aggregation="sum",
+    show_subtotals=["Region"],
+    show_totals=True,
+    max_height=500,
+)
+
+st.markdown(
+    """
+↑ Only Region has subtotals. Category and Product are both leaf attributes
+within each Region group. The Region column gets grouping-dimension styling
+while Category and Product are plain detail data.
+"""
+)
+
+with st.expander("View Code"):
+    st.code(
+        """
+# 3-level hierarchy with full subtotals
+st_pivot_table(
+    df_medium,
+    key="hier_subtotals_on",
+    rows=["Region", "Category", "Product"],
+    values=["Revenue"],
+    show_subtotals=True,
+)
+
+# Scoped value sort: Category desc, Regions stay in default order
+st_pivot_table(
+    df_medium,
+    key="hier_scoped_sort",
+    rows=["Region", "Category", "Product"],
+    values=["Revenue"],
+    show_subtotals=True,
+    row_sort={
+        "by": "value",
+        "direction": "desc",
+        "value_field": "Revenue",
+        "dimension": "Category",  # <-- scoped to Category level
+    },
+)
+
+# Per-dimension subtotals: only Region level
+st_pivot_table(
+    df_medium,
+    key="hier_partial_subtotals",
+    rows=["Region", "Category", "Product"],
+    values=["Revenue"],
+    show_subtotals=["Region"],
+)
+""",
+        language="python",
+    )
+
+# ---------------------------------------------------------------------------
 # Footer: Raw Data
 # ---------------------------------------------------------------------------
 st.divider()

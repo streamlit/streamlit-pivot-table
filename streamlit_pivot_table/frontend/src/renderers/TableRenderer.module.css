@@ -138,7 +138,7 @@
   text-align: right;
 }
 
-.pivotTable tbody tr:nth-child(even) td:not(.totalsCol) {
+.pivotTable tbody tr:not(.subtotalRow):not(.totalsRow):nth-child(even) td:not(.totalsCol) {
   background-color: color-mix(
     in srgb,
     var(--st-secondary-background-color) 15%,
@@ -370,6 +370,40 @@
   opacity: 0.6;
   stroke-width: 1.8;
   flex-shrink: 0;
+}
+
+/* --- Group boundary borders (BI-grade hierarchy) --- */
+
+.groupBoundaryL0 > td,
+.groupBoundaryL0 > th {
+  border-top: 2px solid color-mix(in srgb, var(--st-text-color) 25%, transparent);
+}
+
+.groupBoundaryL1 > td,
+.groupBoundaryL1 > th {
+  border-top: 1.5px solid color-mix(in srgb, var(--st-text-color) 15%, transparent);
+}
+
+.groupBoundaryL2 > td,
+.groupBoundaryL2 > th {
+  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+/* Grouping dimension cell tinting — distinguish non-leaf from leaf cells */
+.groupingDimCell {
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 96%, var(--st-background-color));
+  font-weight: 600;
+}
+
+/* Leaf dimension cell indentation — subordinate detail rows within groups */
+.leafDimCell {
+  padding-inline-start: 20px;
+}
+
+/* Grouping dimension column header styling */
+.groupingDimHeader {
+  font-weight: 700;
+  border-bottom-width: 2px;
 }
 
 /* --- Dimension-level collapse toggle --- */
