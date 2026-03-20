@@ -138,10 +138,23 @@
   text-align: right;
 }
 
-.pivotTable tbody tr:not(.subtotalRow):not(.totalsRow):nth-child(even) td:not(.totalsCol) {
+/* Group-relative zebra striping: class is applied by the renderer based on
+   the data row's index within its group (resets after each subtotal).
+   This avoids nth-child parity drift caused by interleaved subtotal rows. */
+.pivotTable tbody .evenDataRow td:not(.totalsCol) {
   background-color: color-mix(
     in srgb,
-    var(--st-secondary-background-color) 15%,
+    var(--st-secondary-background-color) 50%,
+    var(--st-background-color)
+  );
+}
+
+/* Row header stripe: drop from the default 92% toward background so the
+   band is visible against the slightly lighter odd-row headers. */
+.pivotTable tbody .evenDataRow th.rowHeaderCell:not(.groupingDimCell) {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 72%,
     var(--st-background-color)
   );
 }

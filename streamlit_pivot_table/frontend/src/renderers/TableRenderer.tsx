@@ -1022,6 +1022,7 @@ export function renderDataRow(
   headerSpans?: number[],
   groupBoundaryLevel?: number,
   groupContext?: GroupContext,
+  isEvenRow?: boolean,
 ): ReactElement {
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
@@ -1034,17 +1035,21 @@ export function renderDataRow(
   const subtotalsOn = groupContext?.subtotalsEnabled && config.rows.length >= 2;
   const numGroupingDims = groupContext?.numGroupingDims ?? 0;
   const leafDimIdx = config.rows.length - 1;
-  const boundaryClass =
+  const trClasses = [
     groupBoundaryLevel !== undefined
       ? (styles[
           `groupBoundaryL${Math.min(groupBoundaryLevel, 2)}` as keyof typeof styles
         ] ?? "")
-      : "";
+      : "",
+    isEvenRow ? styles.evenDataRow : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <tr
       key={rowKey.join("\x00")}
       data-testid="pivot-data-row"
-      className={boundaryClass || undefined}
+      className={trClasses || undefined}
     >
       {rowKey.map((part, dimIdx) => {
         const span = headerSpans ? headerSpans[dimIdx] : 1;
@@ -1932,8 +1937,10 @@ const TableRenderer: FC<TableRendererProps> = ({
       const sliced =
         maxRows != null ? groupedRows.slice(0, maxRows) : groupedRows;
       let prevDataKey: string[] | null = null;
+      let groupDataIdx = 0;
       return sliced.map((entry, idx) => {
         if (entry.type === "subtotal") {
+          groupDataIdx = 0;
           return renderSubtotalRow(
             entry.key,
             entry.level,
@@ -1954,10 +1961,13 @@ const TableRenderer: FC<TableRendererProps> = ({
           for (let d = 0; d < numGroupingDims; d++) {
             if (entry.key[d] !== prevDataKey[d]) {
               boundaryLevel = d;
+              if (d === 0) groupDataIdx = 0;
               break;
             }
           }
         }
+        const isEven = groupDataIdx % 2 === 1;
+        groupDataIdx++;
         prevDataKey = entry.key;
         return renderDataRow(
           entry.key,
@@ -1971,6 +1981,7 @@ const TableRenderer: FC<TableRendererProps> = ({
           groupedRowSpans?.get(idx),
           boundaryLevel,
           grpContext,
+          isEven,
         );
       });
     }
@@ -1986,6 +1997,9 @@ const TableRenderer: FC<TableRendererProps> = ({
         onCellClick ? handleCellKeyDown : undefined,
         undefined,
         rowSpans ? rowSpans[rowIdx] : undefined,
+        undefined,
+        undefined,
+        rowIdx % 2 === 1,
       ),
     );
   };
