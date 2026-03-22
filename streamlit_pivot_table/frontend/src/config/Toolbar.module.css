@@ -27,8 +27,13 @@
   align-items: stretch;
 }
 
-.toolbarLocked {
-  opacity: 0.75;
+.toolbarLocked .fieldGroup {
+  background: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 72%,
+    transparent
+  );
+  border-color: color-mix(in srgb, var(--st-text-color) 12%, transparent);
 }
 
 /* --- Section cards (Rows/Columns/Values/Aggregate/Options) --- */
@@ -524,6 +529,17 @@
   pointer-events: auto;
 }
 
+.utilGroupPinned {
+  position: static;
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  pointer-events: auto;
+  align-self: center;
+}
+
 .utilButton {
   display: inline-flex;
   align-items: center;
@@ -871,6 +887,30 @@
   height: 1px;
   margin: 4px 0;
   background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+.settingsStatusList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settingsStatusRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.85em;
+}
+
+.settingsStatusLabel {
+  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+}
+
+.settingsStatusValue {
+  color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
+  font-weight: 500;
+  text-align: right;
 }
 
 /* Export data popover */

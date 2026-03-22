@@ -212,6 +212,7 @@ export interface TableRendererProps {
   onFilterChange?: (field: string, filter: DimensionFilter | undefined) => void;
   onConfigChange?: (config: PivotConfigV1) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
+  onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
   menuLimit?: number;
   /** When true, the wrapper becomes a flex item that fills remaining space
    *  in a flex-column parent, enabling a single internal scrollbar. */
@@ -462,7 +463,7 @@ export function renderColumnHeaders(
   activeMenuDimension?: string,
   onToggleColGroup?: (groupKey: string) => void,
   pivotData?: PivotData,
-  onConfigChange?: (config: PivotConfigV1) => void,
+  onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void,
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
   const visibleSlots = colRange
@@ -473,18 +474,13 @@ export function renderColumnHeaders(
   const hasMenu = !!onOpenMenu;
 
   const handleDimToggle = (axis: "row" | "col", level: number) => {
-    if (!onConfigChange || !pivotData) return;
+    if (!onCollapseChange || !pivotData) return;
     const keys =
       axis === "row" ? pivotData.getRowKeys() : pivotData.getColKeys();
     const current =
       axis === "row"
         ? (config.collapsed_groups ?? [])
         : (config.collapsed_col_groups ?? []);
-    const configField =
-      axis === "row"
-        ? ("collapsed_groups" as const)
-        : ("collapsed_col_groups" as const);
-
     const level0Prefixes = [
       ...new Set(keys.map((k) => makeKeyString(k.slice(0, 1)))),
     ].sort();
@@ -502,10 +498,10 @@ export function renderColumnHeaders(
       for (const p of targetPrefixes) working.add(p);
     }
 
-    onConfigChange({ ...config, [configField]: [...working].sort() });
+    onCollapseChange(axis, [...working].sort());
   };
 
-  const canDimToggle = !!onConfigChange && !!pivotData;
+  const canDimToggle = !!onCollapseChange && !!pivotData;
 
   for (let level = 0; level < numColLevels; level++) {
     const cells: ReactElement[] = [];
@@ -1724,6 +1720,7 @@ const TableRenderer: FC<TableRendererProps> = ({
   onFilterChange,
   onConfigChange,
   onShowValuesAsChange,
+  onCollapseChange,
   menuLimit,
   scrollable,
   maxHeight,
@@ -1858,30 +1855,30 @@ const TableRenderer: FC<TableRendererProps> = ({
 
   const handleToggleGroup = useCallback(
     (groupKeyStr: string) => {
-      if (!onConfigChange) return;
+      if (!onCollapseChange) return;
       const collapsed = new Set(config.collapsed_groups ?? []);
       if (collapsed.has(groupKeyStr)) {
         collapsed.delete(groupKeyStr);
       } else {
         collapsed.add(groupKeyStr);
       }
-      onConfigChange({ ...config, collapsed_groups: [...collapsed] });
+      onCollapseChange("row", [...collapsed].sort());
     },
-    [config, onConfigChange],
+    [config, onCollapseChange],
   );
 
   const handleToggleColGroup = useCallback(
     (groupKeyStr: string) => {
-      if (!onConfigChange) return;
+      if (!onCollapseChange) return;
       const collapsed = new Set(config.collapsed_col_groups ?? []);
       if (collapsed.has(groupKeyStr)) {
         collapsed.delete(groupKeyStr);
       } else {
         collapsed.add(groupKeyStr);
       }
-      onConfigChange({ ...config, collapsed_col_groups: [...collapsed] });
+      onCollapseChange("col", [...collapsed].sort());
     },
-    [config, onConfigChange],
+    [config, onCollapseChange],
   );
 
   const {
@@ -1925,7 +1922,7 @@ const TableRenderer: FC<TableRendererProps> = ({
   const numGroupingDims = useSubtotals ? config.rows.length - 1 : 0;
   const grpContext: GroupContext | undefined = useSubtotals
     ? {
-        onToggleGroup: onConfigChange ? handleToggleGroup : undefined,
+        onToggleGroup: onCollapseChange ? handleToggleGroup : undefined,
         collapsedSet,
         subtotalsEnabled: true,
         numGroupingDims,
@@ -1949,7 +1946,7 @@ const TableRenderer: FC<TableRendererProps> = ({
             config,
             hasMultipleValues,
             collapsedSet.has(makeKeyString(entry.key)),
-            onConfigChange ? handleToggleGroup : undefined,
+            onCollapseChange ? handleToggleGroup : undefined,
             undefined,
             onCellClick,
             onCellClick ? handleCellKeyDown : undefined,
@@ -2031,11 +2028,11 @@ const TableRenderer: FC<TableRendererProps> = ({
               undefined,
               hasHeaderMenu ? handleOpenMenu : undefined,
               menuTarget?.dimension,
-              numColDims >= 2 && onConfigChange
+              numColDims >= 2 && onCollapseChange
                 ? handleToggleColGroup
                 : undefined,
               pivotData,
-              onConfigChange,
+              onCollapseChange,
             )}
           </thead>
           <tbody>

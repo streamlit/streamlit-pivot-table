@@ -166,15 +166,17 @@ st.markdown(
 Control which values appear via **header menu filters** or the Python API.
 **Locked mode** freezes the toolbar config controls so end-users cannot change
 rows, columns, values, or per-measure aggregation — but sorting and filtering via header
-menus still work. **Custom sorters** enforce a specific dimension order.
+menus still work, **Show Values As** remains available on value headers, and
+export still stays available as a viewer action. **Custom sorters** enforce a specific dimension order.
 
 **Try it (left table):**
 - Click the **⋮** menu icon on the "Region" header → uncheck regions to filter them out.
 - Use the search box to find specific values quickly.
 
-**Right table** is **locked** — the toolbar config controls and utility actions
-(reset, swap, import/export) are hidden, the **Settings** gear remains visible
-for inspection only, and you can still sort and filter via the column header menus.
+**Right table** is **locked** — authoring actions like reset, swap, and config import/export
+are hidden, but **Export Data** remains available, the **Settings** gear shows
+read-only view status, and you can still sort, filter, and change **Show Values As**
+from the header menus.
 
 **API parameters used:** `hidden_from_aggregators`, `sorters`, `locked`
 """

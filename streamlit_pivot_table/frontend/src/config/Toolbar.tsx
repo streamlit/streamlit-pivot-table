@@ -73,10 +73,20 @@ export interface ToolbarProps {
   pivotData?: PivotData;
   /** Base filename (without extension) for exported files. */
   exportFilename?: string;
+  /** Viewer-safe collapse updates, enabled whenever interactive is true. */
+  onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
 }
 
 function configsEqual(a: PivotConfigV1, b: PivotConfigV1): boolean {
   return stringifyPivotConfig(a) === stringifyPivotConfig(b);
+}
+
+function stringArraysEqual(
+  a: readonly string[] | undefined,
+  b: readonly string[],
+): boolean {
+  if ((a?.length ?? 0) !== b.length) return false;
+  return b.every((value, idx) => a?.[idx] === value);
 }
 
 const AGG_ICONS: Record<AggregationType, string> = {
@@ -137,6 +147,7 @@ const Toolbar: FC<ToolbarProps> = ({
   showStickyToggle,
   pivotData,
   exportFilename,
+  onCollapseChange,
 }): ReactElement => {
   const syncAggregation = useCallback(
     (values: string[], aggregation: AggregationConfig = config.aggregation) =>
@@ -287,22 +298,36 @@ const Toolbar: FC<ToolbarProps> = ({
   }, [config, emitIfChanged]);
 
   const expandAllGroups = useCallback(() => {
-    emitIfChanged({ ...config, collapsed_groups: [] });
-  }, [config, emitIfChanged]);
+    if (!onCollapseChange) return;
+    if (!stringArraysEqual(config.collapsed_groups, [])) {
+      onCollapseChange("row", []);
+    }
+  }, [config, onCollapseChange]);
 
   const collapseAllGroups = useCallback(() => {
     if (config.rows.length < 2) return;
-    emitIfChanged({ ...config, collapsed_groups: ["__ALL__"] });
-  }, [config, emitIfChanged]);
+    const next = ["__ALL__"];
+    if (!onCollapseChange) return;
+    if (!stringArraysEqual(config.collapsed_groups, next)) {
+      onCollapseChange("row", next);
+    }
+  }, [config, onCollapseChange]);
 
   const expandAllColGroups = useCallback(() => {
-    emitIfChanged({ ...config, collapsed_col_groups: [] });
-  }, [config, emitIfChanged]);
+    if (!onCollapseChange) return;
+    if (!stringArraysEqual(config.collapsed_col_groups, [])) {
+      onCollapseChange("col", []);
+    }
+  }, [config, onCollapseChange]);
 
   const collapseAllColGroups = useCallback(() => {
     if (config.columns.length < 2) return;
-    emitIfChanged({ ...config, collapsed_col_groups: ["__ALL__"] });
-  }, [config, emitIfChanged]);
+    const next = ["__ALL__"];
+    if (!onCollapseChange) return;
+    if (!stringArraysEqual(config.collapsed_col_groups, next)) {
+      onCollapseChange("col", next);
+    }
+  }, [config, onCollapseChange]);
 
   const handleSwapRowsCols = useCallback(() => {
     emitIfChanged({
@@ -339,8 +364,8 @@ const Toolbar: FC<ToolbarProps> = ({
 
   const showRowTotals = resolveShowRowTotals(config);
   const showColTotals = resolveShowColumnTotals(config);
-  const rowTotalsDisabled = locked || config.columns.length === 0;
-  const colTotalsDisabled = locked || config.rows.length === 0;
+  const rowTotalsDisabled = config.columns.length === 0;
+  const colTotalsDisabled = config.rows.length === 0;
 
   return (
     <div
@@ -391,7 +416,7 @@ const Toolbar: FC<ToolbarProps> = ({
 
       <div
         ref={utilGroupRef}
-        className={styles.utilGroup}
+        className={`${styles.utilGroup} ${locked ? styles.utilGroupPinned : ""}`}
         role="toolbar"
         aria-label="Table actions"
         onKeyDown={(e) => {
@@ -467,7 +492,7 @@ const Toolbar: FC<ToolbarProps> = ({
         {!locked && onConfigChange && (
           <ConfigIOControls config={config} onConfigChange={onConfigChange} />
         )}
-        {!locked && pivotData && (
+        {pivotData && (
           <ExportDataControls
             pivotData={pivotData}
             config={config}
@@ -482,15 +507,17 @@ const Toolbar: FC<ToolbarProps> = ({
           showColTotals={showColTotals}
           rowTotalsDisabled={rowTotalsDisabled}
           colTotalsDisabled={colTotalsDisabled}
-          toggleRowTotals={toggleRowTotals}
-          toggleColumnTotals={toggleColumnTotals}
-          toggleSubtotals={toggleSubtotals}
-          toggleRepeatLabels={toggleRepeatLabels}
-          toggleStickyHeaders={toggleStickyHeaders}
-          expandAllGroups={expandAllGroups}
-          collapseAllGroups={collapseAllGroups}
-          expandAllColGroups={expandAllColGroups}
-          collapseAllColGroups={collapseAllColGroups}
+          toggleRowTotals={!locked ? toggleRowTotals : undefined}
+          toggleColumnTotals={!locked ? toggleColumnTotals : undefined}
+          toggleSubtotals={!locked ? toggleSubtotals : undefined}
+          toggleRepeatLabels={!locked ? toggleRepeatLabels : undefined}
+          toggleStickyHeaders={!locked ? toggleStickyHeaders : undefined}
+          expandAllGroups={onCollapseChange ? expandAllGroups : undefined}
+          collapseAllGroups={onCollapseChange ? collapseAllGroups : undefined}
+          expandAllColGroups={onCollapseChange ? expandAllColGroups : undefined}
+          collapseAllColGroups={
+            onCollapseChange ? collapseAllColGroups : undefined
+          }
         />
       </div>
     </div>
@@ -1681,15 +1708,36 @@ interface SettingsPopoverProps {
   showColTotals: boolean;
   rowTotalsDisabled: boolean;
   colTotalsDisabled: boolean;
-  toggleRowTotals: () => void;
-  toggleColumnTotals: () => void;
-  toggleSubtotals: () => void;
-  toggleRepeatLabels: () => void;
-  toggleStickyHeaders: () => void;
-  expandAllGroups: () => void;
-  collapseAllGroups: () => void;
-  expandAllColGroups: () => void;
-  collapseAllColGroups: () => void;
+  toggleRowTotals?: () => void;
+  toggleColumnTotals?: () => void;
+  toggleSubtotals?: () => void;
+  toggleRepeatLabels?: () => void;
+  toggleStickyHeaders?: () => void;
+  expandAllGroups?: () => void;
+  collapseAllGroups?: () => void;
+  expandAllColGroups?: () => void;
+  collapseAllColGroups?: () => void;
+}
+
+function formatBooleanStatus(value: boolean): string {
+  return value ? "On" : "Off";
+}
+
+function formatTotalsStatus(
+  isEnabled: boolean,
+  isUnavailable: boolean,
+  isPartial: boolean,
+): string {
+  if (isUnavailable) return "N/A";
+  if (isPartial) return "Some";
+  return formatBooleanStatus(isEnabled);
+}
+
+function formatSubtotalsStatus(value: PivotConfigV1["show_subtotals"]): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(", ") : "Off";
+  }
+  return formatBooleanStatus(!!value);
 }
 
 const SettingsPopover: FC<SettingsPopoverProps> = ({
@@ -1751,8 +1799,29 @@ const SettingsPopover: FC<SettingsPopoverProps> = ({
   );
 
   const showRowGroups =
-    config.show_subtotals && config.rows.length >= 2 && !locked;
-  const showColGroups = config.columns.length >= 2 && !locked;
+    !!config.show_subtotals &&
+    config.rows.length >= 2 &&
+    !!expandAllGroups &&
+    !!collapseAllGroups;
+  const showColGroups =
+    config.columns.length >= 2 &&
+    !!expandAllColGroups &&
+    !!collapseAllColGroups;
+  const rowTotalsStatus = formatTotalsStatus(
+    showRowTotals,
+    config.columns.length === 0,
+    rowTotalsIndeterminate,
+  );
+  const colTotalsStatus = formatTotalsStatus(
+    showColTotals,
+    config.rows.length === 0,
+    colTotalsIndeterminate,
+  );
+  const subtotalsStatus = formatSubtotalsStatus(config.show_subtotals);
+  const repeatLabelsStatus = formatBooleanStatus(!!config.repeat_row_labels);
+  const stickyHeadersStatus = formatBooleanStatus(
+    config.sticky_headers !== false,
+  );
 
   return (
     <div className={styles.settingsWrapper} ref={containerRef}>
@@ -1781,93 +1850,156 @@ const SettingsPopover: FC<SettingsPopoverProps> = ({
           aria-label="Table settings"
           onKeyDown={handleKeyDown}
         >
-          <span className={styles.settingsSectionTitle}>Display</span>
-          <label
-            className={styles.checkboxLabel}
-            data-testid="toolbar-row-totals"
-            title={
-              rowTotalsDisabled && !locked
-                ? "Requires at least one column dimension"
-                : undefined
-            }
-          >
-            <input
-              ref={(el) => {
-                if (el) el.indeterminate = rowTotalsIndeterminate;
-              }}
-              type="checkbox"
-              checked={showRowTotals}
-              onChange={toggleRowTotals}
-              disabled={rowTotalsDisabled}
-            />
-            <span>Row Totals</span>
-          </label>
-          <label
-            className={styles.checkboxLabel}
-            data-testid="toolbar-col-totals"
-            title={
-              colTotalsDisabled && !locked
-                ? "Requires at least one row dimension"
-                : undefined
-            }
-          >
-            <input
-              ref={(el) => {
-                if (el) el.indeterminate = colTotalsIndeterminate;
-              }}
-              type="checkbox"
-              checked={showColTotals}
-              onChange={toggleColumnTotals}
-              disabled={colTotalsDisabled}
-            />
-            <span>Column Totals</span>
-          </label>
-          {config.rows.length >= 2 && (
-            <label
-              className={styles.checkboxLabel}
-              data-testid="toolbar-subtotals"
-            >
-              <input
-                ref={(el) => {
-                  if (el) el.indeterminate = subtotalsIndeterminate;
-                }}
-                type="checkbox"
-                checked={
-                  config.show_subtotals === true || subtotalsIndeterminate
+          <span className={styles.settingsSectionTitle}>
+            {locked ? "Current View" : "Display"}
+          </span>
+          {locked ? (
+            <div className={styles.settingsStatusList}>
+              <div
+                className={styles.settingsStatusRow}
+                data-testid="toolbar-row-totals-status"
+              >
+                <span className={styles.settingsStatusLabel}>Row Totals</span>
+                <span className={styles.settingsStatusValue}>
+                  {rowTotalsStatus}
+                </span>
+              </div>
+              <div
+                className={styles.settingsStatusRow}
+                data-testid="toolbar-col-totals-status"
+              >
+                <span className={styles.settingsStatusLabel}>
+                  Column Totals
+                </span>
+                <span className={styles.settingsStatusValue}>
+                  {colTotalsStatus}
+                </span>
+              </div>
+              {config.rows.length >= 2 && (
+                <div
+                  className={styles.settingsStatusRow}
+                  data-testid="toolbar-subtotals-status"
+                >
+                  <span className={styles.settingsStatusLabel}>Subtotals</span>
+                  <span className={styles.settingsStatusValue}>
+                    {subtotalsStatus}
+                  </span>
+                </div>
+              )}
+              {config.rows.length >= 2 && (
+                <div
+                  className={styles.settingsStatusRow}
+                  data-testid="toolbar-repeat-labels-status"
+                >
+                  <span className={styles.settingsStatusLabel}>
+                    Repeat Labels
+                  </span>
+                  <span className={styles.settingsStatusValue}>
+                    {repeatLabelsStatus}
+                  </span>
+                </div>
+              )}
+              {showStickyToggle && (
+                <div
+                  className={styles.settingsStatusRow}
+                  data-testid="toolbar-sticky-headers-status"
+                >
+                  <span className={styles.settingsStatusLabel}>
+                    Sticky Headers
+                  </span>
+                  <span className={styles.settingsStatusValue}>
+                    {stickyHeadersStatus}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <label
+                className={styles.checkboxLabel}
+                data-testid="toolbar-row-totals"
+                title={
+                  rowTotalsDisabled
+                    ? "Requires at least one column dimension"
+                    : undefined
                 }
-                onChange={toggleSubtotals}
-                disabled={locked}
-              />
-              <span>Subtotals</span>
-            </label>
-          )}
-          {config.rows.length >= 2 && (
-            <label
-              className={styles.checkboxLabel}
-              data-testid="toolbar-repeat-labels"
-            >
-              <input
-                type="checkbox"
-                checked={!!config.repeat_row_labels}
-                onChange={toggleRepeatLabels}
-                disabled={locked}
-              />
-              <span>Repeat Labels</span>
-            </label>
-          )}
-          {showStickyToggle && (
-            <label
-              className={styles.checkboxLabel}
-              data-testid="toolbar-sticky-headers"
-            >
-              <input
-                type="checkbox"
-                checked={config.sticky_headers !== false}
-                onChange={toggleStickyHeaders}
-                disabled={locked}
-              />
-              <span>Sticky Headers</span>
-            </label>
+              >
+                <input
+                  ref={(el) => {
+                    if (el) el.indeterminate = rowTotalsIndeterminate;
+                  }}
+                  type="checkbox"
+                  checked={showRowTotals}
+                  onChange={() => toggleRowTotals?.()}
+                  disabled={rowTotalsDisabled}
+                />
+                <span>Row Totals</span>
+              </label>
+              <label
+                className={styles.checkboxLabel}
+                data-testid="toolbar-col-totals"
+                title={
+                  colTotalsDisabled
+                    ? "Requires at least one row dimension"
+                    : undefined
+                }
+              >
+                <input
+                  ref={(el) => {
+                    if (el) el.indeterminate = colTotalsIndeterminate;
+                  }}
+                  type="checkbox"
+                  checked={showColTotals}
+                  onChange={() => toggleColumnTotals?.()}
+                  disabled={colTotalsDisabled}
+                />
+                <span>Column Totals</span>
+              </label>
+              {config.rows.length >= 2 && (
+                <label
+                  className={styles.checkboxLabel}
+                  data-testid="toolbar-subtotals"
+                >
+                  <input
+                    ref={(el) => {
+                      if (el) el.indeterminate = subtotalsIndeterminate;
+                    }}
+                    type="checkbox"
+                    checked={
+                      config.show_subtotals === true || subtotalsIndeterminate
+                    }
+                    onChange={() => toggleSubtotals?.()}
+                  />
+                  <span>Subtotals</span>
+                </label>
+              )}
+              {config.rows.length >= 2 && (
+                <label
+                  className={styles.checkboxLabel}
+                  data-testid="toolbar-repeat-labels"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!config.repeat_row_labels}
+                    onChange={() => toggleRepeatLabels?.()}
+                  />
+                  <span>Repeat Labels</span>
+                </label>
+              )}
+              {showStickyToggle && (
+                <label
+                  className={styles.checkboxLabel}
+                  data-testid="toolbar-sticky-headers"
+                >
+                  <input
+                    type="checkbox"
+                    checked={config.sticky_headers !== false}
+                    onChange={() => toggleStickyHeaders?.()}
+                  />
+                  <span>Sticky Headers</span>
+                </label>
+              )}
+            </>
           )}
           {(showRowGroups || showColGroups) && (
             <>
@@ -1878,7 +2010,7 @@ const SettingsPopover: FC<SettingsPopoverProps> = ({
                   <button
                     type="button"
                     className={styles.subtotalActionBtn}
-                    onClick={expandAllGroups}
+                    onClick={() => expandAllGroups?.()}
                     data-testid="pivot-group-toggle-expand-all"
                     aria-label="Expand all row groups"
                   >
@@ -1887,7 +2019,7 @@ const SettingsPopover: FC<SettingsPopoverProps> = ({
                   <button
                     type="button"
                     className={styles.subtotalActionBtn}
-                    onClick={collapseAllGroups}
+                    onClick={() => collapseAllGroups?.()}
                     data-testid="pivot-group-toggle-collapse-all"
                     aria-label="Collapse all row groups"
                   >
@@ -1900,7 +2032,7 @@ const SettingsPopover: FC<SettingsPopoverProps> = ({
                   <button
                     type="button"
                     className={styles.subtotalActionBtn}
-                    onClick={expandAllColGroups}
+                    onClick={() => expandAllColGroups?.()}
                     data-testid="pivot-col-group-expand-all"
                     aria-label="Expand all column groups"
                   >
@@ -1909,7 +2041,7 @@ const SettingsPopover: FC<SettingsPopoverProps> = ({
                   <button
                     type="button"
                     className={styles.subtotalActionBtn}
-                    onClick={collapseAllColGroups}
+                    onClick={() => collapseAllColGroups?.()}
                     data-testid="pivot-col-group-collapse-all"
                     aria-label="Collapse all column groups"
                   >

@@ -63,6 +63,7 @@ export interface VirtualizedTableRendererProps {
   onFilterChange?: (field: string, filter: DimensionFilter | undefined) => void;
   onConfigChange?: (config: PivotConfigV1) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
+  onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
   menuLimit?: number;
   /** When true, the wrapper becomes a flex item that fills remaining space. */
   scrollable?: boolean;
@@ -85,6 +86,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   onFilterChange,
   onConfigChange,
   onShowValuesAsChange,
+  onCollapseChange,
   menuLimit,
   scrollable,
 }): ReactElement => {
@@ -155,30 +157,30 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
 
   const handleToggleGroup = useCallback(
     (groupKeyStr: string) => {
-      if (!onConfigChange) return;
+      if (!onCollapseChange) return;
       const collapsed = new Set(config.collapsed_groups ?? []);
       if (collapsed.has(groupKeyStr)) {
         collapsed.delete(groupKeyStr);
       } else {
         collapsed.add(groupKeyStr);
       }
-      onConfigChange({ ...config, collapsed_groups: [...collapsed] });
+      onCollapseChange("row", [...collapsed].sort());
     },
-    [config, onConfigChange],
+    [config, onCollapseChange],
   );
 
   const handleToggleColGroup = useCallback(
     (groupKeyStr: string) => {
-      if (!onConfigChange) return;
+      if (!onCollapseChange) return;
       const collapsed = new Set(config.collapsed_col_groups ?? []);
       if (collapsed.has(groupKeyStr)) {
         collapsed.delete(groupKeyStr);
       } else {
         collapsed.add(groupKeyStr);
       }
-      onConfigChange({ ...config, collapsed_col_groups: [...collapsed] });
+      onCollapseChange("col", [...collapsed].sort());
     },
-    [config, onConfigChange],
+    [config, onCollapseChange],
   );
 
   const {
@@ -215,7 +217,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     () =>
       useSubtotals
         ? {
-            onToggleGroup: onConfigChange ? handleToggleGroup : undefined,
+            onToggleGroup: onCollapseChange ? handleToggleGroup : undefined,
             collapsedSet,
             subtotalsEnabled: true,
             numGroupingDims,
@@ -223,7 +225,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         : undefined,
     [
       useSubtotals,
-      onConfigChange,
+      onCollapseChange,
       handleToggleGroup,
       collapsedSet,
       numGroupingDims,
@@ -283,7 +285,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
             config,
             hasMultipleValues,
             collapsedSet.has(makeKeyString(entry.key)),
-            onConfigChange ? handleToggleGroup : undefined,
+            onCollapseChange ? handleToggleGroup : undefined,
             visibleColRange,
             onCellClick,
             onCellClick ? handleCellKeyDown : undefined,
@@ -348,9 +350,9 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         visibleColRange,
         hasHeaderMenu ? handleOpenMenu : undefined,
         menuTarget?.dimension,
-        numColDims >= 2 && onConfigChange ? handleToggleColGroup : undefined,
+        numColDims >= 2 && onCollapseChange ? handleToggleColGroup : undefined,
         pivotData,
-        onConfigChange,
+        onCollapseChange,
       );
     },
     [
@@ -362,7 +364,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       hasHeaderMenu,
       handleOpenMenu,
       menuTarget?.dimension,
-      onConfigChange,
+      onCollapseChange,
       handleToggleColGroup,
       pivotData,
     ],

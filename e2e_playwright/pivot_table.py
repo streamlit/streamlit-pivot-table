@@ -125,8 +125,8 @@ st_pivot_table(
     key="test_pivot_locked",
     rows=["Region"],
     columns=["Year"],
-    values=["Revenue"],
-    aggregation="sum",
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "avg"},
     locked=True,
     interactive=True,
     on_config_change=lambda: None,
@@ -134,7 +134,26 @@ st_pivot_table(
 
 
 # ---------------------------------------------------------------------------
-# 4. Conditional formatting -- color scale + data bars
+# 4. Locked mode with row groups
+# ---------------------------------------------------------------------------
+st.subheader("Locked Grouped Pivot")
+
+st_pivot_table(
+    df,
+    key="test_pivot_locked_groups",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue"],
+    aggregation="sum",
+    show_subtotals=True,
+    locked=True,
+    interactive=True,
+    on_config_change=lambda: None,
+)
+
+
+# ---------------------------------------------------------------------------
+# 5. Conditional formatting -- color scale + data bars
 # ---------------------------------------------------------------------------
 st.subheader("Conditional Format Pivot")
 
@@ -165,7 +184,23 @@ st_pivot_table(
 
 
 # ---------------------------------------------------------------------------
-# 5. Number formatting
+# 6. Non-interactive read-only mode
+# ---------------------------------------------------------------------------
+st.subheader("Read Only Pivot")
+
+st_pivot_table(
+    df,
+    key="test_pivot_readonly",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    aggregation="sum",
+    interactive=False,
+)
+
+
+# ---------------------------------------------------------------------------
+# 7. Number formatting
 # ---------------------------------------------------------------------------
 st.subheader("Number Format Pivot")
 
@@ -183,7 +218,7 @@ st_pivot_table(
 
 
 # ---------------------------------------------------------------------------
-# 6. Drilldown
+# 8. Drilldown
 # ---------------------------------------------------------------------------
 st.subheader("Drilldown Pivot")
 

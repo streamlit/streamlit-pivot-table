@@ -111,7 +111,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `on_cell_click` | `Callable[[], None] \| None` | `None` | Called when a user clicks a data cell. Read the payload from `st.session_state[key]`. See [Cell Click Payload](#cell-click-payload). |
 | `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config via the toolbar. |
 | `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
-| `locked` | `bool` | `False` | Freeze toolbar config controls (rows/columns/values/aggregation/settings). The entire utility menu is hidden. Sorting and filtering via header menus remain available. |
+| `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, while data export, group expand/collapse, and header-menu sorting/filtering/show-values-as remain available. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
 #### Data Control
@@ -471,7 +471,7 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
 | **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
 
-In **locked mode**, Reset, Swap, config import/export, and data export are hidden. The Settings gear remains visible, its toggles are disabled, and sorting/filtering via header menus remain available.
+In **locked mode**, Reset, Swap, and config import/export are hidden while data export remains available. The Settings gear remains visible, its popover shows read-only view status plus group expand/collapse actions, and sorting/filtering/show-values-as remain available via header menus.
 
 ---
 

@@ -39,7 +39,9 @@ PIVOT_KEYS = [
     "test_pivot",
     "test_pivot_subtotals",
     "test_pivot_locked",
+    "test_pivot_locked_groups",
     "test_pivot_cond_fmt",
+    "test_pivot_readonly",
     "test_pivot_number_fmt",
     "test_pivot_drilldown",
     "test_pivot_empty",
@@ -865,7 +867,7 @@ def test_number_format_currency(page_at_app: Page):
 
 
 def test_locked_mode_toolbar_disabled(page_at_app: Page):
-    """In locked mode, toolbar dropdowns are disabled and config buttons hidden."""
+    """In locked mode, authoring controls are hidden but viewer actions remain."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_locked")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
@@ -880,6 +882,7 @@ def test_locked_mode_toolbar_disabled(page_at_app: Page):
 
     expect(container.get_by_test_id("toolbar-rows-select")).to_have_count(0)
     expect(container.get_by_test_id("toolbar-swap")).to_have_count(0)
+    expect(container.get_by_test_id("toolbar-export-data")).to_be_visible()
     expect(container.get_by_test_id("toolbar-settings")).to_be_visible()
 
 
@@ -903,8 +906,82 @@ def test_locked_mode_header_sort_and_filter_still_work(page_at_app: Page):
     checkboxes = filter_section.locator("input[type=checkbox]")
     assert checkboxes.count() > 0
 
-    menu.get_by_test_id("header-sort-key-desc").click()
+    menu.get_by_test_id("header-sort-key-desc").evaluate("el => el.click()")
     expect(container.get_by_test_id("pivot-row-header").first).to_have_text("West")
+
+
+def test_locked_mode_show_values_as_still_works(page_at_app: Page):
+    """In locked mode, value-header display modes remain available."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_locked")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    trigger = container.get_by_test_id("header-menu-trigger-Revenue").first
+    expect(trigger).to_be_visible(timeout=5000)
+    trigger.click()
+
+    display_group = container.get_by_test_id("header-menu-display")
+    expect(display_group).to_be_visible(timeout=5000)
+    container.get_by_test_id("header-display-pct_of_total").click()
+
+    expect(container.get_by_test_id("pivot-data-cell").first).to_contain_text(
+        "%", timeout=10000
+    )
+
+
+def test_locked_mode_export_data_panel_opens(page_at_app: Page):
+    """In locked mode, export remains available as a viewer action."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_locked")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    button = container.get_by_test_id("toolbar-export-data")
+    button.scroll_into_view_if_needed()
+    button.evaluate("el => el.click()")
+    panel = page.get_by_test_id("toolbar-export-data-panel")
+    expect(panel).to_be_visible(timeout=5000)
+    expect(panel.get_by_test_id("export-format-csv")).to_be_visible()
+    expect(panel.get_by_test_id("export-content-formatted")).to_be_visible()
+
+
+def test_locked_mode_csv_download_content(page_at_app: Page):
+    """Locked mode can complete a CSV export successfully."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_locked")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    button = container.get_by_test_id("toolbar-export-data")
+    button.scroll_into_view_if_needed()
+    button.evaluate("el => el.click()")
+    panel = page.get_by_test_id("toolbar-export-data-panel")
+    expect(panel).to_be_visible(timeout=5000)
+
+    panel.get_by_test_id("export-format-csv").click()
+    panel.get_by_test_id("export-content-raw").click()
+
+    with page.expect_download() as dl_info:
+        panel.get_by_test_id("toolbar-export-data-action").click()
+
+    download = dl_info.value
+    path = download.path()
+    assert path is not None
+
+    content = Path(path).read_text()
+    assert "Region" in content
+    assert len(content.strip().splitlines()) > 1
+
+
+def test_readonly_mode_hides_toolbar_and_menu_actions(page_at_app: Page):
+    """interactive=False hides the toolbar and removes header-menu config actions."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_readonly")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.get_by_test_id("pivot-toolbar")).to_have_count(0)
+    expect(container.get_by_test_id("header-menu-trigger-Region")).to_have_count(0)
+
+    container.get_by_test_id("pivot-data-cell").first.click()
+    expect(container.get_by_test_id("drilldown-panel")).to_be_visible(timeout=5000)
 
 
 # =====================================================================
@@ -958,9 +1035,11 @@ def test_export_data_panel_opens(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-export-data").click(force=True)
+    button = container.get_by_test_id("toolbar-export-data")
+    button.scroll_into_view_if_needed()
+    button.evaluate("el => el.click()")
 
-    panel = container.get_by_test_id("toolbar-export-data-panel")
+    panel = page.get_by_test_id("toolbar-export-data-panel")
     expect(panel).to_be_visible(timeout=5000)
 
     expect(panel.get_by_test_id("export-format-csv")).to_be_visible()
@@ -1414,7 +1493,7 @@ def test_action_bar_always_visible(page_at_app: Page):
 
 
 def test_locked_mode_gear_visible_and_functional(page_at_app: Page):
-    """In locked mode, the settings gear is visible and opens the popover."""
+    """In locked mode, the settings gear opens a viewer-oriented popover."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_locked")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
@@ -1422,8 +1501,52 @@ def test_locked_mode_gear_visible_and_functional(page_at_app: Page):
     expect(container.get_by_test_id("toolbar-settings")).to_be_visible()
 
     open_settings_popover(container)
-    expect(container.get_by_test_id("toolbar-row-totals")).to_be_visible()
-    expect(container.get_by_test_id("toolbar-col-totals")).to_be_visible()
+    expect(container.get_by_test_id("toolbar-row-totals-status")).to_be_visible()
+    expect(container.get_by_test_id("toolbar-col-totals-status")).to_be_visible()
+
+
+def test_locked_mode_group_actions_still_work(page_at_app: Page):
+    """In locked mode, settings popover group actions still collapse/expand rows."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_locked_groups")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    button = container.get_by_test_id("toolbar-settings")
+    button.scroll_into_view_if_needed()
+    button.evaluate("el => el.click()")
+    panel = page.get_by_test_id("toolbar-settings-panel")
+    expect(panel).to_be_visible(timeout=5000)
+    panel.get_by_test_id("pivot-group-toggle-expand-all").click()
+
+    data_rows = container.get_by_test_id("pivot-data-row")
+    rows_expanded = data_rows.count()
+    assert rows_expanded > 0
+
+    expect(panel.get_by_test_id("toolbar-subtotals-status")).to_be_visible()
+    panel.get_by_test_id("pivot-group-toggle-collapse-all").click()
+    expect(data_rows).not_to_have_count(rows_expanded, timeout=10000)
+    rows_collapsed = data_rows.count()
+    assert rows_collapsed < rows_expanded
+
+    panel.get_by_test_id("pivot-group-toggle-expand-all").click()
+    expect(data_rows).to_have_count(rows_expanded, timeout=10000)
+
+
+def test_locked_mode_inline_row_dim_toggle_still_works(page_at_app: Page):
+    """Locked mode still allows inline row dimension toggles for group exploration."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_locked_groups")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    rows_before = container.get_by_test_id("pivot-data-row").count()
+    toggle = container.get_by_test_id("pivot-dim-toggle-row-0-region")
+    expect(toggle).to_have_attribute("aria-expanded", "true")
+
+    toggle.click()
+    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=10000)
+
+    rows_after = container.get_by_test_id("pivot-data-row").count()
+    assert rows_after < rows_before
 
 
 # =====================================================================

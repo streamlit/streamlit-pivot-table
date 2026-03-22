@@ -328,6 +328,15 @@ const PivotRoot: FC<PivotRootProps> = ({
     [currentConfig, handleConfigChange],
   );
 
+  const handleCollapseChange = useCallback(
+    (axis: "row" | "col", collapsed: string[]) => {
+      const key =
+        axis === "row" ? "collapsed_groups" : "collapsed_col_groups";
+      handleConfigChange({ ...currentConfig, [key]: collapsed });
+    },
+    [currentConfig, handleConfigChange],
+  );
+
   const safeMaxRows = useMemo(() => {
     if (!pivotData || budget?.needsVirtualization) return undefined;
     const effectiveCols = budget?.columnsTruncated
@@ -407,6 +416,9 @@ const PivotRoot: FC<PivotRootProps> = ({
             showStickyToggle={isTableScrollable}
             pivotData={pivotData ?? undefined}
             exportFilename={export_filename}
+            onCollapseChange={
+              currentConfig.interactive ? handleCollapseChange : undefined
+            }
           />
         )}
 
@@ -441,9 +453,10 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive && !locked
-                    ? handleShowValuesAsChange
-                    : undefined
+                  currentConfig.interactive ? handleShowValuesAsChange : undefined
+                }
+                onCollapseChange={
+                  currentConfig.interactive ? handleCollapseChange : undefined
                 }
                 menuLimit={menu_limit}
                 scrollable={height != null}
@@ -471,9 +484,10 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive && !locked
-                    ? handleShowValuesAsChange
-                    : undefined
+                  currentConfig.interactive ? handleShowValuesAsChange : undefined
+                }
+                onCollapseChange={
+                  currentConfig.interactive ? handleCollapseChange : undefined
                 }
                 menuLimit={menu_limit}
                 scrollable={height != null}

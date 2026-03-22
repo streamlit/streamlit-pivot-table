@@ -747,7 +747,7 @@ describe("Toolbar - locked mode", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("hides reset/swap/config buttons when locked but shows settings gear", () => {
+  it("hides authoring controls when locked but keeps viewer actions", () => {
     render(
       <Toolbar
         config={makeConfig({ aggregation: "avg" })}
@@ -756,14 +756,16 @@ describe("Toolbar - locked mode", () => {
         onConfigChange={vi.fn()}
         initialConfig={makeConfig()}
         locked={true}
+        pivotData={makePivotData()}
       />,
     );
     expect(screen.queryByTestId("toolbar-reset")).not.toBeInTheDocument();
     expect(screen.queryByTestId("toolbar-swap")).not.toBeInTheDocument();
     expect(screen.getByTestId("toolbar-settings")).toBeInTheDocument();
+    expect(screen.getByTestId("toolbar-export-data")).toBeInTheDocument();
   });
 
-  it("disables checkboxes when locked", () => {
+  it("shows read-only status rows instead of disabled checkboxes when locked", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -774,10 +776,29 @@ describe("Toolbar - locked mode", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    const rowTotalsInput = screen
-      .getByTestId("toolbar-row-totals")
-      .querySelector("input")!;
-    expect(rowTotalsInput.disabled).toBe(true);
+    expect(screen.getByTestId("toolbar-row-totals-status")).toHaveTextContent(
+      "Row Totals",
+    );
+    expect(screen.getByTestId("toolbar-col-totals-status")).toHaveTextContent(
+      "Column Totals",
+    );
+    expect(screen.queryByTestId("toolbar-row-totals")).not.toBeInTheDocument();
+  });
+
+  it("shows N/A for totals that are not applicable in locked mode", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: ["region"], columns: [] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        locked={true}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("toolbar-row-totals-status")).toHaveTextContent(
+      "N/A",
+    );
   });
 });
 
@@ -941,13 +962,13 @@ describe("Toolbar - Expand All / Collapse All regression", () => {
         })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={handleChange}
+        onCollapseChange={handleChange}
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     fireEvent.click(screen.getByTestId("pivot-group-toggle-collapse-all"));
     expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].collapsed_groups).toEqual(["__ALL__"]);
+    expect(handleChange).toHaveBeenCalledWith("row", ["__ALL__"]);
   });
 
   it("Expand All clears collapsed_groups to empty array", () => {
@@ -961,13 +982,13 @@ describe("Toolbar - Expand All / Collapse All regression", () => {
         })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={handleChange}
+        onCollapseChange={handleChange}
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     fireEvent.click(screen.getByTestId("pivot-group-toggle-expand-all"));
     expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].collapsed_groups).toEqual([]);
+    expect(handleChange).toHaveBeenCalledWith("row", []);
   });
 
   it("Collapse Columns sets collapsed_col_groups to __ALL__", () => {
@@ -977,15 +998,13 @@ describe("Toolbar - Expand All / Collapse All regression", () => {
         config={makeConfig({ columns: ["year", "quarter"] })}
         allColumns={[...ALL_COLUMNS, "quarter"]}
         numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={handleChange}
+        onCollapseChange={handleChange}
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     fireEvent.click(screen.getByTestId("pivot-col-group-collapse-all"));
     expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].collapsed_col_groups).toEqual([
-      "__ALL__",
-    ]);
+    expect(handleChange).toHaveBeenCalledWith("col", ["__ALL__"]);
   });
 
   it("Expand Columns clears collapsed_col_groups", () => {
@@ -998,13 +1017,13 @@ describe("Toolbar - Expand All / Collapse All regression", () => {
         })}
         allColumns={[...ALL_COLUMNS, "quarter"]}
         numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={handleChange}
+        onCollapseChange={handleChange}
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     fireEvent.click(screen.getByTestId("pivot-col-group-expand-all"));
     expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].collapsed_col_groups).toEqual([]);
+    expect(handleChange).toHaveBeenCalledWith("col", []);
   });
 });
 
@@ -1021,16 +1040,11 @@ describe("Toolbar - locked mode + filtering integration", () => {
       />,
     );
     expect(screen.getByTestId("pivot-toolbar")).toBeInTheDocument();
-    // Open settings popover to access checkboxes
-    fireEvent.click(screen.getByTestId("toolbar-settings"));
-    const rowTotalsInput = screen
-      .getByTestId("toolbar-row-totals")
-      .querySelector("input")!;
-    expect(rowTotalsInput.disabled).toBe(true);
-    // Filter indicator should still show (filtering state is visible)
     expect(
       screen.getByTestId("toolbar-rows-filter-indicator-region"),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("toolbar-row-totals-status")).toBeInTheDocument();
     expect(
       screen.queryByTestId("toolbar-rows-remove-region"),
     ).not.toBeInTheDocument();
@@ -1142,10 +1156,40 @@ describe("Toolbar - settings popover", () => {
     expect(screen.getByTestId("toolbar-settings")).toBeInTheDocument();
   });
 
-  it("locked mode gear popover has disabled checkboxes", () => {
+  it("locked mode gear popover shows status rows and group actions", () => {
+    const onCollapseChange = vi.fn();
     render(
       <Toolbar
-        config={makeConfig()}
+        config={makeConfig({
+          rows: ["region", "category"],
+          show_subtotals: ["region"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        locked={true}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("toolbar-subtotals-status")).toHaveTextContent(
+      "region",
+    );
+    expect(screen.queryByTestId("toolbar-row-totals")).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("pivot-group-toggle-collapse-all"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("pivot-group-toggle-collapse-all"));
+    expect(onCollapseChange).toHaveBeenCalledWith("row", ["__ALL__"]);
+  });
+
+  it("omits group actions when collapse callbacks are not provided", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region", "category"],
+          show_subtotals: ["region"],
+        })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={vi.fn()}
@@ -1153,14 +1197,9 @@ describe("Toolbar - settings popover", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    const rowTotalsInput = screen
-      .getByTestId("toolbar-row-totals")
-      .querySelector("input")!;
-    expect(rowTotalsInput.disabled).toBe(true);
-    const colTotalsInput = screen
-      .getByTestId("toolbar-col-totals")
-      .querySelector("input")!;
-    expect(colTotalsInput.disabled).toBe(true);
+    expect(
+      screen.queryByTestId("pivot-group-toggle-collapse-all"),
+    ).not.toBeInTheDocument();
   });
 
   it("toggles closed when gear clicked again", () => {

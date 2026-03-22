@@ -101,7 +101,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `on_cell_click` | `Callable[[], None] \| None` | `None` | Called when a user clicks a data cell. Read the payload from `st.session_state[key]`. |
 | `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config interactively, including toolbar and header-menu actions. |
 | `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
-| `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls and settings toggles are disabled, while header-menu sorting/filtering and drill-down remain available. |
+| `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, viewer-safe actions like data export and group expand/collapse remain available, and header-menu sorting/filtering/`Show Values As` plus drill-down still work. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
 #### Data Control
@@ -428,7 +428,7 @@ Hover over a parent column header to reveal the collapse toggle.
 
 ### Data Export
 
-Export the pivot table as CSV, TSV, or copy to clipboard. Available via the toolbar utility menu (download icon) when `interactive=True`.
+Export the pivot table as CSV, TSV, or copy to clipboard. Available via the toolbar utility menu (download icon) whenever the interactive toolbar is shown, including locked viewer mode.
 
 - **Format**: CSV, TSV, or Clipboard (tab-separated for pasting into spreadsheets)
 - **Content**: Formatted (display values with currency, percentages, etc.) or Raw (unformatted numbers)
@@ -458,7 +458,7 @@ result = st_pivot_table(
 
 ### Locked Mode
 
-Use `locked=True` for a viewer-mode experience with exploration enabled. Toolbar config controls stay locked so end-users cannot change rows, columns, values, per-measure aggregation, or settings toggles. Reset, Swap, config import/export, and data export are hidden, while the Settings gear remains visible so users can inspect settings and use Expand/Collapse All group controls. Header-menu sorting and filtering remain available, and drill-down still works.
+Use `locked=True` for a viewer-mode experience with exploration enabled. Toolbar config controls stay locked so end-users cannot change rows, columns, values, per-measure aggregation, or settings toggles. Reset, Swap, and config import/export are hidden, while data export remains available and the Settings gear stays visible for read-only display status plus Expand/Collapse All group controls. Header-menu sorting, filtering, and `Show Values As` remain available, and drill-down still works.
 
 ```python
 st_pivot_table(
@@ -484,7 +484,7 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
 | **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
 
-In **locked mode**, Reset, Swap, config import/export, and data export are hidden. The Settings gear remains visible, settings toggles are disabled, group expand/collapse actions remain available, and header-menu sorting and filtering stay enabled.
+In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings gear remains visible, its popover shows read-only display status plus group expand/collapse actions, and header-menu sorting, filtering, and `Show Values As` stay enabled.
 
 ### Non-Interactive Mode
 

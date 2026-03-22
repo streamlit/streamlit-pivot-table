@@ -497,9 +497,9 @@ def st_pivot_table(
         of values in the desired order.
     locked : bool
         If True, toolbar config controls are disabled. The settings gear stays
-        visible so users can inspect settings and expand/collapse groups, but
-        settings toggles are disabled. Header-menu sorting and filtering remain
-        available. Defaults to False.
+        visible so users can inspect current view status and expand/collapse
+        groups. Data export plus header-menu sorting, filtering, and show-values-as
+        remain available. Defaults to False.
     menu_limit : int or None
         Max items to show in the header-menu filter checklist. Defaults
         to 50 when None.
