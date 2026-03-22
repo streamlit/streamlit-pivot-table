@@ -32,6 +32,8 @@ import {
   DEFAULT_CONFIG,
   getRenderedValueFields,
   isSyntheticMeasure,
+  stringifyPivotConfig,
+  validatePivotConfigV1,
   type PivotConfigV1,
   type PivotTableData,
   type ShowValuesAs,
@@ -95,9 +97,13 @@ const PivotRoot: FC<PivotRootProps> = ({
   // Detect when Python intentionally sends a *new* config (as opposed to
   // re-sending the same config on a rerun). When the prop changes, discard
   // local overrides so the new Python config takes effect.
-  const propConfigJson = useMemo(
-    () => JSON.stringify(configProp),
+  const normalizedPropConfig = useMemo(
+    () => validatePivotConfigV1(configProp ?? DEFAULT_CONFIG),
     [configProp],
+  );
+  const propConfigJson = useMemo(
+    () => stringifyPivotConfig(normalizedPropConfig),
+    [normalizedPropConfig],
   );
   const prevPropJsonRef = useRef(propConfigJson);
   if (propConfigJson !== prevPropJsonRef.current) {
@@ -107,7 +113,7 @@ const PivotRoot: FC<PivotRootProps> = ({
     }
   }
 
-  const currentConfig = localConfig ?? configProp ?? DEFAULT_CONFIG;
+  const currentConfig = localConfig ?? normalizedPropConfig;
   const [isTableScrollable, setIsTableScrollable] = useState(false);
   const [drilldownPayload, setDrilldownPayload] =
     useState<CellClickPayload | null>(null);
@@ -116,7 +122,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   const initialConfig = initialConfigRef.current;
 
   const currentConfigJson = useMemo(
-    () => JSON.stringify(currentConfig),
+    () => stringifyPivotConfig(currentConfig),
     [currentConfig],
   );
 
@@ -259,7 +265,7 @@ const PivotRoot: FC<PivotRootProps> = ({
 
   const handleConfigChange = useCallback(
     (newConfig: PivotConfigV1) => {
-      if (JSON.stringify(newConfig) !== currentConfigJson) {
+      if (stringifyPivotConfig(newConfig) !== currentConfigJson) {
         setLocalConfig(newConfig);
         setStateValue("config", newConfig);
       }

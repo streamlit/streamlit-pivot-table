@@ -21,13 +21,14 @@ import {
   createAggregator,
   getAggregatorFactory,
 } from "./aggregators";
-import type {
-  DimensionFilter,
-  NullHandlingConfig,
-  NullHandlingMode,
-  PivotConfigV1,
-  SyntheticMeasureConfig,
-  SortConfig,
+import {
+  getAggregationForField,
+  type DimensionFilter,
+  type NullHandlingConfig,
+  type NullHandlingMode,
+  type PivotConfigV1,
+  type SyntheticMeasureConfig,
+  type SortConfig,
 } from "./types";
 import { formatNumber } from "./formatters";
 
@@ -87,7 +88,6 @@ export function mixedCompare(a: string, b: string): number {
  */
 export class PivotData {
   private readonly _config: PivotConfigV1;
-  private readonly _factory: AggregatorFactory;
   private readonly _records: DataRecord[];
   private readonly _options: PivotDataOptions;
 
@@ -96,6 +96,7 @@ export class PivotData {
   /** Synthetic measure lookup by id. */
   private readonly _syntheticById: Map<string, SyntheticMeasureConfig>;
   private readonly _hasSyntheticMeasures: boolean;
+  private readonly _factoriesByField: Map<string, AggregatorFactory>;
 
   private readonly _rowKeySet: Map<string, string[]> = new Map();
   private readonly _colKeySet: Map<string, string[]> = new Map();
@@ -124,7 +125,6 @@ export class PivotData {
     options?: PivotDataOptions,
   ) {
     this._config = config;
-    this._factory = getAggregatorFactory(config.aggregation);
     this._records = records;
     this._options = options ?? {};
     this._syntheticById = new Map(
@@ -137,9 +137,18 @@ export class PivotData {
     this._allAggregatedFields = [
       ...new Set([...config.values, ...syntheticSourceFields]),
     ];
+    this._factoriesByField = new Map(
+      this._allAggregatedFields.map((field) => [
+        field,
+        getAggregatorFactory(getAggregationForField(field, config)),
+      ]),
+    );
 
     for (const valField of this._allAggregatedFields) {
-      this._grandTotalAggs.set(valField, this._factory.create());
+      this._grandTotalAggs.set(
+        valField,
+        this._factoryForField(valField).create(),
+      );
       if (this._hasSyntheticMeasures) {
         this._grandTotalSumAggs.set(valField, createAggregator("sum"));
       }
@@ -151,6 +160,13 @@ export class PivotData {
   private _defaultValueField(): string {
     return (
       this._config.values[0] ?? this._config.synthetic_measures?.[0]?.id ?? ""
+    );
+  }
+
+  private _factoryForField(valField: string): AggregatorFactory {
+    return (
+      this._factoriesByField.get(valField) ??
+      getAggregatorFactory(getAggregationForField(valField, this._config))
     );
   }
 
@@ -261,7 +277,7 @@ export class PivotData {
         const cellKeyStr = `${rowKeyStr}\x01${colKeyStr}\x01${valField}`;
         let cellAgg = this._cellAggs.get(cellKeyStr);
         if (!cellAgg) {
-          cellAgg = this._factory.create();
+          cellAgg = this._factoryForField(valField).create();
           this._cellAggs.set(cellKeyStr, cellAgg);
         }
         this._pushToAgg(cellAgg, record, valField);
@@ -277,7 +293,7 @@ export class PivotData {
         const rowTotalKeyStr = `${rowKeyStr}\x01${valField}`;
         let rowTotalAgg = this._rowTotalAggs.get(rowTotalKeyStr);
         if (!rowTotalAgg) {
-          rowTotalAgg = this._factory.create();
+          rowTotalAgg = this._factoryForField(valField).create();
           this._rowTotalAggs.set(rowTotalKeyStr, rowTotalAgg);
         }
         this._pushToAgg(rowTotalAgg, record, valField);
@@ -293,7 +309,7 @@ export class PivotData {
         const colTotalKeyStr = `${colKeyStr}\x01${valField}`;
         let colTotalAgg = this._colTotalAggs.get(colTotalKeyStr);
         if (!colTotalAgg) {
-          colTotalAgg = this._factory.create();
+          colTotalAgg = this._factoryForField(valField).create();
           this._colTotalAggs.set(colTotalKeyStr, colTotalAgg);
         }
         this._pushToAgg(colTotalAgg, record, valField);
@@ -492,7 +508,7 @@ export class PivotData {
     const keyStr = `${makeKeyString(rowKey)}\x01${makeKeyString(colKey)}\x01${field}`;
     const agg = this._cellAggs.get(keyStr);
     if (!agg) {
-      return this._factory.create();
+      return this._factoryForField(field).create();
     }
     return agg;
   }
@@ -510,7 +526,7 @@ export class PivotData {
     const keyStr = `${makeKeyString(rowKey)}\x01${field}`;
     const agg = this._rowTotalAggs.get(keyStr);
     if (!agg) {
-      return this._factory.create();
+      return this._factoryForField(field).create();
     }
     return agg;
   }
@@ -528,7 +544,7 @@ export class PivotData {
     const keyStr = `${makeKeyString(colKey)}\x01${field}`;
     const agg = this._colTotalAggs.get(keyStr);
     if (!agg) {
-      return this._factory.create();
+      return this._factoryForField(field).create();
     }
     return agg;
   }
@@ -546,7 +562,7 @@ export class PivotData {
     }
     const agg = this._grandTotalAggs.get(field);
     if (!agg) {
-      return this._factory.create();
+      return this._factoryForField(field).create();
     }
     return agg;
   }
@@ -590,7 +606,7 @@ export class PivotData {
           const cellKey = `${parentKeyStr}\x01${colKeyStr}\x01${valField}`;
           let cellAgg = this._subtotalAggs.get(cellKey);
           if (!cellAgg) {
-            cellAgg = this._factory.create();
+            cellAgg = this._factoryForField(valField).create();
             this._subtotalAggs.set(cellKey, cellAgg);
           }
           this._pushToAgg(cellAgg, record, valField);
@@ -609,7 +625,7 @@ export class PivotData {
             const rowTotalKey = `${parentKeyStr}\x01\x01${valField}`;
             let rowAgg = this._subtotalAggs.get(rowTotalKey);
             if (!rowAgg) {
-              rowAgg = this._factory.create();
+              rowAgg = this._factoryForField(valField).create();
               this._subtotalAggs.set(rowTotalKey, rowAgg);
             }
             this._pushToAgg(rowAgg, record, valField);
@@ -652,7 +668,7 @@ export class PivotData {
       return this._fixedAggregator(value);
     }
     const key = `${parentKeyStr}\x01${colKeyStr}\x01${field}`;
-    return aggs.get(key) ?? this._factory.create();
+    return aggs.get(key) ?? this._factoryForField(field).create();
   }
 
   /**
@@ -801,7 +817,7 @@ export class PivotData {
           const cellKey = `${rowKeyStr}\x01${colPrefixStr}\x01${valField}`;
           let cellAgg = this._colSubtotalAggs.get(cellKey);
           if (!cellAgg) {
-            cellAgg = this._factory.create();
+            cellAgg = this._factoryForField(valField).create();
             this._colSubtotalAggs.set(cellKey, cellAgg);
           }
           this._pushToAgg(cellAgg, record, valField);
@@ -818,7 +834,7 @@ export class PivotData {
           const grandKey = `${emptyRowKeyStr}\x01${colPrefixStr}\x01${valField}`;
           let grandAgg = this._colSubtotalAggs.get(grandKey);
           if (!grandAgg) {
-            grandAgg = this._factory.create();
+            grandAgg = this._factoryForField(valField).create();
             this._colSubtotalAggs.set(grandKey, grandAgg);
           }
           this._pushToAgg(grandAgg, record, valField);
@@ -839,7 +855,7 @@ export class PivotData {
               const crossKey = `${parentKeyStr}\x01${colPrefixStr}\x01${valField}`;
               let crossAgg = this._crossSubtotalAggs!.get(crossKey);
               if (!crossAgg) {
-                crossAgg = this._factory.create();
+                crossAgg = this._factoryForField(valField).create();
                 this._crossSubtotalAggs!.set(crossKey, crossAgg);
               }
               this._pushToAgg(crossAgg, record, valField);
@@ -881,7 +897,7 @@ export class PivotData {
       return this._fixedAggregator(value);
     }
     const key = `${rowKeyStr}\x01${colPrefixStr}\x01${field}`;
-    return aggs.get(key) ?? this._factory.create();
+    return aggs.get(key) ?? this._factoryForField(field).create();
   }
 
   /**
@@ -901,7 +917,7 @@ export class PivotData {
       return this._fixedAggregator(value);
     }
     const key = `${makeKeyString([])}\x01${colPrefixStr}\x01${field}`;
-    return aggs.get(key) ?? this._factory.create();
+    return aggs.get(key) ?? this._factoryForField(field).create();
   }
 
   /**
@@ -926,7 +942,9 @@ export class PivotData {
       return this._fixedAggregator(value);
     }
     const key = `${parentKeyStr}\x01${colPrefixStr}\x01${field}`;
-    return this._crossSubtotalAggs!.get(key) ?? this._factory.create();
+    return (
+      this._crossSubtotalAggs!.get(key) ?? this._factoryForField(field).create()
+    );
   }
 
   // ---------------------------------------------------------------------------

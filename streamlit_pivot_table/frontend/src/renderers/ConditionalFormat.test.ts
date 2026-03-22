@@ -17,26 +17,37 @@
 
 import { describe, expect, it } from "vitest";
 import { PivotData, type DataRecord } from "../engine/PivotData";
-import type {
-  PivotConfigV1,
-  ColorScaleRule,
-  DataBarsRule,
-  ThresholdRule,
+import {
+  normalizeAggregationConfig,
+  type AggregationConfig,
+  type AggregationType,
+  type PivotConfigV1,
+  type ColorScaleRule,
+  type DataBarsRule,
+  type ThresholdRule,
 } from "../engine/types";
 import { computeCellStyle, computeColumnStats } from "./ConditionalFormat";
 
-function makeConfig(overrides: Partial<PivotConfigV1> = {}): PivotConfigV1 {
-  return {
+type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
+  aggregation?: AggregationType | AggregationConfig;
+};
+
+function makeConfig(overrides: TestConfigOverrides = {}): PivotConfigV1 {
+  const { aggregation: aggregationOverride, ...restOverrides } = overrides;
+  const values = overrides.values ?? ["revenue"];
+  const config = {
     version: 1,
     rows: ["region"],
     columns: ["year"],
-    values: ["revenue"],
-    aggregation: "sum",
+    values,
     show_totals: true,
     empty_cell_value: "-",
     interactive: true,
-    ...overrides,
-  };
+    ...restOverrides,
+  } as PivotConfigV1;
+  config.values = values;
+  config.aggregation = normalizeAggregationConfig(aggregationOverride, values);
+  return config;
 }
 
 const SAMPLE_DATA: DataRecord[] = [

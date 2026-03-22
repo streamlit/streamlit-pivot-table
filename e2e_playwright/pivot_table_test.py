@@ -61,6 +61,7 @@ PIVOT_KEYS = [
     "test_pivot_per_measure_col_totals",
     "test_pivot_sparse_drilldown",
     "test_pivot_synthetic",
+    "test_pivot_scalar_roundtrip",
 ]
 
 
@@ -161,8 +162,9 @@ def test_aggregation_change_via_toolbar(page_at_app: Page):
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
     expect(page.get_by_text("Config change count: 0")).to_be_visible()
 
-    container.get_by_test_id("toolbar-aggregation-trigger").click()
-    container.get_by_test_id("toolbar-aggregation-option-avg").click()
+    container.get_by_test_id("toolbar-values-select").click()
+    container.get_by_test_id("toolbar-values-aggregation-Revenue-trigger").click()
+    container.get_by_test_id("toolbar-values-aggregation-Revenue-option-avg").click()
 
     expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
 
@@ -186,8 +188,9 @@ def test_state_persists_across_rerun(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-aggregation-trigger").click()
-    container.get_by_test_id("toolbar-aggregation-option-min").click()
+    container.get_by_test_id("toolbar-values-select").click()
+    container.get_by_test_id("toolbar-values-aggregation-Revenue-trigger").click()
+    container.get_by_test_id("toolbar-values-aggregation-Revenue-option-min").click()
     expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
 
     page.get_by_role("button", name="Trigger rerun").scroll_into_view_if_needed()
@@ -195,8 +198,9 @@ def test_state_persists_across_rerun(page_at_app: Page):
     expect(page.get_by_text("Reruns:")).to_be_visible(timeout=10000)
 
     container = get_pivot(page, "test_pivot")
-    agg_after = container.get_by_test_id("toolbar-aggregation")
-    expect(agg_after).to_have_attribute("data-value", "min")
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Min)"
+    )
 
 
 def test_wide_table_horizontal_scroll_alignment(page_at_app: Page):
@@ -307,6 +311,82 @@ def test_toolbar_add_value_field(page_at_app: Page):
     value_labels = container.get_by_test_id("pivot-value-label")
     expect(value_labels).not_to_have_count(initial_labels, timeout=10000)
     assert value_labels.count() > initial_labels
+
+
+def test_toolbar_per_measure_aggregation_controls(page_at_app: Page):
+    """Values UI supports setting different aggregations per raw measure."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cond_fmt")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    container.get_by_test_id("toolbar-values-select").click()
+    expect(
+        container.get_by_test_id("toolbar-values-aggregation-controls")
+    ).to_be_visible(timeout=5000)
+    profit_trigger = container.get_by_test_id(
+        "toolbar-values-aggregation-Profit-trigger"
+    )
+    profit_trigger.scroll_into_view_if_needed()
+    profit_trigger.evaluate("el => el.click()")
+    container.get_by_test_id("toolbar-values-aggregation-Profit-option-count").click()
+
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Sum)", timeout=10000
+    )
+    expect(container.get_by_test_id("toolbar-values-chip-label-Profit")).to_have_text(
+        "Profit (Count)", timeout=10000
+    )
+
+
+def test_scalar_aggregation_roundtrip_persists_and_python_override_wins(
+    page_at_app: Page,
+):
+    """Scalar Python aggregation hydrates to a map, persists, then yields to Python changes."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_scalar_roundtrip")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    container.get_by_test_id("toolbar-values-select").click()
+    expect(
+        container.get_by_test_id("toolbar-values-aggregation-controls")
+    ).to_be_visible(timeout=5000)
+    profit_trigger = container.get_by_test_id(
+        "toolbar-values-aggregation-Profit-trigger"
+    )
+    profit_trigger.scroll_into_view_if_needed()
+    profit_trigger.evaluate("el => el.click()")
+    container.get_by_test_id("toolbar-values-aggregation-Profit-option-count").click()
+
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Sum)", timeout=10000
+    )
+    expect(container.get_by_test_id("toolbar-values-chip-label-Profit")).to_have_text(
+        "Profit (Count)", timeout=10000
+    )
+
+    page.get_by_role("button", name="Trigger scalar roundtrip rerun").click()
+    expect(page.get_by_text("Reruns:")).to_be_visible(timeout=10000)
+
+    container = get_pivot(page, "test_pivot_scalar_roundtrip")
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Sum)", timeout=10000
+    )
+    expect(container.get_by_test_id("toolbar-values-chip-label-Profit")).to_have_text(
+        "Profit (Count)", timeout=10000
+    )
+
+    page.get_by_role("button", name="Set scalar aggregation to avg").click()
+    expect(page.get_by_text("Scalar roundtrip aggregation: avg")).to_be_visible(
+        timeout=10000
+    )
+
+    container = get_pivot(page, "test_pivot_scalar_roundtrip")
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Avg)", timeout=10000
+    )
+    expect(container.get_by_test_id("toolbar-values-chip-label-Profit")).to_have_text(
+        "Profit (Avg)", timeout=10000
+    )
 
 
 def test_toolbar_swap_rows_columns(page_at_app: Page):
@@ -420,15 +500,18 @@ def test_toolbar_reset_config(page_at_app: Page):
 
     expect(container.get_by_test_id("toolbar-reset")).to_have_count(0)
 
-    container.get_by_test_id("toolbar-aggregation-trigger").click()
-    container.get_by_test_id("toolbar-aggregation-option-avg").click()
+    container.get_by_test_id("toolbar-values-select").click()
+    container.get_by_test_id("toolbar-values-aggregation-Revenue-trigger").click()
+    container.get_by_test_id("toolbar-values-aggregation-Revenue-option-avg").click()
 
     expect(container.get_by_test_id("toolbar-reset")).to_be_visible(timeout=10000)
 
+    container.get_by_test_id("toolbar-values-select").click()
     container.get_by_test_id("toolbar-reset").click(force=True)
 
-    agg = container.get_by_test_id("toolbar-aggregation")
-    expect(agg).to_have_attribute("data-value", "sum", timeout=10000)
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Sum)", timeout=10000
+    )
     expect(container.get_by_test_id("toolbar-reset")).to_have_count(0, timeout=10000)
 
 
@@ -985,19 +1068,19 @@ def test_config_import_apply(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-export").click(force=True)
-    page.wait_for_function(
-        "async () => { try { const t = await navigator.clipboard.readText();"
-        " return t.startsWith('{'); } catch { return false; } }",
-        timeout=5000,
+    new_json = json.dumps(
+        {
+            "version": 1,
+            "rows": ["Region"],
+            "columns": ["Year"],
+            "values": ["Revenue"],
+            "aggregation": {"Revenue": "max"},
+        }
     )
-    clip = page.evaluate("() => navigator.clipboard.readText()")
-    config = json.loads(clip)
 
-    config["aggregation"] = "max"
-    new_json = json.dumps(config)
-
-    container.get_by_test_id("toolbar-import-toggle").click(force=True)
+    import_toggle = container.get_by_test_id("toolbar-import-toggle")
+    import_toggle.scroll_into_view_if_needed()
+    import_toggle.evaluate("el => el.click()")
     expect(container.get_by_test_id("toolbar-import-panel")).to_be_visible(timeout=5000)
 
     textarea = container.get_by_test_id("toolbar-import-textarea")
@@ -1005,8 +1088,9 @@ def test_config_import_apply(page_at_app: Page):
 
     container.get_by_test_id("toolbar-import-apply").click()
 
-    agg = container.get_by_test_id("toolbar-aggregation")
-    expect(agg).to_have_attribute("data-value", "max", timeout=10000)
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Max)", timeout=10000
+    )
 
 
 # =====================================================================
@@ -1264,7 +1348,9 @@ def test_config_import_invalid_json_no_crash(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-import-toggle").click(force=True)
+    import_toggle = container.get_by_test_id("toolbar-import-toggle")
+    import_toggle.scroll_into_view_if_needed()
+    import_toggle.evaluate("el => el.click()")
     expect(container.get_by_test_id("toolbar-import-panel")).to_be_visible(timeout=5000)
 
     textarea = container.get_by_test_id("toolbar-import-textarea")
@@ -1274,8 +1360,9 @@ def test_config_import_invalid_json_no_crash(page_at_app: Page):
 
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=5000)
 
-    agg = container.get_by_test_id("toolbar-aggregation")
-    expect(agg).to_have_attribute("data-value", "sum")
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Sum)"
+    )
 
 
 # =====================================================================

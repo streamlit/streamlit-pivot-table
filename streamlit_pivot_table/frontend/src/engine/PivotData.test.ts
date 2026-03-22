@@ -24,23 +24,33 @@ import {
 } from "./PivotData";
 import {
   AGGREGATOR_CLASS,
+  normalizeAggregationConfig,
+  type AggregationConfig,
   type AggregationType,
   type PivotConfigV1,
 } from "./types";
 import { measureSync, DEFAULT_BUDGETS } from "./perf";
 
-function makeConfig(overrides: Partial<PivotConfigV1> = {}): PivotConfigV1 {
-  return {
+type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
+  aggregation?: AggregationType | AggregationConfig;
+};
+
+function makeConfig(overrides: TestConfigOverrides = {}): PivotConfigV1 {
+  const { aggregation: aggregationOverride, ...restOverrides } = overrides;
+  const values = overrides.values ?? ["revenue"];
+  const config = {
     version: 1,
     rows: ["region"],
     columns: ["year"],
-    values: ["revenue"],
-    aggregation: "sum",
+    values,
     show_totals: true,
     empty_cell_value: "-",
     interactive: true,
-    ...overrides,
-  };
+    ...restOverrides,
+  } as PivotConfigV1;
+  config.values = values;
+  config.aggregation = normalizeAggregationConfig(aggregationOverride, values);
+  return config;
 }
 
 const SAMPLE_DATA: DataRecord[] = [
@@ -98,6 +108,20 @@ describe("PivotData - multiple values", () => {
     expect(pd.getAggregator(["US"], ["2023"], "revenue").value()).toBe(150);
     expect(pd.getAggregator(["US"], ["2023"], "profit").value()).toBe(60);
     expect(pd.getRowTotal(["US"], "profit").value()).toBe(120);
+  });
+
+  it("applies different aggregations to different value fields in the same pivot", () => {
+    const config = makeConfig({
+      values: ["revenue", "profit"],
+      aggregation: { revenue: "sum", profit: "avg" },
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+
+    expect(pd.getAggregator(["US"], ["2023"], "revenue").value()).toBe(150);
+    expect(pd.getAggregator(["US"], ["2023"], "profit").value()).toBe(30);
+
+    expect(pd.getGrandTotal("revenue").value()).toBe(750);
+    expect(pd.getGrandTotal("profit").value()).toBe(60);
   });
 
   it("computes per-field grand totals", () => {
@@ -1093,20 +1117,18 @@ describe("PivotData - performance budgets", () => {
 // ---------------------------------------------------------------------------
 
 const MULTI_ROW_DATA: DataRecord[] = [
-  { region: "US", state: "CA", year: "2023", revenue: 100 },
-  { region: "US", state: "CA", year: "2024", revenue: 150 },
-  { region: "US", state: "NY", year: "2023", revenue: 80 },
-  { region: "US", state: "NY", year: "2024", revenue: 120 },
-  { region: "EU", state: "DE", year: "2023", revenue: 200 },
-  { region: "EU", state: "DE", year: "2024", revenue: 250 },
-  { region: "EU", state: "FR", year: "2023", revenue: 180 },
-  { region: "EU", state: "FR", year: "2024", revenue: 220 },
+  { region: "US", state: "CA", year: "2023", revenue: 100, profit: 30 },
+  { region: "US", state: "CA", year: "2024", revenue: 150, profit: 45 },
+  { region: "US", state: "NY", year: "2023", revenue: 80, profit: 10 },
+  { region: "US", state: "NY", year: "2024", revenue: 120, profit: 25 },
+  { region: "EU", state: "DE", year: "2023", revenue: 200, profit: 60 },
+  { region: "EU", state: "DE", year: "2024", revenue: 250, profit: 70 },
+  { region: "EU", state: "FR", year: "2023", revenue: 180, profit: 20 },
+  { region: "EU", state: "FR", year: "2024", revenue: 220, profit: 50 },
 ];
 
 describe("PivotData - subtotals (Phase 3a)", () => {
-  function multiRowConfig(
-    overrides: Partial<PivotConfigV1> = {},
-  ): PivotConfigV1 {
+  function multiRowConfig(overrides: TestConfigOverrides = {}): PivotConfigV1 {
     return makeConfig({
       rows: ["region", "state"],
       columns: ["year"],
@@ -1156,6 +1178,26 @@ describe("PivotData - subtotals (Phase 3a)", () => {
     expect(pd.getSubtotalAggregator(["EU"], ["2023"], "revenue").value()).toBe(
       190,
     );
+  });
+
+  it("subtotals apply mixed aggregations per field", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      multiRowConfig({
+        values: ["revenue", "profit"],
+        aggregation: { revenue: "sum", profit: "avg" },
+      }),
+    );
+
+    expect(pd.getSubtotalAggregator(["US"], ["2023"], "revenue").value()).toBe(
+      180,
+    );
+    expect(pd.getSubtotalAggregator(["US"], ["2023"], "profit").value()).toBe(
+      20,
+    );
+
+    expect(pd.getSubtotalAggregator(["EU"], [], "revenue").value()).toBe(850);
+    expect(pd.getSubtotalAggregator(["EU"], [], "profit").value()).toBe(50);
   });
 
   it("getGroupedRowKeys returns data rows and subtotal rows", () => {
@@ -1275,9 +1317,7 @@ const MULTI_COL_DATA: DataRecord[] = [
 ];
 
 describe("PivotData - column group subtotals (Phase 3a)", () => {
-  function multiColConfig(
-    overrides: Partial<PivotConfigV1> = {},
-  ): PivotConfigV1 {
+  function multiColConfig(overrides: TestConfigOverrides = {}): PivotConfigV1 {
     return makeConfig({
       rows: ["region"],
       columns: ["year", "quarter"],

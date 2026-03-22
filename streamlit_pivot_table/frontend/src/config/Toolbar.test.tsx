@@ -54,7 +54,7 @@ describe("Toolbar - rendering", () => {
     );
   });
 
-  it("renders aggregation dropdown with all types", () => {
+  it("renders measure aggregation controls inside the Values dropdown", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -63,12 +63,13 @@ describe("Toolbar - rendering", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    const aggWrapper = screen.getByTestId("toolbar-aggregation");
-    expect(aggWrapper).toHaveAttribute("data-value", "sum");
-
-    fireEvent.click(screen.getByTestId("toolbar-aggregation-trigger"));
-    const panel = screen.getByTestId("toolbar-aggregation-panel");
-    expect(panel.querySelectorAll("button")).toHaveLength(10);
+    fireEvent.click(screen.getByTestId("toolbar-values-select"));
+    expect(
+      screen.getByTestId("toolbar-values-aggregation-controls"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("toolbar-values-aggregation-revenue-trigger"),
+    ).toHaveTextContent("Sum");
   });
 
   it("shows count badge with selected count", () => {
@@ -86,7 +87,31 @@ describe("Toolbar - rendering", () => {
 });
 
 describe("Toolbar - interactions", () => {
-  it("fires onConfigChange when aggregation changes", () => {
+  it("fires onConfigChange when a value aggregation changes", () => {
+    const handleChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({ values: ["revenue", "profit"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={handleChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-values-select"));
+    fireEvent.click(
+      screen.getByTestId("toolbar-values-aggregation-revenue-trigger"),
+    );
+    fireEvent.click(
+      screen.getByTestId("toolbar-values-aggregation-revenue-option-avg"),
+    );
+    expect(handleChange).toHaveBeenCalledTimes(1);
+    expect(handleChange.mock.calls[0][0].aggregation).toEqual({
+      revenue: "avg",
+      profit: "sum",
+    });
+  });
+
+  it("does not fire when the same value aggregation is selected", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -96,24 +121,13 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-aggregation-trigger"));
-    fireEvent.click(screen.getByTestId("toolbar-aggregation-option-avg"));
-    expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].aggregation).toBe("avg");
-  });
-
-  it("does not fire when same aggregation is selected", () => {
-    const handleChange = vi.fn();
-    render(
-      <Toolbar
-        config={makeConfig({ aggregation: "sum" })}
-        allColumns={ALL_COLUMNS}
-        numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={handleChange}
-      />,
+    fireEvent.click(screen.getByTestId("toolbar-values-select"));
+    fireEvent.click(
+      screen.getByTestId("toolbar-values-aggregation-revenue-trigger"),
     );
-    fireEvent.click(screen.getByTestId("toolbar-aggregation-trigger"));
-    fireEvent.click(screen.getByTestId("toolbar-aggregation-option-sum"));
+    fireEvent.click(
+      screen.getByTestId("toolbar-values-aggregation-revenue-option-sum"),
+    );
     expect(handleChange).not.toHaveBeenCalled();
   });
 
@@ -192,6 +206,9 @@ describe("Toolbar - interactions", () => {
     fireEvent.click(screen.getByTestId("toolbar-values-remove-revenue"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].values).toEqual(["profit"]);
+    expect(handleChange.mock.calls[0][0].aggregation).toEqual({
+      profit: "sum",
+    });
   });
 
   it("creates a synthetic measure from Values builder", () => {
@@ -521,48 +538,61 @@ describe("Toolbar - options checkboxes (inside settings popover)", () => {
   });
 });
 
-describe("Toolbar - aggregation reset", () => {
-  it("shows remove button on agg chip when aggregation is not sum", () => {
+describe("Toolbar - value aggregation labels", () => {
+  it("does not render the old global aggregation control", () => {
     render(
       <Toolbar
-        config={makeConfig({ aggregation: "avg" })}
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("toolbar-aggregation")).not.toBeInTheDocument();
+  });
+
+  it("shows an aggregation label on each raw value chip", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ values: ["revenue", "profit"] })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={vi.fn()}
       />,
     );
     expect(
-      screen.getByTestId("toolbar-aggregation-remove"),
-    ).toBeInTheDocument();
-  });
-
-  it("hides remove button on agg chip when aggregation is sum (default)", () => {
-    render(
-      <Toolbar
-        config={makeConfig({ aggregation: "sum" })}
-        allColumns={ALL_COLUMNS}
-        numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={vi.fn()}
-      />,
-    );
+      screen.getByTestId("toolbar-values-aggregation-label-revenue"),
+    ).toHaveTextContent("(Sum)");
     expect(
-      screen.queryByTestId("toolbar-aggregation-remove"),
-    ).not.toBeInTheDocument();
+      screen.getByTestId("toolbar-values-aggregation-label-profit"),
+    ).toHaveTextContent("(Sum)");
+    expect(
+      screen.getByTestId("toolbar-values-chip-label-revenue"),
+    ).toHaveTextContent(/revenue\s*\(sum\)/i);
   });
 
-  it("resets aggregation to sum when remove button is clicked", () => {
+  it("updates only the targeted measure's aggregation", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
-        config={makeConfig({ aggregation: "max" })}
+        config={makeConfig({ values: ["revenue", "profit"] })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-aggregation-remove"));
+    fireEvent.click(screen.getByTestId("toolbar-values-select"));
+    fireEvent.click(
+      screen.getByTestId("toolbar-values-aggregation-profit-trigger"),
+    );
+    fireEvent.click(
+      screen.getByTestId("toolbar-values-aggregation-profit-option-count"),
+    );
     expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].aggregation).toBe("sum");
+    expect(handleChange.mock.calls[0][0].aggregation).toEqual({
+      revenue: "sum",
+      profit: "count",
+    });
   });
 });
 
@@ -636,7 +666,9 @@ describe("Toolbar - config import/export", () => {
     });
     fireEvent.click(screen.getByTestId("toolbar-import-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].aggregation).toBe("avg");
+    expect(handleChange.mock.calls[0][0].aggregation).toEqual({
+      revenue: "avg",
+    });
     expect(handleChange.mock.calls[0][0].rows).toEqual(["category"]);
   });
 
@@ -696,7 +728,7 @@ describe("Toolbar - locked mode", () => {
       screen.queryByTestId("toolbar-values-select"),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByTestId("toolbar-aggregation-trigger"),
+      screen.queryByTestId("toolbar-values-aggregation-controls"),
     ).not.toBeInTheDocument();
   });
 

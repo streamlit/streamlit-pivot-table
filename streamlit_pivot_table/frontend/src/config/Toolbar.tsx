@@ -32,6 +32,10 @@ import {
 } from "../engine/exportData";
 import {
   AGGREGATION_TYPES,
+  getAggregationForField,
+  normalizeAggregationConfig,
+  stringifyPivotConfig,
+  type AggregationConfig,
   type AggregationType,
   type DimensionFilter,
   type PivotConfigV1,
@@ -72,7 +76,7 @@ export interface ToolbarProps {
 }
 
 function configsEqual(a: PivotConfigV1, b: PivotConfigV1): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return stringifyPivotConfig(a) === stringifyPivotConfig(b);
 }
 
 const AGG_ICONS: Record<AggregationType, string> = {
@@ -107,15 +111,6 @@ const AGG_CHIP_LABELS: Record<AggregationType, string> = {
   percentile_90: "P90",
 };
 
-const BASIC_AGGS: AggregationType[] = ["sum", "avg", "count", "min", "max"];
-const ADVANCED_AGGS: AggregationType[] = [
-  "count_distinct",
-  "median",
-  "percentile_90",
-  "first",
-  "last",
-];
-
 const ChevronIcon: FC<{ open?: boolean }> = ({ open }) => (
   <svg
     className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`}
@@ -143,6 +138,12 @@ const Toolbar: FC<ToolbarProps> = ({
   pivotData,
   exportFilename,
 }): ReactElement => {
+  const syncAggregation = useCallback(
+    (values: string[], aggregation: AggregationConfig = config.aggregation) =>
+      normalizeAggregationConfig(aggregation, values),
+    [config.aggregation],
+  );
+
   const emitIfChanged = useCallback(
     (updated: PivotConfigV1) => {
       if (onConfigChange && !configsEqual(updated, config)) {
@@ -177,9 +178,13 @@ const Toolbar: FC<ToolbarProps> = ({
       const values = config.values.includes(col)
         ? config.values.filter((v) => v !== col)
         : [...config.values, col];
-      emitIfChanged({ ...config, values });
+      emitIfChanged({
+        ...config,
+        values,
+        aggregation: syncAggregation(values),
+      });
     },
-    [config, emitIfChanged],
+    [config, emitIfChanged, syncAggregation],
   );
 
   const removeRow = useCallback(
@@ -201,12 +206,14 @@ const Toolbar: FC<ToolbarProps> = ({
 
   const removeValue = useCallback(
     (col: string) => {
+      const values = config.values.filter((v) => v !== col);
       emitIfChanged({
         ...config,
-        values: config.values.filter((v) => v !== col),
+        values,
+        aggregation: syncAggregation(values),
       });
     },
-    [config, emitIfChanged],
+    [config, emitIfChanged, syncAggregation],
   );
 
   const upsertSyntheticMeasure = useCallback(
@@ -231,16 +238,18 @@ const Toolbar: FC<ToolbarProps> = ({
     [config, emitIfChanged],
   );
 
-  const handleAggregationChange = useCallback(
-    (agg: AggregationType) => {
-      emitIfChanged({ ...config, aggregation: agg });
+  const handleValueAggregationChange = useCallback(
+    (valueField: string, aggregation: AggregationType) => {
+      emitIfChanged({
+        ...config,
+        aggregation: syncAggregation(config.values, {
+          ...config.aggregation,
+          [valueField]: aggregation,
+        }),
+      });
     },
-    [config, emitIfChanged],
+    [config, emitIfChanged, syncAggregation],
   );
-
-  const resetAggregation = useCallback(() => {
-    emitIfChanged({ ...config, aggregation: "sum" });
-  }, [config, emitIfChanged]);
 
   const toggleRowTotals = useCallback(() => {
     const current = config.show_row_totals ?? config.show_totals;
@@ -372,22 +381,12 @@ const Toolbar: FC<ToolbarProps> = ({
         disabled={locked}
         frozenColumns={frozenColumns}
         showValuesAs={config.show_values_as}
+        aggregation={config.aggregation}
         syntheticMeasures={config.synthetic_measures ?? []}
         allNumericColumns={syntheticSourceColumns ?? numericColumns}
+        onAggregationChange={handleValueAggregationChange}
         onUpsertSyntheticMeasure={upsertSyntheticMeasure}
         onRemoveSyntheticMeasure={removeSyntheticMeasure}
-      />
-      <DropdownSingleSelect
-        label="Aggregate"
-        testId="toolbar-aggregation"
-        value={config.aggregation}
-        options={AGGREGATION_TYPES}
-        labels={AGG_LABELS}
-        chipLabels={AGG_CHIP_LABELS}
-        icons={AGG_ICONS}
-        onChange={handleAggregationChange}
-        onRemove={config.aggregation !== "sum" ? resetAggregation : undefined}
-        disabled={locked}
       />
 
       <div
@@ -531,11 +530,138 @@ interface DropdownMultiSelectProps {
   filters?: Record<string, DimensionFilter>;
   /** Read-only: current show-values-as config for badge indicators on chips. */
   showValuesAs?: Record<string, ShowValuesAs>;
+  aggregation?: AggregationConfig;
   syntheticMeasures?: SyntheticMeasureConfig[];
   allNumericColumns?: string[];
+  onAggregationChange?: (field: string, aggregation: AggregationType) => void;
   onUpsertSyntheticMeasure?: (measure: SyntheticMeasureConfig) => void;
   onRemoveSyntheticMeasure?: (id: string) => void;
 }
+
+interface AggregationPickerProps {
+  field: string;
+  value: AggregationType;
+  testId: string;
+  disabled?: boolean;
+  onChange: (value: AggregationType) => void;
+}
+
+const BASIC_AGGREGATIONS: readonly AggregationType[] = [
+  "sum",
+  "avg",
+  "count",
+  "min",
+  "max",
+];
+
+const ADVANCED_AGGREGATIONS: readonly AggregationType[] = [
+  "count_distinct",
+  "median",
+  "percentile_90",
+  "first",
+  "last",
+];
+
+const AggregationPicker: FC<AggregationPickerProps> = ({
+  field,
+  value,
+  testId,
+  disabled,
+  onChange,
+}): ReactElement => {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closePicker = useCallback(() => setOpen(false), []);
+
+  useClickOutside(containerRef, closePicker, open);
+
+  const listboxKeyDown = useListboxKeyboard(
+    panelRef,
+    triggerRef,
+    open,
+    closePicker,
+    '[role="option"]',
+  );
+
+  const handleSelect = useCallback(
+    (next: AggregationType) => {
+      onChange(next);
+      setOpen(false);
+    },
+    [onChange],
+  );
+
+  return (
+    <div className={styles.aggregationPicker} ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.aggregationPickerTrigger}
+        data-testid={`${testId}-trigger`}
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        aria-label={`Choose aggregation for ${field}`}
+        disabled={disabled}
+      >
+        <span className={styles.aggregationPickerValue}>
+          <span className={styles.aggIcon}>{AGG_ICONS[value]}</span>
+          <span>{AGG_LABELS[value]}</span>
+        </span>
+        <ChevronIcon open={open} />
+      </button>
+      {open && (
+        <div
+          ref={panelRef}
+          className={styles.aggregationPickerPanel}
+          data-testid={`${testId}-panel`}
+          role="listbox"
+          aria-label={`${field} aggregation options`}
+          onKeyDown={listboxKeyDown}
+        >
+          <div className={styles.dropdownGroupLabel}>Basic</div>
+          {BASIC_AGGREGATIONS.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className={`${styles.dropdownItem} ${opt === value ? styles.dropdownItemActive : ""}`}
+              data-testid={`${testId}-option-${opt}`}
+              role="option"
+              aria-selected={opt === value}
+              tabIndex={-1}
+              onClick={() => handleSelect(opt)}
+            >
+              <span className={styles.aggregationPickerOptionContent}>
+                <span className={styles.aggIcon}>{AGG_ICONS[opt]}</span>
+                <span>{AGG_LABELS[opt]}</span>
+              </span>
+            </button>
+          ))}
+          <div className={styles.dropdownGroupDivider} />
+          <div className={styles.dropdownGroupLabel}>Advanced</div>
+          {ADVANCED_AGGREGATIONS.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className={`${styles.dropdownItem} ${opt === value ? styles.dropdownItemActive : ""}`}
+              data-testid={`${testId}-option-${opt}`}
+              role="option"
+              aria-selected={opt === value}
+              tabIndex={-1}
+              onClick={() => handleSelect(opt)}
+            >
+              <span className={styles.aggregationPickerOptionContent}>
+                <span className={styles.aggIcon}>{AGG_ICONS[opt]}</span>
+                <span>{AGG_LABELS[opt]}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
   label,
@@ -549,8 +675,10 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
   sortConfig,
   filters,
   showValuesAs,
+  aggregation,
   syntheticMeasures = [],
   allNumericColumns = [],
+  onAggregationChange,
   onUpsertSyntheticMeasure,
   onRemoveSyntheticMeasure,
 }): ReactElement => {
@@ -712,7 +840,7 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
             {open && (
               <div
                 ref={panelRef}
-                className={styles.dropdownPanel}
+                className={`${styles.dropdownPanel} ${isValuesField ? styles.valuesDropdownPanel : ""}`}
                 data-testid={`${testId}-panel`}
                 role="listbox"
                 aria-label={`${label} options`}
@@ -765,6 +893,35 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
                         + Add measure
                       </button>
                     </div>
+                    {selected.length > 0 && onAggregationChange && (
+                      <>
+                        <div className={styles.dropdownGroupDivider} />
+                        <div className={styles.dropdownGroupLabel}>
+                          Measure Aggregation
+                        </div>
+                        <div data-testid={`${testId}-aggregation-controls`}>
+                          {selected.map((col) => (
+                            <div
+                              key={`${col}-aggregation`}
+                              className={styles.aggregationControlRow}
+                            >
+                              <span className={styles.aggregationControlLabel}>
+                                {col}
+                              </span>
+                              <AggregationPicker
+                                field={col}
+                                value={aggregation?.[col] ?? "sum"}
+                                testId={`${testId}-aggregation-${col}`}
+                                disabled={disabled}
+                                onChange={(next) =>
+                                  onAggregationChange(col, next)
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -783,10 +940,25 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
               ((filters[col].include && filters[col].include.length > 0) ||
                 (filters[col].exclude && filters[col].exclude.length > 0));
             const currentShowAs = showValuesAs?.[col] ?? "raw";
+            const currentAggregation = aggregation?.[col] ?? "sum";
             const showAsBadge = currentShowAs !== "raw";
             return (
               <span key={col} className={styles.chip}>
-                {col}
+                <span
+                  className={styles.chipLabelText}
+                  data-testid={`${testId}-chip-label-${col}`}
+                >
+                  <span className={styles.chipPrimaryText}>{col}</span>
+                  {isValuesField && (
+                    <span
+                      className={styles.chipAggregationLabel}
+                      data-testid={`${testId}-aggregation-label-${col}`}
+                    >
+                      {" "}
+                      ({AGG_CHIP_LABELS[currentAggregation]})
+                    </span>
+                  )}
+                </span>
                 {showAsBadge && (
                   <span
                     className={styles.chipShowAsBadge}
@@ -975,157 +1147,6 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
               Save
             </button>
           </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// DropdownSingleSelect (for Aggregation — matches Rows/Columns/Values pattern)
-// ---------------------------------------------------------------------------
-
-interface DropdownSingleSelectProps {
-  label: string;
-  testId: string;
-  value: AggregationType;
-  options: readonly AggregationType[];
-  labels: Record<AggregationType, string>;
-  /** Shorter labels for the selected-value chip (falls back to labels). */
-  chipLabels?: Record<AggregationType, string>;
-  icons: Record<AggregationType, string>;
-  onChange: (value: AggregationType) => void;
-  /** If provided, shows an X on the chip. Called when clicked. */
-  onRemove?: () => void;
-  disabled?: boolean;
-  /** Optional hint/warning text displayed below the chip row. */
-  hint?: string;
-}
-
-const DropdownSingleSelect: FC<DropdownSingleSelectProps> = ({
-  label,
-  testId,
-  value,
-  options,
-  labels,
-  chipLabels,
-  icons,
-  onChange,
-  onRemove,
-  disabled,
-  hint,
-}): ReactElement => {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const closeDropdown = useCallback(() => setOpen(false), []);
-  useClickOutside(containerRef, closeDropdown, open);
-  const listboxKeyDown = useListboxKeyboard(
-    panelRef,
-    triggerRef,
-    open,
-    closeDropdown,
-    '[role="option"]',
-  );
-
-  const handleSelect = useCallback(
-    (opt: AggregationType) => {
-      onChange(opt);
-      setOpen(false);
-    },
-    [onChange],
-  );
-
-  return (
-    <div
-      className={styles.fieldGroup}
-      ref={containerRef}
-      data-testid={testId}
-      data-value={value}
-    >
-      <div className={styles.sectionHeader}>
-        <span className={styles.sectionTitle}>{label}</span>
-        {!disabled && (
-          <div className={styles.dropdownAnchor}>
-            <button
-              ref={triggerRef}
-              type="button"
-              className={styles.dropdownToggle}
-              data-testid={`${testId}-trigger`}
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              aria-label={`Toggle ${label} dropdown`}
-            >
-              <ChevronIcon open={open} />
-            </button>
-            {open && (
-              <div
-                ref={panelRef}
-                className={styles.dropdownPanel}
-                data-testid={`${testId}-panel`}
-                role="listbox"
-                aria-label={`${label} options`}
-                onKeyDown={listboxKeyDown}
-              >
-                <div className={styles.dropdownGroupLabel}>Basic</div>
-                {BASIC_AGGS.map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    className={`${styles.dropdownItem} ${opt === value ? styles.dropdownItemActive : ""}`}
-                    data-testid={`${testId}-option-${opt}`}
-                    onClick={() => handleSelect(opt)}
-                    role="option"
-                    aria-selected={opt === value}
-                    tabIndex={-1}
-                  >
-                    <span className={styles.aggIcon}>{icons[opt]}</span>
-                    <span>{labels[opt]}</span>
-                  </button>
-                ))}
-                <div className={styles.dropdownGroupDivider} />
-                <div className={styles.dropdownGroupLabel}>Advanced</div>
-                {ADVANCED_AGGS.map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    className={`${styles.dropdownItem} ${opt === value ? styles.dropdownItemActive : ""}`}
-                    data-testid={`${testId}-option-${opt}`}
-                    onClick={() => handleSelect(opt)}
-                    role="option"
-                    aria-selected={opt === value}
-                    tabIndex={-1}
-                  >
-                    <span className={styles.aggIcon}>{icons[opt]}</span>
-                    <span>{labels[opt]}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className={styles.chipRow}>
-        <span className={styles.chip}>
-          <span className={styles.aggChipIcon}>{icons[value]}</span>
-          {(chipLabels ?? labels)[value]}
-          {onRemove && !disabled && (
-            <button
-              className={styles.chipRemove}
-              onClick={onRemove}
-              aria-label="Reset aggregation"
-              data-testid={`${testId}-remove`}
-            >
-              ×
-            </button>
-          )}
-        </span>
-      </div>
-      {hint && (
-        <div className={styles.fieldHint} data-testid={`${testId}-hint`}>
-          {hint}
         </div>
       )}
     </div>

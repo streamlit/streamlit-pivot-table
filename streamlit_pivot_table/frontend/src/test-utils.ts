@@ -15,20 +15,32 @@
  * limitations under the License.
  */
 
-import type { PivotConfigV1 } from "./engine/types";
+import {
+  type AggregationType,
+  normalizeAggregationConfig,
+  type PivotConfigV1,
+} from "./engine/types";
+
+type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
+  aggregation?: AggregationType | PivotConfigV1["aggregation"];
+};
 
 export function makeConfig(
-  overrides: Partial<PivotConfigV1> = {},
+  overrides: TestConfigOverrides = {},
 ): PivotConfigV1 {
-  return {
+  const { aggregation: aggregationOverride, ...restOverrides } = overrides;
+  const values = overrides.values ?? ["revenue"];
+  const config = {
     version: 1,
     rows: ["region"],
     columns: ["year"],
-    values: ["revenue"],
-    aggregation: "sum",
+    values,
     show_totals: true,
     empty_cell_value: "-",
     interactive: true,
-    ...overrides,
-  };
+    ...restOverrides,
+  } as PivotConfigV1;
+  config.values = values;
+  config.aggregation = normalizeAggregationConfig(aggregationOverride, values);
+  return config;
 }

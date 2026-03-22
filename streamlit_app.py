@@ -114,6 +114,10 @@ rank rows or columns by label or by value.
 **Try it:**
 - The table shows both **Revenue** and **Profit** — notice the value label row
   below the column headers.
+- Open the **Values** dropdown to see that each raw measure has its own
+  aggregation control.
+- Notice the selected value chips use a compact inline format like
+  **Revenue (Sum)**.
 - Click the **⋮** menu icon on a row/column header to open the **header menu**.
   Choose **Sort A→Z**, **Sort Z→A**, or **Sort by value ↑/↓**.
 - When sorting by value, pick which measure and which column to sort against.
@@ -128,7 +132,7 @@ st_pivot_table(
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit"],
-    aggregation="sum",
+    aggregation={"Revenue": "sum", "Profit": "avg"},
     row_sort={"by": "value", "direction": "desc", "value_field": "Revenue"},
     col_sort={"by": "key", "direction": "asc"},
 )
@@ -142,6 +146,7 @@ st_pivot_table(
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "avg"},
     row_sort={"by": "value", "direction": "desc", "value_field": "Revenue"},
     col_sort={"by": "key", "direction": "asc"},
 )
@@ -160,7 +165,7 @@ st.markdown(
     """
 Control which values appear via **header menu filters** or the Python API.
 **Locked mode** freezes the toolbar config controls so end-users cannot change
-rows, columns, values, or aggregation — but sorting and filtering via header
+rows, columns, values, or per-measure aggregation — but sorting and filtering via header
 menus still work. **Custom sorters** enforce a specific dimension order.
 
 **Try it (left table):**
@@ -350,8 +355,10 @@ aggregators**: Count Distinct, Median, Percentile (90th), First, and Last.
 **% of Row Total**, or **% of Column Total** instead of raw numbers.
 
 **Try it:**
-- Open the **Aggregation** dropdown in the toolbar — notice the **Basic** and
-  **Advanced** groups.
+- Open the **Values** dropdown in the toolbar and use each measure's own
+  aggregation control.
+- Selected value chips show aggregation inline, using the same name-first
+  pattern as **Revenue (Sum)**.
 - Click the **⋮** menu icon on a **value label** header (e.g. "Revenue") to open
   its **Display** menu. Choose between Raw Value, % of Grand Total, % of Row
   Total, or % of Column Total.
@@ -608,7 +615,9 @@ still keeping regular measures in the same table.
 - Notice denominator-zero cells render as `–`.
 - In the builder, try **Format presets** (Percent/Currency/Number) or enter a custom format pattern.
 
-Synthetic measures currently do not support **Show Values As** transformations.
+Synthetic measures currently do not support **Show Values As** transformations,
+and they continue to use sum-based source semantics even if raw measures in the
+same pivot use different aggregations.
 """
 )
 
@@ -627,6 +636,7 @@ st_pivot_table(
     rows=["Region"],
     columns=["Year"],
     values=["Total PRs", "People"],
+    aggregation={"Total PRs": "sum", "People": "count"},
     synthetic_measures=[
         {
             "id": "prs_per_person",
@@ -657,6 +667,7 @@ st_pivot_table(
     rows=["Region"],
     columns=["Year"],
     values=["Total PRs", "People"],
+    aggregation={"Total PRs": "sum", "People": "count"},
     synthetic_measures=[
         {
             "id": "prs_per_person",

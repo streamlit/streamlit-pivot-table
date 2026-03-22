@@ -566,3 +566,31 @@ st_pivot_table(
     interactive=True,
     on_config_change=lambda: None,
 )
+
+
+# ---------------------------------------------------------------------------
+# 25. Scalar aggregation round-trip / Python precedence
+# ---------------------------------------------------------------------------
+st.subheader("Scalar Aggregation Roundtrip Pivot")
+
+if "scalar_roundtrip_aggregation" not in st.session_state:
+    st.session_state["scalar_roundtrip_aggregation"] = "sum"
+
+st.button("Trigger scalar roundtrip rerun", key="scalar_roundtrip_rerun")
+if st.button("Set scalar aggregation to avg", key="scalar_roundtrip_set_avg"):
+    st.session_state["scalar_roundtrip_aggregation"] = "avg"
+
+st.write(
+    f"Scalar roundtrip aggregation: {st.session_state['scalar_roundtrip_aggregation']}"
+)
+
+st_pivot_table(
+    df,
+    key="test_pivot_scalar_roundtrip",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation=st.session_state["scalar_roundtrip_aggregation"],
+    interactive=True,
+    on_config_change=lambda: None,
+)

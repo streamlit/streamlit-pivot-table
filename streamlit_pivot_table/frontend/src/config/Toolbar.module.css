@@ -131,6 +131,11 @@
   box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
 }
 
+.valuesDropdownPanel {
+  overflow: visible;
+  max-height: none;
+}
+
 .dropdownItem {
   box-sizing: border-box;
   display: flex;
@@ -223,6 +228,16 @@
   text-overflow: ellipsis;
 }
 
+.chipPrimaryText {
+  white-space: nowrap;
+}
+
+.chipLabelText {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .chipRemove {
   cursor: pointer;
   border: none;
@@ -286,6 +301,110 @@
   background: var(--st-primary-color);
   margin-left: 2px;
   flex-shrink: 0;
+}
+
+.chipAggregationLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  min-height: auto;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.88;
+}
+
+.aggregationControlRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.aggregationControlLabel {
+  font-size: 0.82em;
+  color: var(--st-text-color);
+  white-space: nowrap;
+}
+
+.aggregationSelect {
+  min-width: 120px;
+  padding: 4px 6px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.8em;
+}
+
+.aggregationSelect:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.aggregationPicker {
+  position: relative;
+  min-width: 160px;
+}
+
+.aggregationPickerTrigger {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.84em;
+  cursor: pointer;
+}
+
+.aggregationPickerTrigger:hover {
+  background: color-mix(in srgb, var(--st-text-color) 4%, transparent);
+}
+
+.aggregationPickerTrigger:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.aggregationPickerTrigger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.aggregationPickerValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.aggregationPickerOptionContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.aggregationPickerPanel {
+  position: absolute;
+  right: -12px;
+  top: calc(100% + 4px);
+  z-index: 25;
+  min-width: 220px;
+  max-width: 260px;
+  padding: 4px;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
 }
 
 /* --- Checkbox styles (used inside settings popover) --- */

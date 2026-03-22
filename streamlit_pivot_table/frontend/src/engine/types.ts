@@ -43,7 +43,7 @@ export interface PivotConfigV1 {
   columns: string[];
   values: string[];
   synthetic_measures?: SyntheticMeasureConfig[];
-  aggregation: AggregationType;
+  aggregation: AggregationConfig;
   show_totals: boolean;
   /** Independent row totals toggle. bool = all/none, string[] = only listed measures. */
   show_row_totals?: boolean | string[];
@@ -208,6 +208,70 @@ export const AGGREGATION_TYPES: readonly AggregationType[] = [
   "last",
 ] as const;
 
+export type AggregationConfig = Record<string, AggregationType>;
+
+export const DEFAULT_AGGREGATION: AggregationType = "sum";
+
+function isAggregationType(value: unknown): value is AggregationType {
+  return AGGREGATION_TYPES.includes(value as AggregationType);
+}
+
+export function normalizeAggregationConfig(
+  raw: unknown,
+  values: string[],
+): AggregationConfig {
+  if (raw === undefined || raw === null) {
+    return Object.fromEntries(
+      values.map((field) => [field, DEFAULT_AGGREGATION]),
+    ) as AggregationConfig;
+  }
+
+  if (typeof raw === "string") {
+    if (!isAggregationType(raw)) {
+      throw new Error(
+        `'aggregation' must be one of: ${AGGREGATION_TYPES.join(", ")}`,
+      );
+    }
+    return Object.fromEntries(
+      values.map((field) => [field, raw]),
+    ) as AggregationConfig;
+  }
+
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      "'aggregation' must be an aggregation type or an object keyed by raw value fields",
+    );
+  }
+
+  const provided = raw as Record<string, unknown>;
+  return Object.fromEntries(
+    values.map((field) => {
+      const entry = provided[field];
+      if (entry === undefined) return [field, DEFAULT_AGGREGATION];
+      if (!isAggregationType(entry)) {
+        throw new Error(
+          `'aggregation["${field}"]' must be one of: ${AGGREGATION_TYPES.join(", ")}`,
+        );
+      }
+      return [field, entry];
+    }),
+  ) as AggregationConfig;
+}
+
+export function getAggregationForField(
+  valField: string,
+  config: PivotConfigV1,
+): AggregationType {
+  return config.aggregation[valField] ?? DEFAULT_AGGREGATION;
+}
+
+export function stringifyPivotConfig(config: PivotConfigV1): string {
+  return JSON.stringify({
+    ...config,
+    aggregation: normalizeAggregationConfig(config.aggregation, config.values),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Show-values-as display mode (Phase 3b)
 // ---------------------------------------------------------------------------
@@ -259,7 +323,7 @@ export const DEFAULT_CONFIG: PivotConfigV1 = {
   columns: [],
   values: [],
   synthetic_measures: [],
-  aggregation: "sum",
+  aggregation: {},
   show_totals: true,
   show_row_totals: true,
   show_column_totals: true,
@@ -423,11 +487,6 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     }
   }
 
-  if (!AGGREGATION_TYPES.includes(o.aggregation as AggregationType)) {
-    throw new Error(
-      `'aggregation' must be one of: ${AGGREGATION_TYPES.join(", ")}`,
-    );
-  }
   if (o.show_totals !== undefined && typeof o.show_totals !== "boolean") {
     throw new Error("'show_totals' must be a boolean");
   }
@@ -470,7 +529,7 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     columns,
     values,
     synthetic_measures: syntheticMeasures,
-    aggregation: o.aggregation as AggregationType,
+    aggregation: normalizeAggregationConfig(o.aggregation, values),
     show_totals: showTotals,
     show_row_totals: normalizeBoolOrList(o.show_row_totals, values, showTotals),
     show_column_totals: normalizeBoolOrList(

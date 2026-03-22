@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -68,7 +69,7 @@ class PivotConfig(TypedDict, total=False):
     columns: list[str]
     values: list[str]
     synthetic_measures: list[dict[str, Any]]
-    aggregation: str
+    aggregation: dict[str, str]
     show_totals: bool
     show_row_totals: bool | list[str]
     show_column_totals: bool | list[str]
@@ -108,6 +109,110 @@ VALID_NULL_MODES = frozenset(("exclude", "zero", "separate"))
 
 
 _warned_keys: set[str] = set()
+_PYTHON_CONFIG_STATE_PREFIX = "__streamlit_pivot_table_python_config__:"
+
+
+def _normalize_aggregation_config(
+    aggregation: str | dict[str, str] | None,
+    values: list[str],
+) -> dict[str, str]:
+    """Normalize aggregation input to a canonical per-value map."""
+    if not values:
+        return {}
+    if aggregation is None:
+        return {value: "sum" for value in values}
+    if isinstance(aggregation, str):
+        if aggregation not in VALID_AGGREGATIONS:
+            raise ValueError(
+                f"aggregation must be one of {sorted(VALID_AGGREGATIONS)}, got {aggregation!r}"
+            )
+        return {value: aggregation for value in values}
+    if not isinstance(aggregation, dict):
+        raise TypeError(
+            f"aggregation must be a str, dict[str, str], or None, got {type(aggregation).__name__}"
+        )
+    normalized: dict[str, str] = {}
+    for value in values:
+        agg = aggregation.get(value, "sum")
+        if not isinstance(agg, str):
+            raise TypeError(
+                f"aggregation[{value!r}] must be a string, got {type(agg).__name__}"
+            )
+        if agg not in VALID_AGGREGATIONS:
+            raise ValueError(
+                f"aggregation[{value!r}] must be one of {sorted(VALID_AGGREGATIONS)}, got {agg!r}"
+            )
+        normalized[value] = agg
+    return normalized
+
+
+def _normalize_config_aggregation(config: Any) -> Any:
+    """Normalize a config object's aggregation field in-place-compatible form."""
+    if not isinstance(config, dict):
+        return config
+    values = config.get("values")
+    value_list = (
+        [v for v in values if isinstance(v, str)] if isinstance(values, list) else []
+    )
+    normalized = dict(config)
+    normalized["aggregation"] = _normalize_aggregation_config(
+        normalized.get("aggregation"),
+        value_list,
+    )
+    return normalized
+
+
+def _stable_config_json(config: Any) -> str:
+    """Serialize a config deterministically after aggregation normalization."""
+    return json.dumps(
+        _normalize_config_aggregation(config),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _resolve_config_to_send(
+    session_state: Any,
+    key: str,
+    initial_config: PivotConfig,
+) -> PivotConfig:
+    """Resolve Python config vs persisted frontend config precedence.
+
+    Preserve persisted user config across normal reruns, but when Python sends a
+    new config for the same component key, prefer that new Python config.
+    """
+    tracker_key = f"{_PYTHON_CONFIG_STATE_PREFIX}{key}"
+    initial_json = _stable_config_json(initial_config)
+
+    previous_python_json = None
+    try:
+        previous_python_json = session_state.get(tracker_key)
+    except (AttributeError, TypeError):
+        previous_python_json = None
+
+    persisted_config = None
+    try:
+        persisted_config = session_state.get(key, {}).get("config")
+    except (AttributeError, TypeError):
+        persisted_config = None
+
+    normalized_persisted = (
+        _normalize_config_aggregation(persisted_config)
+        if persisted_config is not None
+        else None
+    )
+    python_config_changed = (
+        previous_python_json is not None and previous_python_json != initial_json
+    )
+
+    try:
+        session_state[tracker_key] = initial_json
+    except Exception:
+        pass
+
+    if normalized_persisted is None or python_config_changed:
+        return initial_config
+    return normalized_persisted
 
 
 def _validate_list_field(
@@ -142,7 +247,7 @@ def _default_config(
     columns: list[str] | None = None,
     values: list[str] | None = None,
     synthetic_measures: list[dict[str, Any]] | None = None,
-    aggregation: str = "sum",
+    aggregation: str | dict[str, str] = "sum",
     show_totals: bool = True,
     show_row_totals: bool | list[str] | None = None,
     show_column_totals: bool | list[str] | None = None,
@@ -166,7 +271,7 @@ def _default_config(
         columns=columns or [],
         values=_values,
         synthetic_measures=synthetic_measures or [],
-        aggregation=aggregation,
+        aggregation=_normalize_aggregation_config(aggregation, _values),
         show_totals=show_totals,
         show_row_totals=show_row_totals if show_row_totals is not None else show_totals,
         show_column_totals=show_column_totals
@@ -285,7 +390,7 @@ def st_pivot_table(
     columns: list[str] | None = None,
     values: list[str] | None = None,
     synthetic_measures: list[dict[str, Any]] | None = None,
-    aggregation: str = "sum",
+    aggregation: str | dict[str, str] = "sum",
     show_totals: bool = True,
     show_row_totals: bool | list[str] | None = None,
     show_column_totals: bool | list[str] | None = None,
@@ -339,8 +444,9 @@ def st_pivot_table(
         Column names from *data* to use as column dimensions.
     values : list[str] or None
         Column names from *data* to aggregate as measures.
-    aggregation : str
-        Aggregation function: "sum", "avg", "count", "min", or "max".
+    aggregation : str or dict[str, str]
+        Aggregation setting for raw value fields. A single string applies to all
+        measures, while a dict maps each value field to its aggregation.
     show_totals : bool
         Whether to display grand total rows and columns. Acts as default
         for ``show_row_totals`` and ``show_column_totals`` when unset.
@@ -459,10 +565,6 @@ def st_pivot_table(
             f"data must be a DataFrame-like object (Pandas/Polars DataFrame, "
             f"dict, list, NumPy array, etc.), got {type(data).__name__}: {exc}"
         ) from exc
-    if aggregation not in VALID_AGGREGATIONS:
-        raise ValueError(
-            f"aggregation must be one of {sorted(VALID_AGGREGATIONS)}, got {aggregation!r}"
-        )
     if not isinstance(show_totals, bool):
         raise TypeError(f"show_totals must be a bool, got {type(show_totals).__name__}")
     if show_row_totals is not None and not isinstance(show_row_totals, (bool, list)):
@@ -650,6 +752,10 @@ def st_pivot_table(
                 }
             )
 
+    normalized_aggregation = _normalize_aggregation_config(
+        aggregation, resolved_values or []
+    )
+
     # --- Phase 3 validation ---
     if not isinstance(show_subtotals, (bool, list)):
         raise TypeError(
@@ -759,7 +865,7 @@ def st_pivot_table(
         columns=resolved_columns,
         values=resolved_values,
         synthetic_measures=normalized_synthetic_measures,
-        aggregation=aggregation,
+        aggregation=normalized_aggregation,
         show_totals=show_totals,
         show_row_totals=show_row_totals,
         show_column_totals=show_column_totals,
@@ -776,19 +882,9 @@ def st_pivot_table(
         column_alignment=column_alignment,
     )
 
-    # Controlled-state hydration (follows canonical pattern from
-    # st.components.v2 docs in types.py):  read persisted config from
-    # session state so user changes made via the frontend survive reruns.
-    # CCv2 stores state as BidiComponentResult (AttributeDictionary subclass),
-    # which supports both dict-style .get() and attribute access.
-    persisted_config = None
-    try:
-        persisted_config = st.session_state.get(key, {}).get("config")
-    except (AttributeError, TypeError):
-        pass
-    config_to_send = (
-        persisted_config if persisted_config is not None else initial_config
-    )
+    # Controlled-state hydration: preserve persisted user config across normal
+    # reruns, but let explicit Python config changes take precedence.
+    config_to_send = _resolve_config_to_send(st.session_state, key, initial_config)
 
     data_payload: dict[str, Any] = {
         "dataframe": data,

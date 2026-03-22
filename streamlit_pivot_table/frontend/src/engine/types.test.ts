@@ -21,6 +21,9 @@ import {
   AGGREGATOR_CLASS,
   CONFIG_SCHEMA_VERSION,
   DEFAULT_CONFIG,
+  type AggregationConfig,
+  getAggregationForField,
+  normalizeAggregationConfig,
   getRenderedValueFields,
   isSyntheticMeasure,
   migrateSortDirection,
@@ -37,18 +40,26 @@ import {
   type SortConfig,
 } from "./types";
 
-function makeConfig(overrides: Partial<PivotConfigV1> = {}): PivotConfigV1 {
-  return {
+type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
+  aggregation?: AggregationType | AggregationConfig;
+};
+
+function makeConfig(overrides: TestConfigOverrides = {}): PivotConfigV1 {
+  const { aggregation: aggregationOverride, ...restOverrides } = overrides;
+  const values = overrides.values ?? ["Revenue", "Profit"];
+  const config = {
     version: 1,
     rows: ["Region", "Category"],
     columns: ["Year"],
-    values: ["Revenue", "Profit"],
-    aggregation: "sum",
+    values,
     show_totals: true,
     empty_cell_value: "-",
     interactive: true,
-    ...overrides,
-  };
+    ...restOverrides,
+  } as PivotConfigV1;
+  config.values = values;
+  config.aggregation = normalizeAggregationConfig(aggregationOverride, values);
+  return config;
 }
 
 describe("Config schema v1", () => {
@@ -60,7 +71,7 @@ describe("Config schema v1", () => {
   it("default config shape matches snapshot", () => {
     expect(DEFAULT_CONFIG).toMatchInlineSnapshot(`
       {
-        "aggregation": "sum",
+        "aggregation": {},
         "columns": [],
         "empty_cell_value": "-",
         "interactive": true,
@@ -180,7 +191,7 @@ describe("validatePivotConfigV1", () => {
   it("accepts a valid config", () => {
     const result = validatePivotConfigV1({ ...DEFAULT_CONFIG });
     expect(result.version).toBe(1);
-    expect(result.aggregation).toBe("sum");
+    expect(result.aggregation).toEqual({});
   });
 
   it("rejects non-object input", () => {
@@ -205,6 +216,28 @@ describe("validatePivotConfigV1", () => {
     expect(() =>
       validatePivotConfigV1({ ...DEFAULT_CONFIG, aggregation: "not_real" }),
     ).toThrow("'aggregation' must be one of");
+  });
+
+  it("normalizes scalar aggregation input to a per-value map", () => {
+    const result = validatePivotConfigV1({
+      version: 1,
+      rows: [],
+      columns: [],
+      values: ["Revenue", "Profit"],
+      aggregation: "avg",
+    });
+    expect(result.aggregation).toEqual({ Revenue: "avg", Profit: "avg" });
+  });
+
+  it("fills missing map entries with the default aggregation", () => {
+    const result = validatePivotConfigV1({
+      version: 1,
+      rows: [],
+      columns: [],
+      values: ["Revenue", "Profit"],
+      aggregation: { Revenue: "count" },
+    });
+    expect(result.aggregation).toEqual({ Revenue: "count", Profit: "sum" });
   });
 
   it("rejects non-string array elements in rows", () => {
@@ -249,6 +282,7 @@ describe("validatePivotConfigV1", () => {
     expect(result.show_totals).toBe(true);
     expect(result.interactive).toBe(true);
     expect(result.empty_cell_value).toBe("-");
+    expect(result.aggregation).toEqual({});
   });
 
   it("accepts valid filters object", () => {
@@ -654,5 +688,33 @@ describe("Synthetic measures", () => {
       },
     });
     expect(result.show_values_as).toEqual({ Revenue: "pct_of_total" });
+  });
+});
+
+describe("getAggregationForField", () => {
+  it("returns the configured aggregation for a raw value field", () => {
+    const config = makeConfig({
+      aggregation: { Revenue: "avg", Profit: "count" },
+    });
+    expect(getAggregationForField("Revenue", config)).toBe("avg");
+    expect(getAggregationForField("Profit", config)).toBe("count");
+  });
+
+  it("defaults synthetic-only source fields to sum", () => {
+    const config = makeConfig({
+      values: [],
+      synthetic_measures: [
+        {
+          id: "margin_ratio",
+          label: "Margin Ratio",
+          operation: "sum_over_sum",
+          numerator: "Revenue",
+          denominator: "Cost",
+        },
+      ],
+      aggregation: {},
+    });
+    expect(getAggregationForField("Revenue", config)).toBe("sum");
+    expect(getAggregationForField("Cost", config)).toBe("sum");
   });
 });

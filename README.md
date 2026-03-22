@@ -27,7 +27,7 @@ result = st_pivot_table(
     rows=["Region"],
     columns=["Year"],
     values=["Revenue"],
-    aggregation="sum",
+    aggregation={"Revenue": "sum"},
     show_totals=True,
 )
 ```
@@ -56,7 +56,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `columns` | `list[str] \| None` | `None` | Column names to use as column dimensions. |
 | `values` | `list[str] \| None` | `None` | Column names to aggregate as measures. |
 | `synthetic_measures` | `list[dict] \| None` | `None` | Derived measures computed from source-field sums (for example, ratio of sums). See [Synthetic Measures](#synthetic-measures-v1). |
-| `aggregation` | `str` | `"sum"` | Aggregation function. See [Aggregation Functions](#aggregation-functions). |
+| `aggregation` | `str \| dict[str, str]` | `"sum"` | Aggregation setting for raw value fields. A single string applies to every raw measure; a dict enables per-measure aggregation. See [Aggregation Functions](#aggregation-functions). |
 | `interactive` | `bool` | `True` | Enable toolbar controls for reconfiguring the pivot. |
 
 #### Totals and Subtotals
@@ -101,7 +101,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `on_cell_click` | `Callable[[], None] \| None` | `None` | Called when a user clicks a data cell. Read the payload from `st.session_state[key]`. |
 | `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config via the toolbar. |
 | `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
-| `locked` | `bool` | `False` | Freeze toolbar config controls (rows/columns/values/aggregation/settings). Sorting and filtering via header menus remain available. |
+| `locked` | `bool` | `False` | Freeze toolbar config controls (rows/columns/values/per-measure aggregation/settings). Sorting and filtering via header menus remain available. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
 #### Data Control
@@ -133,6 +133,22 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | 90th Percentile | `"percentile_90"` | 90th percentile |
 | First | `"first"` | First value encountered |
 | Last | `"last"` | Last value encountered |
+
+```python
+st_pivot_table(
+    df,
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Units", "Price"],
+    aggregation={
+        "Revenue": "sum",
+        "Units": "count",
+        "Price": "avg",
+    },
+)
+```
+
+In the interactive toolbar, aggregation is edited inside the `Values` dropdown, and raw measure chips display the selected aggregation inline in a compact name-first format such as `Revenue (Sum)`.
 
 ### Synthetic Measures (V1)
 
@@ -173,6 +189,8 @@ st_pivot_table(
     ],
 )
 ```
+
+Per-measure aggregation applies only to raw entries in `values`. Synthetic measures keep their current sum-based formula semantics, so `sum_over_sum` still means `sum(numerator) / sum(denominator)` even when nearby raw measures use `avg`, `count`, or other aggregations.
 
 `aggregation="sum_over_sum"` is no longer supported as a table-wide aggregation mode. Use `synthetic_measures` for ratio-of-sums behavior.
 In the interactive builder, the **Format** input includes presets (Percent, Currency, Number) and validates custom patterns before save.
@@ -424,7 +442,7 @@ result = st_pivot_table(
 
 ### Locked Mode
 
-Freeze toolbar config controls so end-users cannot change rows, columns, values, aggregation, or display settings. The entire utility menu (reset, swap, config import/export, data export, settings) is hidden. Sorting and filtering via header menus remain available.
+Freeze toolbar config controls so end-users cannot change rows, columns, values, per-measure aggregation, or display settings. The entire utility menu (reset, swap, config import/export, data export, settings) is hidden. Sorting and filtering via header menus remain available.
 
 ```python
 st_pivot_table(
