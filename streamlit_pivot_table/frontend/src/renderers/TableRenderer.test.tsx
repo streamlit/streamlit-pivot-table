@@ -561,6 +561,115 @@ describe("TableRenderer - subtotal hierarchy cues", () => {
   });
 });
 
+describe("TableRenderer - redundant toggle removal", () => {
+  it("data rows have no group toggle when subtotals on; toggle only on subtotal rows", () => {
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
+    );
+    const subtotalRows = screen.getAllByTestId("pivot-subtotal-row");
+    expect(subtotalRows.length).toBeGreaterThan(0);
+    const groupToggles = screen.getAllByTestId(/^pivot-group-toggle-/);
+    expect(groupToggles.length).toBe(subtotalRows.length);
+    const dataRows = screen.getAllByTestId("pivot-data-row");
+    dataRows.forEach((row) => {
+      const toggleInRow = row.querySelector(
+        "[data-testid^='pivot-group-toggle-']",
+      );
+      expect(toggleInRow).toBeNull();
+    });
+  });
+
+  it("Category-level groups have toggle on data row when show_subtotals only Region", () => {
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: ["region"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
+    );
+    const groupToggles = screen.getAllByTestId(/^pivot-group-toggle-/);
+    expect(groupToggles.length).toBeGreaterThan(0);
+    const dataRows = screen.getAllByTestId("pivot-data-row");
+    const togglesInDataRows = groupToggles.filter((toggle) =>
+      dataRows.some((row) => row.contains(toggle)),
+    );
+    expect(togglesInDataRows.length).toBeGreaterThan(
+      0,
+      "Category-level toggles should appear on data rows when Region has subtotals but Category does not",
+    );
+  });
+
+  it("clicking subtotal row toggle calls onCollapseChange with group key", () => {
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    const subtotalRows = screen.getAllByTestId("pivot-subtotal-row");
+    expect(subtotalRows.length).toBeGreaterThan(0);
+    const firstSubtotalToggle =
+      screen.getAllByTestId(/^pivot-group-toggle-/)[0];
+    expect(firstSubtotalToggle).toBeInTheDocument();
+    fireEvent.click(firstSubtotalToggle);
+    expect(onCollapseChange).toHaveBeenCalledTimes(1);
+    expect(onCollapseChange).toHaveBeenCalledWith("row", expect.any(Array));
+    const collapsed = onCollapseChange.mock.calls[0][1];
+    expect(collapsed.length).toBeGreaterThan(0);
+  });
+
+  it("3-level hierarchy with full subtotals has no toggle on data rows", () => {
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
+    );
+    const dataRows = screen.getAllByTestId("pivot-data-row");
+    dataRows.forEach((row) => {
+      const toggleInRow = row.querySelector(
+        "[data-testid^='pivot-group-toggle-']",
+      );
+      expect(toggleInRow).toBeNull();
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // computeColSlots
 // ---------------------------------------------------------------------------
@@ -621,7 +730,11 @@ describe("Dimension toggle - row axis visibility", () => {
     });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     expect(
       screen.getByTestId("pivot-dim-toggle-row-0-region"),
@@ -642,7 +755,11 @@ describe("Dimension toggle - row axis visibility", () => {
     });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     expect(
       screen.queryByTestId(/pivot-dim-toggle-row/),
@@ -653,14 +770,18 @@ describe("Dimension toggle - row axis visibility", () => {
     const config = makeConfig({ rows: ["region", "category"], columns: [] });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     expect(
       screen.queryByTestId(/pivot-dim-toggle-row/),
     ).not.toBeInTheDocument();
   });
 
-  it("hides toggle when no onConfigChange", () => {
+  it("hides toggle when no onCollapseChange", () => {
     const config = makeConfig({
       rows: ["region", "category"],
       columns: [],
@@ -682,7 +803,11 @@ describe("Dimension toggle - column axis visibility", () => {
     });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     expect(
       screen.getByTestId("pivot-dim-toggle-col-0-year"),
@@ -696,7 +821,11 @@ describe("Dimension toggle - column axis visibility", () => {
     const config = makeConfig({ rows: ["region"], columns: ["year"] });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     expect(
       screen.queryByTestId(/pivot-dim-toggle-col/),
@@ -706,7 +835,7 @@ describe("Dimension toggle - column axis visibility", () => {
 
 describe("Dimension toggle - click behavior", () => {
   it("collapses all groups at a row dim level on click", () => {
-    const onConfigChange = vi.fn();
+    const onCollapseChange = vi.fn();
     const config = makeConfig({
       rows: ["region", "category"],
       columns: [],
@@ -717,18 +846,19 @@ describe("Dimension toggle - click behavior", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={onConfigChange}
+        onCollapseChange={onCollapseChange}
       />,
     );
     fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-0-region"));
-    expect(onConfigChange).toHaveBeenCalledTimes(1);
-    const newConfig = onConfigChange.mock.calls[0][0];
-    expect(newConfig.collapsed_groups).toContain("EU");
-    expect(newConfig.collapsed_groups).toContain("US");
+    expect(onCollapseChange).toHaveBeenCalledTimes(1);
+    expect(onCollapseChange).toHaveBeenCalledWith("row", expect.any(Array));
+    const collapsed = onCollapseChange.mock.calls[0][1];
+    expect(collapsed).toContain("EU");
+    expect(collapsed).toContain("US");
   });
 
   it("expands all groups when already collapsed", () => {
-    const onConfigChange = vi.fn();
+    const onCollapseChange = vi.fn();
     const config = makeConfig({
       rows: ["region", "category"],
       columns: [],
@@ -740,17 +870,16 @@ describe("Dimension toggle - click behavior", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={onConfigChange}
+        onCollapseChange={onCollapseChange}
       />,
     );
     fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-0-region"));
-    expect(onConfigChange).toHaveBeenCalledTimes(1);
-    const newConfig = onConfigChange.mock.calls[0][0];
-    expect(newConfig.collapsed_groups).toEqual([]);
+    expect(onCollapseChange).toHaveBeenCalledTimes(1);
+    expect(onCollapseChange).toHaveBeenCalledWith("row", []);
   });
 
   it("collapses column dimension on click", () => {
-    const onConfigChange = vi.fn();
+    const onCollapseChange = vi.fn();
     const config = makeConfig({
       rows: ["region"],
       columns: ["year", "quarter"],
@@ -760,18 +889,19 @@ describe("Dimension toggle - click behavior", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={onConfigChange}
+        onCollapseChange={onCollapseChange}
       />,
     );
     fireEvent.click(screen.getByTestId("pivot-dim-toggle-col-0-year"));
-    expect(onConfigChange).toHaveBeenCalledTimes(1);
-    const newConfig = onConfigChange.mock.calls[0][0];
-    expect(newConfig.collapsed_col_groups).toContain("2023");
-    expect(newConfig.collapsed_col_groups).toContain("2024");
+    expect(onCollapseChange).toHaveBeenCalledTimes(1);
+    expect(onCollapseChange).toHaveBeenCalledWith("col", expect.any(Array));
+    const collapsed = onCollapseChange.mock.calls[0][1];
+    expect(collapsed).toContain("2023");
+    expect(collapsed).toContain("2024");
   });
 
   it("normalizes __ALL__ before toggling", () => {
-    const onConfigChange = vi.fn();
+    const onCollapseChange = vi.fn();
     const config = makeConfig({
       rows: ["region", "category"],
       columns: [],
@@ -783,14 +913,14 @@ describe("Dimension toggle - click behavior", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={onConfigChange}
+        onCollapseChange={onCollapseChange}
       />,
     );
     fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-0-region"));
-    expect(onConfigChange).toHaveBeenCalledTimes(1);
-    const newConfig = onConfigChange.mock.calls[0][0];
-    expect(newConfig.collapsed_groups).not.toContain("__ALL__");
-    expect(newConfig.collapsed_groups).toEqual([]);
+    expect(onCollapseChange).toHaveBeenCalledTimes(1);
+    const collapsed = onCollapseChange.mock.calls[0][1];
+    expect(collapsed).not.toContain("__ALL__");
+    expect(collapsed).toEqual([]);
   });
 });
 
@@ -803,7 +933,11 @@ describe("Dimension toggle - aria attributes", () => {
     });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     const btn = screen.getByTestId("pivot-dim-toggle-row-0-region");
     expect(btn).toHaveAttribute("aria-expanded", "true");
@@ -818,7 +952,11 @@ describe("Dimension toggle - aria attributes", () => {
     });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     const btn = screen.getByTestId("pivot-dim-toggle-row-0-region");
     expect(btn).toHaveAttribute("aria-expanded", "false");
@@ -832,7 +970,11 @@ describe("Dimension toggle - aria attributes", () => {
     });
     const pd = new PivotData(MULTI_DIM_DATA, config);
     render(
-      <TableRenderer pivotData={pd} config={config} onConfigChange={vi.fn()} />,
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+      />,
     );
     const btn = screen.getByTestId("pivot-dim-toggle-row-0-region");
     expect(btn).toHaveAttribute("aria-label", "Collapse all region groups");
@@ -853,7 +995,7 @@ describe("Sort indicator on targeted dimension", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={vi.fn()}
+        onCollapseChange={vi.fn()}
         onSortChange={vi.fn()}
         onFilterChange={vi.fn()}
       />,
@@ -880,7 +1022,7 @@ describe("Sort indicator on targeted dimension", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={vi.fn()}
+        onCollapseChange={vi.fn()}
         onSortChange={vi.fn()}
         onFilterChange={vi.fn()}
       />,
@@ -893,7 +1035,6 @@ describe("Sort indicator on targeted dimension", () => {
 
 describe("Dimension toggle - disabled when parent collapsed", () => {
   it("disables child toggle when parent dimension is fully collapsed", () => {
-    const onConfigChange = vi.fn();
     const config = makeConfig({
       rows: ["region", "category", "product"],
       columns: [],
@@ -905,7 +1046,7 @@ describe("Dimension toggle - disabled when parent collapsed", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={onConfigChange}
+        onCollapseChange={vi.fn()}
       />,
     );
 
@@ -918,7 +1059,7 @@ describe("Dimension toggle - disabled when parent collapsed", () => {
   });
 
   it("child toggle is clickable when parent is expanded", () => {
-    const onConfigChange = vi.fn();
+    const onCollapseChange = vi.fn();
     const config = makeConfig({
       rows: ["region", "category", "product"],
       columns: [],
@@ -929,7 +1070,7 @@ describe("Dimension toggle - disabled when parent collapsed", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={onConfigChange}
+        onCollapseChange={onCollapseChange}
       />,
     );
 
@@ -938,14 +1079,14 @@ describe("Dimension toggle - disabled when parent collapsed", () => {
     );
     expect(categoryToggle).toHaveAttribute("role", "button");
     fireEvent.click(categoryToggle);
-    expect(onConfigChange).toHaveBeenCalled();
+    expect(onCollapseChange).toHaveBeenCalled();
   });
 });
 
 describe("Dimension toggle - interaction isolation", () => {
   it("toggle click does not propagate to header sort", () => {
     const onSortChange = vi.fn();
-    const onConfigChange = vi.fn();
+    const onCollapseChange = vi.fn();
     const config = makeConfig({
       rows: ["region", "category"],
       columns: [],
@@ -956,13 +1097,13 @@ describe("Dimension toggle - interaction isolation", () => {
       <TableRenderer
         pivotData={pd}
         config={config}
-        onConfigChange={onConfigChange}
+        onCollapseChange={onCollapseChange}
         onSortChange={onSortChange}
         onFilterChange={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-0-region"));
-    expect(onConfigChange).toHaveBeenCalledTimes(1);
+    expect(onCollapseChange).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1266,7 +1407,7 @@ describe("empty data cells non-interactive", () => {
         pivotData={pd}
         config={config}
         onCellClick={vi.fn()}
-        onConfigChange={vi.fn()}
+        onCollapseChange={vi.fn()}
       />,
     );
 

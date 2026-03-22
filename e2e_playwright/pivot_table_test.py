@@ -740,7 +740,7 @@ def test_subtotal_group_collapse(page_at_app: Page):
     rows_before = container.get_by_test_id("pivot-data-row").count()
 
     toggle = container.locator(
-        "button[data-testid^='pivot-group-toggle-']"
+        "[data-testid^='pivot-group-toggle-']"
         ":not([data-testid$='-expand-all'])"
         ":not([data-testid$='-collapse-all'])"
     ).first

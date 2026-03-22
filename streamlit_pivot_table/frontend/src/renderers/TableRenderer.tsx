@@ -38,6 +38,7 @@ import {
   isSyntheticMeasure,
   showRowTotals,
   showColumnTotals,
+  showSubtotalForDim,
   showTotalForMeasure,
   type CellClickPayload,
   type DimensionFilter,
@@ -1052,8 +1053,17 @@ export function renderDataRow(
         if (span === 0) return null;
         const isGroupingDim = subtotalsOn && dimIdx < leafDimIdx;
         const isLeafDim = subtotalsOn && dimIdx === leafDimIdx;
+        // Only show toggle on data rows when this dimension has NO subtotal row.
+        // When subtotals exist, the subtotal row has the toggle to avoid redundancy.
+        const hasSubtotalRow = showSubtotalForDim(
+          config,
+          config.rows[dimIdx] ?? "",
+        );
         const showToggle =
-          isGroupingDim && span > 1 && groupContext?.onToggleGroup;
+          isGroupingDim &&
+          span > 1 &&
+          groupContext?.onToggleGroup &&
+          !hasSubtotalRow;
         const groupKeyStr = showToggle
           ? rowKey.slice(0, dimIdx + 1).join("\x00")
           : "";
@@ -1074,7 +1084,11 @@ export function renderDataRow(
             key={dimIdx}
             scope="row"
             className={dimClasses}
-            data-testid="pivot-row-header"
+            data-testid={
+              showToggle
+                ? `pivot-group-toggle-${groupKeyStr}`
+                : "pivot-row-header"
+            }
             rowSpan={span > 1 ? span : undefined}
             data-dim-index={dimIdx}
             {...(showToggle

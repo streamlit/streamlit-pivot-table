@@ -571,7 +571,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains 13 sections demonstrating every feature with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains 13 sections covering the major features and usage patterns with interactive examples and inline documentation.
 
 ### Building the frontend
 

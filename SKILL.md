@@ -66,8 +66,8 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `columns` | `list[str] \| None` | `None` | Column names to use as column dimensions. |
 | `values` | `list[str] \| None` | `None` | Column names to aggregate as measures. |
 | `synthetic_measures` | `list[dict] \| None` | `None` | Derived measures computed from source-field sums (e.g., ratio of sums). See [Synthetic Measures](#synthetic-measures). |
-| `aggregation` | `str` | `"sum"` | Aggregation function. See [Aggregation Functions](#aggregation-functions). |
-| `interactive` | `bool` | `True` | Enable toolbar controls for reconfiguring the pivot. |
+| `aggregation` | `str \| dict[str, str]` | `"sum"` | Aggregation setting for raw value fields. A single string applies to every raw measure; a dict enables per-measure aggregation. See [Aggregation Functions](#aggregation-functions). |
+| `interactive` | `bool` | `True` | Enable end-user config controls. When `False`, the toolbar is hidden and header-menu sort/filter/show-values-as actions are disabled. |
 
 #### Totals and Subtotals
 
@@ -109,9 +109,9 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `on_cell_click` | `Callable[[], None] \| None` | `None` | Called when a user clicks a data cell. Read the payload from `st.session_state[key]`. See [Cell Click Payload](#cell-click-payload). |
-| `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config via the toolbar. |
+| `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config interactively, including toolbar and header-menu actions. |
 | `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
-| `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, while data export, group expand/collapse, and header-menu sorting/filtering/show-values-as remain available. |
+| `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, viewer-safe actions like data export and group expand/collapse remain available, and header-menu sorting/filtering/`Show Values As` plus drill-down still work. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
 #### Data Control
@@ -415,7 +415,7 @@ Hover over a parent column header to reveal the collapse toggle.
 
 ### Data Export
 
-Export the pivot table as CSV, TSV, or copy to clipboard. Available via the toolbar utility menu (download icon) when `interactive=True`.
+Export the pivot table as CSV, TSV, or copy to clipboard. Available via the toolbar utility menu (download icon) whenever the interactive toolbar is shown, including locked viewer mode.
 
 - **Format**: CSV, TSV, or Clipboard (tab-separated for pasting into spreadsheets)
 - **Content**: Formatted (display values with currency, percentages, etc.) or Raw (unformatted numbers)
@@ -445,7 +445,7 @@ result = st_pivot_table(
 
 ### Locked Mode
 
-Freeze toolbar config controls so end-users cannot change rows, columns, values, aggregation, or display settings. The entire utility menu (reset, swap, config import/export, data export, settings) is hidden. Sorting and filtering via header menus remain available.
+Use `locked=True` for a viewer-mode experience with exploration enabled. Toolbar config controls stay locked so end-users cannot change rows, columns, values, per-measure aggregation, or settings toggles. Reset, Swap, and config import/export are hidden, while data export remains available and the Settings gear stays visible for read-only display status plus Expand/Collapse All group controls. Header-menu sorting, filtering, and `Show Values As` remain available, and drill-down still works.
 
 ```python
 st_pivot_table(
@@ -471,7 +471,11 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
 | **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
 
-In **locked mode**, Reset, Swap, and config import/export are hidden while data export remains available. The Settings gear remains visible, its popover shows read-only view status plus group expand/collapse actions, and sorting/filtering/show-values-as remain available via header menus.
+In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings gear remains visible, its popover shows read-only display status plus group expand/collapse actions, and header-menu sorting, filtering, and `Show Values As` stay enabled.
+
+### Non-Interactive Mode
+
+Set `interactive=False` to render a read-only pivot view. This hides the toolbar and disables header-menu config actions (sorting, filtering, and `Show Values As`). Cell clicks and drill-down remain available.
 
 ---
 
@@ -520,7 +524,7 @@ For total cells, `rowKey` or `colKey` will be `["Total"]` and the corresponding 
 
 ### Config State
 
-The returned `config` dict contains the full current configuration including any changes the user made via the toolbar. Use this to persist user customizations or synchronize multiple components.
+The returned `config` dict contains the current supported configuration state, including interactive changes such as rows, columns, values, aggregation, totals, sorting, filtering, and display options. Use this to persist user customizations or synchronize multiple components.
 
 ---
 

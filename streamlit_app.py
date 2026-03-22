@@ -52,6 +52,7 @@ and **value fields** to aggregate.
 **Try it:**
 - Use the **Rows / Columns / Values** dropdowns in the toolbar to add or remove fields.
 - Change the **Aggregation** (e.g. Sum → Average) in the toolbar.
+- Omit `rows`, `columns`, and `values` entirely to let the component auto-detect dimensions and measures.
 - Click any data cell — the cell coordinates will appear below the table.
 - Hover over the top-right of the toolbar to reveal the **utility menu**:
   - **Reset** (↺) — resets the config to the original Python-supplied values
@@ -96,8 +97,22 @@ st_pivot_table(
         language="python",
     )
 
-if result_basic.get("cell_click"):
-    st.info(f"Last cell click: {result_basic['cell_click']}")
+basic_cell_click = st.session_state.get("basic", {}).get("cell_click")
+if basic_cell_click:
+    st.info(f"Last cell click: {basic_cell_click}")
+
+st.markdown("#### Auto-Detect Layout")
+st.markdown(
+    """
+If you omit `rows`, `columns`, and `values`, the component auto-detects dimensions
+and measures from the input data. This is useful for quick exploration when you
+want a sensible starting layout without pre-configuring the pivot.
+"""
+)
+st_pivot_table(
+    df,
+    key="basic_auto_detect",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -156,10 +171,10 @@ st_pivot_table(
 
 
 # ---------------------------------------------------------------------------
-# Section 3: Filtering and Locked Mode
+# Section 3: Filtering, Locked Mode, and Non-Interactive Mode
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("3. Filtering and Locked Mode")
+st.subheader("3. Filtering, Locked Mode, and Non-Interactive Mode")
 
 st.markdown(
     """
@@ -169,20 +184,27 @@ rows, columns, values, or per-measure aggregation — but sorting and filtering 
 menus still work, **Show Values As** remains available on value headers, and
 export still stays available as a viewer action. **Custom sorters** enforce a specific dimension order.
 
+**Non-interactive mode** (`interactive=False`) is the true read-only mode:
+the toolbar is hidden, header-menu config actions are disabled, but cell clicks
+and drill-down still work.
+
 **Try it (left table):**
 - Click the **⋮** menu icon on the "Region" header → uncheck regions to filter them out.
 - Use the search box to find specific values quickly.
 
-**Right table** is **locked** — authoring actions like reset, swap, and config import/export
+**Middle table** is **locked** — authoring actions like reset, swap, and config import/export
 are hidden, but **Export Data** remains available, the **Settings** gear shows
-read-only view status, and you can still sort, filter, and change **Show Values As**
-from the header menus.
+read-only view status plus **Expand/Collapse All** group controls, and you can
+still sort, filter, and change **Show Values As** from the header menus.
 
-**API parameters used:** `hidden_from_aggregators`, `sorters`, `locked`
+**Right table** is **non-interactive** — there is no toolbar and no header-menu
+config UI, but cell clicks still work and drill-down remains enabled.
+
+**API parameters used:** `hidden_from_aggregators`, `sorters`, `locked`, `interactive`
 """
 )
 
-col_left, col_right = st.columns(2)
+col_left, col_middle, col_right = st.columns(3)
 
 with col_left:
     st.caption("Interactive (with custom sorters)")
@@ -196,16 +218,29 @@ with col_left:
         null_handling="zero",
     )
 
-with col_right:
+with col_middle:
     st.caption("Locked mode")
     st_pivot_table(
         df,
         key="locked",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        locked=True,
+        hidden_from_aggregators=["Year", "Region"],
+        show_subtotals=True,
+    )
+
+with col_right:
+    st.caption("Non-interactive mode")
+    result_noninteractive = st_pivot_table(
+        df,
+        key="noninteractive",
         rows=["Region"],
         columns=["Year"],
         values=["Revenue"],
-        locked=True,
-        hidden_from_aggregators=["Year", "Region"],
+        interactive=False,
+        on_cell_click=lambda: None,
     )
 
 with st.expander("View Code"):
@@ -226,15 +261,31 @@ st_pivot_table(
 st_pivot_table(
     df,
     key="locked",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    locked=True,
+    hidden_from_aggregators=["Year", "Region"],
+    show_subtotals=True,
+)
+
+# Non-interactive — no toolbar or header-menu config actions
+st_pivot_table(
+    df,
+    key="noninteractive",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue"],
-    locked=True,
-    hidden_from_aggregators=["Year", "Region"],
+    interactive=False,
+    on_cell_click=lambda: None,
 )
 """,
         language="python",
     )
+
+noninteractive_cell_click = st.session_state.get("noninteractive", {}).get("cell_click")
+if noninteractive_cell_click:
+    st.info(f"Non-interactive cell click: {noninteractive_cell_click}")
 
 
 # ---------------------------------------------------------------------------
@@ -778,6 +829,8 @@ pasting into Excel or Google Sheets.
 - Use ``export_filename`` to customize the downloaded file name. The date
   (``YYYY-MM-DD``) and file extension are appended automatically.
   Defaults to ``"pivot-table"`` (e.g. ``pivot-table_2026-03-09.csv``).
+- This demo sets `export_filename="sales-export-demo"` so you can see the custom
+  filename behavior in the downloaded file.
 """
 )
 
@@ -791,6 +844,7 @@ st_pivot_table(
     number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
     show_totals=True,
     interactive=True,
+    export_filename="sales-export-demo",
 )
 
 with st.expander("View Code"):
@@ -804,6 +858,7 @@ st_pivot_table(
     values=["Revenue", "Profit"],
     number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
     show_totals=True,
+    export_filename="sales-export-demo",
 )
 # Then use the Download icon in the toolbar utility menu.
 """,
