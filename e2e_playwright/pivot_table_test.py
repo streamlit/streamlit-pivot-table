@@ -75,7 +75,9 @@ def get_pivot(page: Page, key: str) -> Locator:
 
 def open_settings_popover(container: Locator):
     """Open the gear settings popover in the toolbar."""
-    container.get_by_test_id("toolbar-settings").click()
+    button = container.get_by_test_id("toolbar-settings")
+    button.scroll_into_view_if_needed()
+    button.evaluate("el => el.click()")
     expect(container.get_by_test_id("toolbar-settings-panel")).to_be_visible(
         timeout=5000
     )
@@ -527,7 +529,7 @@ def test_header_menu_sort_key_asc(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     container.get_by_test_id("header-menu-trigger-Region").click()
-    menu = container.get_by_test_id("header-menu-Region")
+    menu = page.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
     menu.get_by_test_id("header-sort-key-asc").click()
@@ -549,10 +551,10 @@ def test_header_menu_sort_key_desc(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     container.get_by_test_id("header-menu-trigger-Region").click()
-    menu = container.get_by_test_id("header-menu-Region")
+    menu = page.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
-    menu.get_by_test_id("header-sort-key-desc").click()
+    menu.get_by_test_id("header-sort-key-desc").evaluate("el => el.click()")
 
     expect(container.get_by_test_id("pivot-row-header").first).to_have_text(
         "West", timeout=10000
@@ -881,8 +883,8 @@ def test_locked_mode_toolbar_disabled(page_at_app: Page):
     expect(container.get_by_test_id("toolbar-settings")).to_be_visible()
 
 
-def test_locked_mode_header_filter_still_works(page_at_app: Page):
-    """In locked mode, header menu opens and filtering still functions."""
+def test_locked_mode_header_sort_and_filter_still_work(page_at_app: Page):
+    """In locked mode, header-menu exploration remains available."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_locked")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
@@ -890,18 +892,19 @@ def test_locked_mode_header_filter_still_works(page_at_app: Page):
     trigger = container.get_by_test_id("header-menu-trigger-Region")
     expect(trigger).to_be_visible()
 
-    trigger.click()
+    trigger.evaluate("el => el.click()")
     menu = container.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
-    # Sort section is hidden in locked mode
-    expect(menu.get_by_test_id("header-menu-sort")).to_have_count(0)
-
-    # Filter section remains functional
+    sort_section = menu.get_by_test_id("header-menu-sort")
+    expect(sort_section).to_be_visible()
     filter_section = menu.get_by_test_id("header-menu-filter")
     expect(filter_section).to_be_visible()
     checkboxes = filter_section.locator("input[type=checkbox]")
     assert checkboxes.count() > 0
+
+    menu.get_by_test_id("header-sort-key-desc").click()
+    expect(container.get_by_test_id("pivot-row-header").first).to_have_text("West")
 
 
 # =====================================================================

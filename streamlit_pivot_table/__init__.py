@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,6 +54,7 @@ class SortConfig(TypedDict, total=False):
     direction: str  # "asc" | "desc"
     value_field: str  # required when by="value"
     col_key: list[str]  # for row sort: sort within this specific column
+    dimension: str  # optional: scope sort to this dimension level and below
 
 
 class PivotConfig(TypedDict, total=False):
@@ -410,8 +411,8 @@ def st_pivot_table(
     sorters: dict[str, list[str]] | None = None,
     locked: bool = False,
     menu_limit: int | None = None,
-    row_sort: dict[str, Any] | None = None,
-    col_sort: dict[str, Any] | None = None,
+    row_sort: SortConfig | None = None,
+    col_sort: SortConfig | None = None,
     # Phase 3 parameters
     sticky_headers: bool = True,
     show_subtotals: bool | list[str] = False,
@@ -460,7 +461,9 @@ def st_pivot_table(
     empty_cell_value : str
         Display string for cells with no data.
     interactive : bool
-        If True, the user can reconfigure the pivot via toolbar controls.
+        If True, the user can reconfigure the pivot via toolbar controls and
+        header-menu actions. If False, the toolbar is hidden and header-menu
+        sort/filter/show-values-as actions are disabled.
     height : int or None
         Fixed height in pixels. None means auto-size (capped by ``max_height``).
     max_height : int
@@ -493,8 +496,10 @@ def st_pivot_table(
         Custom sort orderings per dimension. Maps column name to a list
         of values in the desired order.
     locked : bool
-        If True, toolbar config controls are disabled (filtering still
-        allowed). Defaults to False.
+        If True, toolbar config controls are disabled. The settings gear stays
+        visible so users can inspect settings and expand/collapse groups, but
+        settings toggles are disabled. Header-menu sorting and filtering remain
+        available. Defaults to False.
     menu_limit : int or None
         Max items to show in the header-menu filter checklist. Defaults
         to 50 when None.
@@ -628,11 +633,15 @@ def st_pivot_table(
     if sorters is not None:
         if not isinstance(sorters, dict):
             raise TypeError(f"sorters must be a dict, got {type(sorters).__name__}")
-        for k, v in sorters.items():
-            if not isinstance(k, str):
-                raise TypeError(f"sorters keys must be strings, got {type(k).__name__}")
-            if not isinstance(v, list) or not all(isinstance(s, str) for s in v):
-                raise TypeError(f"sorters[{k!r}] must be a list of strings")
+        for sorter_key, sorter_values in sorters.items():
+            if not isinstance(sorter_key, str):
+                raise TypeError(
+                    f"sorters keys must be strings, got {type(sorter_key).__name__}"
+                )
+            if not isinstance(sorter_values, list) or not all(
+                isinstance(s, str) for s in sorter_values
+            ):
+                raise TypeError(f"sorters[{sorter_key!r}] must be a list of strings")
 
     if not isinstance(locked, bool):
         raise TypeError(f"locked must be a bool, got {type(locked).__name__}")
@@ -930,4 +939,4 @@ def st_pivot_table(
     if on_cell_click is not None:
         mount_kwargs["on_cell_click_change"] = on_cell_click
 
-    return _component(**mount_kwargs)
+    return cast(PivotTableResult, _component(**mount_kwargs))

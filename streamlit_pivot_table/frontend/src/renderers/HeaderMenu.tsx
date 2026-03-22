@@ -47,7 +47,7 @@ export interface HeaderMenuProps {
   axis: "row" | "col";
   /** Current sort config for this axis. */
   sortConfig?: SortConfig;
-  /** When undefined, the sort section is hidden (e.g. locked mode). */
+  /** When undefined, the sort section is hidden (e.g. non-interactive mode). */
   onSortChange?: (sort: SortConfig | undefined) => void;
   /** Current filter for this dimension. */
   filter?: DimensionFilter;

@@ -172,9 +172,9 @@ menus still work. **Custom sorters** enforce a specific dimension order.
 - Click the **⋮** menu icon on the "Region" header → uncheck regions to filter them out.
 - Use the search box to find specific values quickly.
 
-**Right table** is **locked** — the toolbar config controls and utility menu
-(reset, swap, import/export, settings) are all hidden, but you can still
-sort and filter via the column header menus.
+**Right table** is **locked** — the toolbar config controls and utility actions
+(reset, swap, import/export) are hidden, the **Settings** gear remains visible
+for inspection only, and you can still sort and filter via the column header menus.
 
 **API parameters used:** `hidden_from_aggregators`, `sorters`, `locked`
 """

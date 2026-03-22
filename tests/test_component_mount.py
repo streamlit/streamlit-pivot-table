@@ -85,6 +85,32 @@ def test_mount_includes_optional_payload_fields_and_callbacks(
     assert mount_kwargs["on_config_change"] is on_config_change
 
 
+def test_mount_preserves_sort_dimension_in_config(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        row_sort={
+            "by": "key",
+            "direction": "asc",
+            "dimension": "Category",
+        },
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config["row_sort"] == {
+        "by": "key",
+        "direction": "asc",
+        "dimension": "Category",
+    }
+
+
 def test_hidden_from_drag_drop_alias_flows_to_payload(
     sample_df, pivot_module, mount_recorder
 ):

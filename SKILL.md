@@ -471,7 +471,7 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
 | **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
 
-In **locked mode**, the entire utility menu (including Settings) is hidden. Only sorting and filtering via header menus remain available.
+In **locked mode**, Reset, Swap, config import/export, and data export are hidden. The Settings gear remains visible, its toggles are disabled, and sorting/filtering via header menus remain available.
 
 ---
 
@@ -543,7 +543,7 @@ This section covers deploying the pivot table component (as a `.whl` file) into 
 
 ```
 To set up your SiS on SPCS app with the pivot table component, I need:
-1. The path to your .whl file (e.g., ~/Downloads/streamlit_pivot_table-0.0.1-py3-none-any.whl)
+1. The path to your .whl file (e.g., ~/Downloads/streamlit_pivot_table-0.1.0-py3-none-any.whl)
 2. Do you have an existing SiS project directory with snowflake.yml, or should I create one from scratch?
 3. What Snowflake table(s) will the app query?
 4. What compute pool should the app run on? (e.g., MY_COMPUTE_POOL)
@@ -553,7 +553,7 @@ To set up your SiS on SPCS app with the pivot table component, I need:
 
 **After the user responds**, derive these values from the `.whl` filename and use them in ALL subsequent steps:
 
-- **`WHL_FILENAME`**: The `.whl` file name (e.g., `streamlit_pivot_table-0.0.1-py3-none-any.whl`)
+- **`WHL_FILENAME`**: The `.whl` file name (e.g., `streamlit_pivot_table-0.1.0-py3-none-any.whl`)
 - **`PACKAGE_NAME`**: The portion before the first version segment, with hyphens replaced by underscores (e.g., `streamlit_pivot_table`)
 - **`TABLE_NAMES`**: The Snowflake table(s) the user wants to query
 - **`COMPUTE_POOL`**: The SPCS compute pool name for the app runtime

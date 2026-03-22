@@ -55,7 +55,7 @@ export interface UseHeaderMenuResult {
     triggerEl: HTMLElement,
   ) => void;
   handleCloseMenu: () => void;
-  /** Sort change handler; undefined when sort is disabled (locked mode). */
+  /** Sort change handler; undefined when sort is disabled (e.g. non-interactive mode). */
   handleMenuSortChange: ((sort: SortConfig | undefined) => void) | undefined;
   handleMenuFilterChange: (
     field: string,

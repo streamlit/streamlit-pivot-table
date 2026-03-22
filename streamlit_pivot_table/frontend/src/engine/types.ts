@@ -809,7 +809,7 @@ export interface PivotTableData {
   hidden_from_drag_drop?: string[];
   /** Phase 2: custom sort orderings per dimension. */
   sorters?: Record<string, string[]>;
-  /** Phase 2: lock config controls (filtering still allowed). */
+  /** Phase 2: lock config controls while keeping header-menu exploration enabled. */
   locked?: boolean;
   /** Phase 2: max items shown in header-menu filter checklist. */
   menu_limit?: number;

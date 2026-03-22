@@ -330,7 +330,7 @@ describe("HeaderMenu - keyboard", () => {
   });
 });
 
-describe("HeaderMenu - locked mode (no onSortChange)", () => {
+describe("HeaderMenu - sort-disabled mode (no onSortChange)", () => {
   it("hides the sort section when onSortChange is undefined", () => {
     render(<HeaderMenu {...baseProps} onSortChange={undefined} />);
     expect(screen.queryByTestId("header-sort-key-asc")).not.toBeInTheDocument();

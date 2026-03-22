@@ -57,7 +57,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `values` | `list[str] \| None` | `None` | Column names to aggregate as measures. |
 | `synthetic_measures` | `list[dict] \| None` | `None` | Derived measures computed from source-field sums (for example, ratio of sums). See [Synthetic Measures](#synthetic-measures-v1). |
 | `aggregation` | `str \| dict[str, str]` | `"sum"` | Aggregation setting for raw value fields. A single string applies to every raw measure; a dict enables per-measure aggregation. See [Aggregation Functions](#aggregation-functions). |
-| `interactive` | `bool` | `True` | Enable toolbar controls for reconfiguring the pivot. |
+| `interactive` | `bool` | `True` | Enable end-user config controls. When `False`, the toolbar is hidden and header-menu sort/filter/show-values-as actions are disabled. |
 
 #### Totals and Subtotals
 
@@ -99,9 +99,9 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `on_cell_click` | `Callable[[], None] \| None` | `None` | Called when a user clicks a data cell. Read the payload from `st.session_state[key]`. |
-| `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config via the toolbar. |
+| `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config interactively, including toolbar and header-menu actions. |
 | `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
-| `locked` | `bool` | `False` | Freeze toolbar config controls (rows/columns/values/per-measure aggregation/settings). Sorting and filtering via header menus remain available. |
+| `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls and settings toggles are disabled, while header-menu sorting/filtering and drill-down remain available. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
 #### Data Control
@@ -137,6 +137,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 ```python
 st_pivot_table(
     df,
+    key="aggregation_example",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Units", "Price"],
@@ -166,6 +167,7 @@ Optional synthetic-measure fields:
 ```python
 st_pivot_table(
     df,
+    key="synthetic_measures_example",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue"],
@@ -238,6 +240,7 @@ Display measures as percentages instead of raw numbers.
 ```python
 st_pivot_table(
     df,
+    key="show_values_as_example",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue", "Profit"],
@@ -266,12 +269,18 @@ A single string applies to all value fields. A dict maps field names to patterns
 # Per-field formatting
 st_pivot_table(
     df,
+    key="number_format_per_field_example",
     values=["Revenue", "Profit"],
     number_format={"Revenue": "$,.0f", "Profit": ",.2f"},
 )
 
 # Global format for all fields
-st_pivot_table(df, values=["Revenue"], number_format="$,.0f")
+st_pivot_table(
+    df,
+    key="number_format_global_example",
+    values=["Revenue"],
+    number_format="$,.0f",
+)
 ```
 
 ### Conditional Formatting
@@ -331,6 +340,7 @@ Multiple rules can be combined:
 ```python
 st_pivot_table(
     df,
+    key="conditional_formatting_example",
     values=["Revenue", "Profit", "Units"],
     conditional_formatting=[
         {"type": "data_bars", "apply_to": ["Revenue"], "color": "#1976d2", "fill": "gradient"},
@@ -354,10 +364,14 @@ Control how null/NaN values in the source data are treated.
 
 ```python
 # Global mode
-st_pivot_table(df, null_handling="zero")
+st_pivot_table(df, key="null_handling_global_example", null_handling="zero")
 
 # Per-field modes
-st_pivot_table(df, null_handling={"Region": "separate", "Revenue": "zero"})
+st_pivot_table(
+    df,
+    key="null_handling_per_field_example",
+    null_handling={"Region": "separate", "Revenue": "zero"},
+)
 ```
 
 ### Subtotals and Row Grouping
@@ -367,6 +381,7 @@ With 2+ row dimensions, enable subtotals to see group-level aggregations with co
 ```python
 st_pivot_table(
     df,
+    key="subtotals_example",
     rows=["Region", "Category"],
     columns=["Year"],
     values=["Revenue"],
@@ -402,6 +417,7 @@ With 2+ column dimensions, column groups can be collapsed into subtotal columns.
 ```python
 st_pivot_table(
     df,
+    key="column_groups_example",
     rows=["Region"],
     columns=["Year", "Category"],
     values=["Revenue"],
@@ -442,11 +458,12 @@ result = st_pivot_table(
 
 ### Locked Mode
 
-Freeze toolbar config controls so end-users cannot change rows, columns, values, per-measure aggregation, or display settings. The entire utility menu (reset, swap, config import/export, data export, settings) is hidden. Sorting and filtering via header menus remain available.
+Use `locked=True` for a viewer-mode experience with exploration enabled. Toolbar config controls stay locked so end-users cannot change rows, columns, values, per-measure aggregation, or settings toggles. Reset, Swap, config import/export, and data export are hidden, while the Settings gear remains visible so users can inspect settings and use Expand/Collapse All group controls. Header-menu sorting and filtering remain available, and drill-down still works.
 
 ```python
 st_pivot_table(
     df,
+    key="locked_mode_example",
     rows=["Region"],
     columns=["Year"],
     values=["Revenue"],
@@ -467,7 +484,11 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
 | **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
 
-In **locked mode**, the entire utility menu (including Settings) is hidden. Only sorting and filtering via header menus remain available.
+In **locked mode**, Reset, Swap, config import/export, and data export are hidden. The Settings gear remains visible, settings toggles are disabled, group expand/collapse actions remain available, and header-menu sorting and filtering stay enabled.
+
+### Non-Interactive Mode
+
+Set `interactive=False` to render a read-only pivot view. This hides the toolbar and disables header-menu config actions (sorting, filtering, and `Show Values As`). Cell clicks and drill-down remain available.
 
 ---
 
@@ -516,7 +537,7 @@ For total cells, `rowKey` or `colKey` will be `["Total"]` and the corresponding 
 
 ### Config State
 
-The returned `config` dict contains the full current configuration including any changes the user made via the toolbar. Use this to persist user customizations or synchronize multiple components.
+The returned `config` dict contains the current supported configuration state, including interactive changes such as rows, columns, values, aggregation, totals, sorting, filtering, and display options. Use this to persist user customizations or synchronize multiple components.
 
 ---
 
@@ -550,7 +571,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains 12 sections demonstrating every feature with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains 13 sections demonstrating every feature with interactive examples and inline documentation.
 
 ### Building the frontend
 
@@ -583,7 +604,7 @@ npx vitest run
    uv build
    ```
 
-Output: `dist/streamlit_pivot_table-0.0.1-py3-none-any.whl`
+Output: `dist/streamlit_pivot_table-0.1.0-py3-none-any.whl`
 
 ### Requirements
 

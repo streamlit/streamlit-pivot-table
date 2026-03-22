@@ -63,7 +63,7 @@ export interface ToolbarProps {
   onConfigChange?: (config: PivotConfigV1) => void;
   /** Original config from Python for reset. If omitted, reset is hidden. */
   initialConfig?: PivotConfigV1;
-  /** Lock config controls (filtering still allowed). */
+  /** Lock config controls while keeping header-menu exploration enabled. */
   locked?: boolean;
   /** Columns that cannot be reassigned between zones. */
   frozenColumns?: Set<string>;
