@@ -17,6 +17,7 @@
 
 Provides StreamlitRunner, a context manager that starts a Streamlit server
 in a subprocess, waits for it to become healthy, and tears it down on exit.
+Also provides shared Playwright locator helpers used across E2E test modules.
 """
 
 import contextlib
@@ -29,11 +30,124 @@ import sys
 import time
 import typing
 from contextlib import closing
+from pathlib import Path
 from tempfile import TemporaryFile
 
 import requests
+from playwright.sync_api import Locator, Page, expect
 
 LOGGER = logging.getLogger(__file__)
+
+SCRIPT = Path(__file__).parent / "pivot_table.py"
+TOOLBAR_SCRIPT = Path(__file__).parent / "pivot_table_toolbar_app.py"
+INTERACTIONS_SCRIPT = Path(__file__).parent / "pivot_table_interactions_app.py"
+DATA_SCRIPT = Path(__file__).parent / "pivot_table_data_app.py"
+
+PIVOT_KEYS = [
+    "test_pivot",
+    "test_pivot_subtotals",
+    "test_pivot_locked",
+    "test_pivot_locked_groups",
+    "test_pivot_cond_fmt",
+    "test_pivot_readonly",
+    "test_pivot_number_fmt",
+    "test_pivot_drilldown",
+    "test_pivot_empty",
+    "test_pivot_single_row",
+    "test_pivot_no_cols",
+    "test_pivot_count_distinct",
+    "test_pivot_median",
+    "test_pivot_auto",
+    "test_pivot_threshold",
+    "test_pivot_col_groups",
+    "test_pivot_alignment",
+    "test_pivot_tall",
+    "test_pivot_null_separate",
+    "test_pivot_null_zero",
+    "test_pivot_dim_toggle",
+    "test_pivot_no_drilldown",
+    "test_pivot_per_dim_subtotals",
+    "test_pivot_per_measure_row_totals",
+    "test_pivot_per_measure_col_totals",
+    "test_pivot_sparse_drilldown",
+    "test_pivot_synthetic",
+    "test_pivot_scalar_roundtrip",
+]
+
+TOOLBAR_PIVOT_KEYS = [
+    "test_pivot",
+    "test_pivot_subtotals",
+    "test_pivot_cond_fmt",
+    "test_pivot_scalar_roundtrip",
+]
+
+INTERACTIONS_PIVOT_KEYS = [
+    "test_pivot",
+    "test_pivot_subtotals",
+    "test_pivot_cond_fmt",
+    "test_pivot_locked",
+    "test_pivot_locked_groups",
+    "test_pivot_readonly",
+    "test_pivot_drilldown",
+    "test_pivot_no_drilldown",
+    "test_pivot_dim_toggle",
+    "test_pivot_per_dim_subtotals",
+    "test_pivot_per_measure_row_totals",
+    "test_pivot_per_measure_col_totals",
+    "test_pivot_col_groups",
+]
+
+DATA_PIVOT_KEYS = [
+    "test_pivot",
+    "test_pivot_cond_fmt",
+    "test_pivot_number_fmt",
+    "test_pivot_empty",
+    "test_pivot_single_row",
+    "test_pivot_no_cols",
+    "test_pivot_count_distinct",
+    "test_pivot_median",
+    "test_pivot_auto",
+    "test_pivot_threshold",
+    "test_pivot_tall",
+    "test_pivot_alignment",
+    "test_pivot_null_separate",
+    "test_pivot_null_zero",
+    "test_pivot_sparse_drilldown",
+    "test_pivot_synthetic",
+]
+
+APP_CONFIGS = {
+    "default": {"script": SCRIPT, "pivot_keys": PIVOT_KEYS},
+    "pivot_table_test.py": {"script": TOOLBAR_SCRIPT, "pivot_keys": TOOLBAR_PIVOT_KEYS},
+    "pivot_table_interactions_test.py": {
+        "script": INTERACTIONS_SCRIPT,
+        "pivot_keys": INTERACTIONS_PIVOT_KEYS,
+    },
+    "pivot_table_data_test.py": {"script": DATA_SCRIPT, "pivot_keys": DATA_PIVOT_KEYS},
+}
+
+
+def get_pivot(page: Page, key: str) -> Locator:
+    """Return a Locator scoped to the pivot-container for *key*."""
+    pivot_keys = getattr(page, "_pivot_keys", PIVOT_KEYS)
+    idx = pivot_keys.index(key)
+    container = page.get_by_test_id("pivot-container").nth(idx)
+    container.evaluate("el => el.scrollIntoView({ block: 'center' })")
+    return container
+
+
+def open_settings_popover(page: Page, container: Locator) -> Locator:
+    """Open the gear settings popover in the toolbar."""
+    panel = page.get_by_test_id("toolbar-settings-panel")
+    if panel.count():
+        expect(panel).to_be_visible(timeout=5000)
+        return panel
+
+    button = container.get_by_test_id("toolbar-settings")
+    button.scroll_into_view_if_needed()
+    button.evaluate("el => el.click()")
+    expect(panel).to_be_visible(timeout=5000)
+    return panel
 
 
 def _find_free_port() -> int:

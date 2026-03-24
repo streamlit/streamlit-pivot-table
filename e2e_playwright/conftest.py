@@ -16,9 +16,11 @@
 """Shared Playwright fixtures and pytest hooks for E2E tests."""
 
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import pytest
+from e2e_utils import APP_CONFIGS, StreamlitRunner
 from playwright.sync_api import Browser, BrowserContext, Page
 
 
@@ -61,6 +63,29 @@ def page(context: BrowserContext) -> Generator[Page, None, None]:
     page.close()
 
 
+@pytest.fixture(scope="module")
+def app(request):
+    """Start the Streamlit app once per test module."""
+    module_name = Path(request.module.__file__).name
+    app_config = APP_CONFIGS.get(module_name, APP_CONFIGS["default"])
+
+    with StreamlitRunner(app_config["script"]) as runner:
+        runner.pivot_keys = app_config["pivot_keys"]
+        yield runner
+
+
+@pytest.fixture
+def page_at_app(app, page: Page):
+    """Navigate to the app and wait for it to be ready."""
+    page._pivot_keys = app.pivot_keys
+    page.goto(app.server_url)
+    page.wait_for_selector("text=Pivot Table E2E Test App", timeout=30000)
+    page.add_style_tag(
+        content="header[data-testid='stHeader'] { display: none !important; }"
+    )
+    return page
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
@@ -80,7 +105,7 @@ def pytest_collection_modifyitems(config, items):
             else:
                 browser_name = config.getoption("--browser", default=["chromium"])
                 if isinstance(browser_name, list):
-                    browser_name = browser_name[0]
+                    browser_name = browser_name[0] if browser_name else "chromium"
             if browser_name != "chromium":
                 item.add_marker(
                     pytest.mark.skip(reason="Clipboard API only works in Chromium")
