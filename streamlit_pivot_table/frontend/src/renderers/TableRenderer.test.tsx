@@ -611,10 +611,7 @@ describe("TableRenderer - redundant toggle removal", () => {
     const togglesInDataRows = groupToggles.filter((toggle) =>
       dataRows.some((row) => row.contains(toggle)),
     );
-    expect(togglesInDataRows.length).toBeGreaterThan(
-      0,
-      "Category-level toggles should appear on data rows when Region has subtotals but Category does not",
-    );
+    expect(togglesInDataRows.length).toBeGreaterThan(0);
   });
 
   it("clicking subtotal row toggle calls onCollapseChange with group key", () => {
