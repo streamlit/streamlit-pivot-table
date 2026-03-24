@@ -330,8 +330,7 @@ const PivotRoot: FC<PivotRootProps> = ({
 
   const handleCollapseChange = useCallback(
     (axis: "row" | "col", collapsed: string[]) => {
-      const key =
-        axis === "row" ? "collapsed_groups" : "collapsed_col_groups";
+      const key = axis === "row" ? "collapsed_groups" : "collapsed_col_groups";
       handleConfigChange({ ...currentConfig, [key]: collapsed });
     },
     [currentConfig, handleConfigChange],
@@ -453,7 +452,9 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive ? handleShowValuesAsChange : undefined
+                  currentConfig.interactive
+                    ? handleShowValuesAsChange
+                    : undefined
                 }
                 onCollapseChange={
                   currentConfig.interactive ? handleCollapseChange : undefined
@@ -484,7 +485,9 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive ? handleShowValuesAsChange : undefined
+                  currentConfig.interactive
+                    ? handleShowValuesAsChange
+                    : undefined
                 }
                 onCollapseChange={
                   currentConfig.interactive ? handleCollapseChange : undefined

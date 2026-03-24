@@ -25,9 +25,7 @@ type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
   aggregation?: AggregationType | PivotConfigV1["aggregation"];
 };
 
-export function makeConfig(
-  overrides: TestConfigOverrides = {},
-): PivotConfigV1 {
+export function makeConfig(overrides: TestConfigOverrides = {}): PivotConfigV1 {
   const { aggregation: aggregationOverride, ...restOverrides } = overrides;
   const values = overrides.values ?? ["revenue"];
   const config = {

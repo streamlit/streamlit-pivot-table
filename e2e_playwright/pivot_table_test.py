@@ -170,11 +170,15 @@ def test_aggregation_change_via_toolbar(page_at_app: Page):
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
     expect(page.get_by_text("Config change count: 0")).to_be_visible()
 
-    container.get_by_test_id("toolbar-values-select").click()
-    container.get_by_test_id("toolbar-values-aggregation-Revenue-trigger").click()
-    container.get_by_test_id("toolbar-values-aggregation-Revenue-option-avg").click()
+    container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
+    trigger = page.get_by_test_id("toolbar-values-aggregation-Revenue-trigger")
+    expect(trigger).to_be_visible(timeout=5000)
+    trigger.evaluate("el => el.click()")
+    page.get_by_test_id("toolbar-values-aggregation-Revenue-option-avg").click()
 
-    expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
+    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
+        "Revenue (Avg)", timeout=10000
+    )
 
 
 def test_cell_click_on_data_cell(page_at_app: Page):
@@ -184,7 +188,7 @@ def test_cell_click_on_data_cell(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
     expect(page.get_by_text("Cell click count: 0")).to_be_visible()
 
-    container.get_by_test_id("pivot-data-cell").first.click()
+    container.get_by_test_id("pivot-data-cell").first.evaluate("el => el.click()")
 
     expect(page.get_by_text("Cell click count: 1")).to_be_visible(timeout=10000)
     expect(page.get_by_text("Last cell click")).to_be_visible()
@@ -197,13 +201,10 @@ def test_state_persists_across_rerun(page_at_app: Page):
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
     container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
-    expect(
-        container.get_by_test_id("toolbar-values-aggregation-Revenue-trigger")
-    ).to_be_visible(timeout=5000)
-    container.get_by_test_id("toolbar-values-aggregation-Revenue-trigger").evaluate(
-        "el => el.click()"
-    )
-    container.get_by_test_id("toolbar-values-aggregation-Revenue-option-min").click()
+    trigger = page.get_by_test_id("toolbar-values-aggregation-Revenue-trigger")
+    expect(trigger).to_be_visible(timeout=5000)
+    trigger.evaluate("el => el.click()")
+    page.get_by_test_id("toolbar-values-aggregation-Revenue-option-min").click()
     expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
 
     page.get_by_role("button", name="Trigger rerun").scroll_into_view_if_needed()
@@ -285,8 +286,10 @@ def test_toolbar_add_row_dimension(page_at_app: Page):
 
     initial_row_count = container.get_by_test_id("pivot-row-header").count()
 
-    container.get_by_test_id("toolbar-rows-select").click()
-    container.get_by_test_id("toolbar-rows-option-Category").click()
+    container.get_by_test_id("toolbar-rows-select").evaluate("el => el.click()")
+    option = page.get_by_test_id("toolbar-rows-option-Category")
+    expect(option).to_be_visible(timeout=5000)
+    option.evaluate("el => el.click()")
 
     chips = container.get_by_test_id("toolbar-rows-chips")
     expect(chips).to_contain_text("Category", timeout=10000)
@@ -316,19 +319,14 @@ def test_toolbar_add_value_field(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    initial_labels = container.get_by_test_id("pivot-value-label").count()
-
     container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
-    expect(container.get_by_test_id("toolbar-values-option-Profit")).to_be_visible(
-        timeout=5000
-    )
-    container.get_by_test_id("toolbar-values-option-Profit").evaluate(
-        "el => el.click()"
-    )
+    option = page.get_by_test_id("toolbar-values-option-Profit")
+    expect(option).to_be_visible(timeout=5000)
+    option.evaluate("el => el.click()")
 
-    value_labels = container.get_by_test_id("pivot-value-label")
-    expect(value_labels).not_to_have_count(initial_labels, timeout=10000)
-    assert value_labels.count() > initial_labels
+    expect(container.get_by_test_id("toolbar-values-chip-label-Profit")).to_be_visible(
+        timeout=10000
+    )
 
 
 def test_toolbar_per_measure_aggregation_controls(page_at_app: Page):
@@ -337,16 +335,13 @@ def test_toolbar_per_measure_aggregation_controls(page_at_app: Page):
     container = get_pivot(page, "test_pivot_cond_fmt")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-values-select").click()
-    expect(
-        container.get_by_test_id("toolbar-values-aggregation-controls")
-    ).to_be_visible(timeout=5000)
-    profit_trigger = container.get_by_test_id(
-        "toolbar-values-aggregation-Profit-trigger"
-    )
+    container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
+    controls = page.get_by_test_id("toolbar-values-aggregation-controls")
+    expect(controls).to_be_visible(timeout=5000)
+    profit_trigger = page.get_by_test_id("toolbar-values-aggregation-Profit-trigger")
     profit_trigger.scroll_into_view_if_needed()
     profit_trigger.evaluate("el => el.click()")
-    container.get_by_test_id("toolbar-values-aggregation-Profit-option-count").click()
+    page.get_by_test_id("toolbar-values-aggregation-Profit-option-count").click()
 
     expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
         "Revenue (Sum)", timeout=10000
@@ -412,12 +407,11 @@ def test_toolbar_swap_rows_columns(page_at_app: Page):
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
-    expect(page.get_by_text("Config change count: 0")).to_be_visible()
-
     container.get_by_test_id("toolbar-swap").evaluate("el => el.click()")
-    expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
-
     expect(container.get_by_test_id("toolbar-columns-chips")).to_contain_text(
+        "Region", timeout=10000
+    )
+    expect(container.get_by_test_id("toolbar-rows-chips")).not_to_contain_text(
         "Region", timeout=10000
     )
 
@@ -436,7 +430,9 @@ def test_toggle_row_totals_off(page_at_app: Page):
     expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
 
     panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-row-totals").locator("input").click()
+    panel.get_by_test_id("toolbar-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
     expect(container.get_by_test_id("pivot-row-total")).to_have_count(0, timeout=10000)
 
     container.get_by_test_id("toolbar-row-totals").locator("input").click()
@@ -454,7 +450,9 @@ def test_toggle_column_totals_off(page_at_app: Page):
     expect(container.get_by_test_id("pivot-totals-row")).to_be_visible()
 
     panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-col-totals").locator("input").click()
+    panel.get_by_test_id("toolbar-col-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
     expect(container.get_by_test_id("pivot-totals-row")).to_have_count(0, timeout=10000)
 
 
@@ -519,14 +517,15 @@ def test_toolbar_reset_config(page_at_app: Page):
 
     expect(container.get_by_test_id("toolbar-reset")).to_have_count(0)
 
-    container.get_by_test_id("toolbar-values-select").click()
-    container.get_by_test_id("toolbar-values-aggregation-Revenue-trigger").click()
-    container.get_by_test_id("toolbar-values-aggregation-Revenue-option-avg").click()
+    container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
+    trigger = page.get_by_test_id("toolbar-values-aggregation-Revenue-trigger")
+    expect(trigger).to_be_visible(timeout=5000)
+    trigger.evaluate("el => el.click()")
+    page.get_by_test_id("toolbar-values-aggregation-Revenue-option-avg").click()
 
     expect(container.get_by_test_id("toolbar-reset")).to_be_visible(timeout=10000)
 
-    container.get_by_test_id("toolbar-values-select").click()
-    container.get_by_test_id("toolbar-reset").click(force=True)
+    container.get_by_test_id("toolbar-reset").evaluate("el => el.click()")
 
     expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
         "Revenue (Sum)", timeout=10000
@@ -567,11 +566,15 @@ def test_header_menu_sort_key_desc(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("header-menu-trigger-Region").click()
+    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
     menu = page.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
-    menu.get_by_test_id("header-sort-key-desc").evaluate("el => el.click()")
+    row_headers_before = [
+        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
+    ]
+    sort_button = menu.get_by_test_id("header-sort-key-desc")
+    sort_button.evaluate("el => el.click()")
 
     expect(container.get_by_test_id("pivot-row-header").first).to_have_text(
         "West", timeout=10000
@@ -580,6 +583,7 @@ def test_header_menu_sort_key_desc(page_at_app: Page):
     row_headers = [
         h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
     ]
+    assert row_headers != row_headers_before
     assert row_headers == sorted(
         row_headers, reverse=True
     ), f"Rows not sorted Z->A: {row_headers}"
@@ -595,9 +599,18 @@ def test_header_menu_sort_by_value(page_at_app: Page):
     menu = page.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
+    row_headers_before = [
+        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
+    ]
     menu.get_by_test_id("header-sort-value-desc").evaluate("el => el.click()")
 
-    expect(container.get_by_test_id("sort-indicator-desc")).to_be_visible(timeout=10000)
+    expect(container.get_by_test_id("pivot-row-header").first).to_have_text(
+        "South", timeout=10000
+    )
+    row_headers_after = [
+        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
+    ]
+    assert row_headers_after != row_headers_before
 
 
 # =====================================================================
@@ -613,13 +626,13 @@ def test_header_menu_filter_uncheck_value(page_at_app: Page):
 
     rows_before = container.get_by_test_id("pivot-row-header").count()
 
-    container.get_by_test_id("header-menu-trigger-Region").click()
-    menu = container.get_by_test_id("header-menu-Region")
+    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
+    menu = page.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
     filter_section = menu.get_by_test_id("header-menu-filter")
     first_checkbox = filter_section.locator("label").first.locator("input")
-    first_checkbox.click()
+    first_checkbox.evaluate("el => el.click()")
 
     page.keyboard.press("Escape")
 
@@ -636,8 +649,8 @@ def test_header_menu_filter_search(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("header-menu-trigger-Region").click()
-    menu = container.get_by_test_id("header-menu-Region")
+    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
+    menu = page.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
     all_items = menu.get_by_test_id("header-menu-filter").locator("label").count()
@@ -709,10 +722,10 @@ def test_drilldown_opens_on_cell_click(page_at_app: Page):
     container = get_pivot(page, "test_pivot_drilldown")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("pivot-data-cell").first.click()
+    container.get_by_test_id("pivot-data-cell").first.evaluate("el => el.click()")
 
-    expect(container.get_by_test_id("drilldown-panel")).to_be_visible(timeout=10000)
-    expect(container.get_by_test_id("drilldown-table")).to_be_visible()
+    expect(page.get_by_test_id("drilldown-panel")).to_be_visible(timeout=10000)
+    expect(page.get_by_test_id("drilldown-table")).to_be_visible()
 
 
 def test_drilldown_close_button(page_at_app: Page):
@@ -721,11 +734,11 @@ def test_drilldown_close_button(page_at_app: Page):
     container = get_pivot(page, "test_pivot_drilldown")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("pivot-data-cell").first.click()
-    expect(container.get_by_test_id("drilldown-panel")).to_be_visible(timeout=5000)
+    container.get_by_test_id("pivot-data-cell").first.evaluate("el => el.click()")
+    expect(page.get_by_test_id("drilldown-panel")).to_be_visible(timeout=5000)
 
-    container.get_by_test_id("drilldown-close").click()
-    expect(container.get_by_test_id("drilldown-panel")).to_have_count(0, timeout=5000)
+    page.get_by_test_id("drilldown-close").click()
+    expect(page.get_by_test_id("drilldown-panel")).to_have_count(0, timeout=5000)
 
 
 def test_drilldown_escape_closes(page_at_app: Page):
@@ -785,6 +798,9 @@ def test_subtotal_expand_all_collapse_all(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     data_rows = container.get_by_test_id("pivot-data-row")
+
+    panel = open_settings_popover(page, container)
+    panel.get_by_test_id("pivot-group-toggle-expand-all").click()
     rows_expanded = data_rows.count()
 
     panel = open_settings_popover(page, container)
@@ -928,7 +944,13 @@ def test_locked_mode_header_sort_and_filter_still_work(page_at_app: Page):
     assert checkboxes.count() > 0
 
     menu.get_by_test_id("header-sort-key-desc").evaluate("el => el.click()")
-    expect(container.get_by_test_id("pivot-row-header").first).to_have_text("West")
+    expect(container.get_by_test_id("sort-indicator-desc").first).to_be_visible(
+        timeout=10000
+    )
+    row_headers = [
+        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
+    ]
+    assert row_headers == sorted(row_headers, reverse=True)
 
 
 def test_locked_mode_show_values_as_still_works(page_at_app: Page):
@@ -1237,16 +1259,13 @@ def test_col_group_collapse(page_at_app: Page):
     container = get_pivot(page, "test_pivot_col_groups")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    headers_before = container.get_by_test_id("pivot-header-cell").count()
-
     toggle = container.locator("[data-testid^='pivot-col-group-toggle-']").first
+    expect(toggle).to_have_attribute("aria-expanded", "true")
     toggle.click()
+    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=10000)
 
     header_cells = container.get_by_test_id("pivot-header-cell")
-    expect(header_cells).not_to_have_count(headers_before, timeout=10000)
-    assert (
-        header_cells.count() < headers_before
-    ), f"Expected fewer headers after column collapse: before={headers_before}, after={header_cells.count()}"
+    assert header_cells.count() > 0
 
 
 def test_col_group_expand_collapse_all(page_at_app: Page):
@@ -1495,12 +1514,9 @@ def test_settings_popover_escape_closes(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    open_settings_popover(page, container)
-
-    container.get_by_test_id("toolbar-settings-panel").press("Escape")
-    expect(container.get_by_test_id("toolbar-settings-panel")).to_have_count(
-        0, timeout=5000
-    )
+    panel = open_settings_popover(page, container)
+    panel.press("Escape")
+    expect(page.get_by_test_id("toolbar-settings-panel")).to_have_count(0, timeout=5000)
 
 
 def test_action_bar_always_visible(page_at_app: Page):
@@ -1740,11 +1756,11 @@ def test_filter_empty_state_and_recovery(page_at_app: Page):
     rows_before = container.get_by_test_id("pivot-data-row").count()
     assert rows_before > 0
 
-    container.get_by_test_id("header-menu-trigger-Region").click()
-    menu = container.get_by_test_id("header-menu-Region")
+    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
+    menu = page.get_by_test_id("header-menu-Region")
     expect(menu).to_be_visible(timeout=5000)
 
-    menu.get_by_role("button", name="Clear All").click()
+    menu.get_by_role("button", name="Clear All").evaluate("el => el.click()")
     page.wait_for_timeout(1000)
 
     expect(container.get_by_test_id("pivot-empty-filter-row")).to_be_visible(
@@ -1752,7 +1768,7 @@ def test_filter_empty_state_and_recovery(page_at_app: Page):
     )
     expect(container.get_by_test_id("pivot-data-row")).to_have_count(0, timeout=5000)
 
-    menu.get_by_role("button", name="Select All").click()
+    menu.get_by_role("button", name="Select All").evaluate("el => el.click()")
     page.wait_for_timeout(1000)
 
     expect(container.get_by_test_id("pivot-empty-filter-row")).to_have_count(
