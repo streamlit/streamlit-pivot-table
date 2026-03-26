@@ -88,3 +88,4 @@ jobs:
         with:
           name: playwright_test_results
           path: e2e_playwright/test-results
+          if-no-files-found: ignore

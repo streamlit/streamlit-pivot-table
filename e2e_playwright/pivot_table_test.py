@@ -121,8 +121,9 @@ def test_state_persists_across_rerun(page_at_app: Page):
         "Region", timeout=10000
     )
 
-    page.get_by_role("button", name="Trigger rerun").scroll_into_view_if_needed()
-    page.get_by_role("button", name="Trigger rerun").click()
+    rerun_button = page.get_by_role("button", name="Trigger rerun")
+    expect(rerun_button).to_be_visible(timeout=10000)
+    rerun_button.click()
     expect(page.get_by_text("Reruns:")).to_be_visible(timeout=10000)
 
     container = get_pivot(page, "test_pivot")

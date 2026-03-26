@@ -23,6 +23,40 @@ from playwright.sync_api import Page, expect
 
 from e2e_utils import get_pivot, open_settings_popover
 
+ROW_HEADERS_KEY_ASC = ["East", "North", "South", "West"]
+ROW_HEADERS_KEY_DESC = ["West", "South", "North", "East"]
+ROW_HEADERS_REVENUE_DESC = ["South", "North", "West", "East"]
+
+
+def click_menu_item(locator) -> None:
+    """Click a menu item reliably even when the popover clips its viewport."""
+    locator.evaluate(
+        "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+    )
+
+
+def activate_sort_option(
+    page: Page,
+    trigger_locator,
+    menu_test_id: str,
+    option_test_id: str,
+):
+    """Open a sort menu and activate a preset, normalizing any pre-active state."""
+    trigger_locator.evaluate("el => el.click()")
+    menu = page.get_by_test_id(menu_test_id)
+    expect(menu).to_be_visible(timeout=5000)
+
+    option = menu.get_by_test_id(option_test_id)
+    if option.get_attribute("aria-pressed") == "true":
+        click_menu_item(option)
+        trigger_locator.evaluate("el => el.click()")
+        menu = page.get_by_test_id(menu_test_id)
+        expect(menu).to_be_visible(timeout=5000)
+        option = menu.get_by_test_id(option_test_id)
+
+    click_menu_item(option)
+    return menu
+
 
 def test_header_menu_sort_key_asc(page_at_app: Page):
     """Sorting A->Z via header menu reorders rows alphabetically."""
@@ -30,20 +64,18 @@ def test_header_menu_sort_key_asc(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
-    menu = page.get_by_test_id("header-menu-Region")
-    expect(menu).to_be_visible(timeout=5000)
-
-    menu.get_by_test_id("header-sort-key-asc").evaluate("el => el.click()")
-
-    expect(container.get_by_test_id("pivot-row-header").first).to_have_text(
-        "East", timeout=10000
+    activate_sort_option(
+        page,
+        container.get_by_test_id("header-menu-trigger-Region"),
+        "header-menu-Region",
+        "header-sort-key-asc",
     )
 
-    row_headers = [
-        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
-    ]
-    assert row_headers == sorted(row_headers), f"Rows not sorted A->Z: {row_headers}"
+    row_headers = container.get_by_test_id("pivot-row-header")
+    expect(row_headers).to_have_count(4, timeout=10000)
+    expect(container.get_by_test_id("pivot-row-header")).to_have_text(
+        ROW_HEADERS_KEY_ASC, timeout=10000
+    )
 
 
 def test_header_menu_sort_key_desc(page_at_app: Page):
@@ -52,27 +84,18 @@ def test_header_menu_sort_key_desc(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
-    menu = page.get_by_test_id("header-menu-Region")
-    expect(menu).to_be_visible(timeout=5000)
-
-    row_headers_before = [
-        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
-    ]
-    sort_button = menu.get_by_test_id("header-sort-key-desc")
-    sort_button.evaluate("el => el.click()")
-
-    expect(container.get_by_test_id("pivot-row-header").first).to_have_text(
-        "West", timeout=10000
+    activate_sort_option(
+        page,
+        container.get_by_test_id("header-menu-trigger-Region"),
+        "header-menu-Region",
+        "header-sort-key-desc",
     )
 
-    row_headers = [
-        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
-    ]
-    assert row_headers != row_headers_before
-    assert row_headers == sorted(
-        row_headers, reverse=True
-    ), f"Rows not sorted Z->A: {row_headers}"
+    row_headers = container.get_by_test_id("pivot-row-header")
+    expect(row_headers).to_have_count(4, timeout=10000)
+    expect(container.get_by_test_id("pivot-row-header")).to_have_text(
+        ROW_HEADERS_KEY_DESC, timeout=10000
+    )
 
 
 def test_header_menu_sort_by_value(page_at_app: Page):
@@ -81,22 +104,25 @@ def test_header_menu_sort_by_value(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
-    menu = page.get_by_test_id("header-menu-Region")
-    expect(menu).to_be_visible(timeout=5000)
-
-    row_headers_before = [
-        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
-    ]
-    menu.get_by_test_id("header-sort-value-desc").evaluate("el => el.click()")
-
-    expect(container.get_by_test_id("pivot-row-header").first).to_have_text(
-        "South", timeout=10000
+    activate_sort_option(
+        page,
+        container.get_by_test_id("header-menu-trigger-Region"),
+        "header-menu-Region",
+        "header-sort-value-desc",
     )
-    row_headers_after = [
-        h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
-    ]
-    assert row_headers_after != row_headers_before
+    value_field = page.get_by_test_id("header-sort-value-field")
+    expect(value_field).to_be_visible(timeout=5000)
+    value_field.select_option("Revenue")
+    col_key = page.get_by_test_id("header-sort-col-key")
+    expect(col_key).to_be_visible(timeout=5000)
+    col_key.select_option("")
+
+    row_headers = container.get_by_test_id("pivot-row-header")
+    expect(row_headers).to_have_count(4, timeout=10000)
+    expect(container.get_by_test_id("pivot-row-header")).to_have_text(
+        ROW_HEADERS_REVENUE_DESC,
+        timeout=10000,
+    )
 
 
 def test_header_menu_filter_uncheck_value(page_at_app: Page):
@@ -176,12 +202,12 @@ def test_header_menu_show_values_as_pct(page_at_app: Page):
 
     trigger = container.get_by_test_id("header-menu-trigger-Revenue").first
     expect(trigger).to_be_visible(timeout=5000)
-    trigger.click()
+    trigger.click(force=True)
 
-    display_group = container.get_by_test_id("header-menu-display")
+    display_group = page.get_by_test_id("header-menu-display")
     expect(display_group).to_be_visible(timeout=5000)
 
-    container.get_by_test_id("header-display-pct_of_total").click()
+    page.get_by_test_id("header-display-pct_of_total").click(force=True)
 
     cells = container.get_by_test_id("pivot-data-cell")
     expect(cells.first).to_contain_text("%", timeout=10000)
