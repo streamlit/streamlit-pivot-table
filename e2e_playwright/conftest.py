@@ -21,32 +21,33 @@ from typing import Any
 
 import pytest
 from e2e_utils import APP_CONFIGS, StreamlitRunner
-from playwright.sync_api import Browser, BrowserContext, Page
+from playwright.sync_api import Page
 
 
-@pytest.fixture(scope="function")
-def context(browser: Browser) -> Generator[BrowserContext, None, None]:
-    """Create a new browser context with custom settings."""
-    context_options: dict[str, Any] = {
+@pytest.fixture(scope="session")
+def browser_context_args(
+    browser_context_args: dict[str, Any],
+    browser_name: str,
+) -> dict[str, Any]:
+    """Extend pytest-playwright context args without replacing its context fixture."""
+    permissions = list(browser_context_args.get("permissions", []))
+    if browser_name == "chromium":
+        permissions.extend(["clipboard-read", "clipboard-write"])
+
+    context_args = {
+        **browser_context_args,
         "accept_downloads": True,
-        "service_workers": "block"
-        if browser.browser_type.name == "chromium"
-        else "allow",
+        "service_workers": "block" if browser_name == "chromium" else "allow",
     }
-    if browser.browser_type.name == "chromium":
-        context_options["permissions"] = ["clipboard-read", "clipboard-write"]
-
-    context = browser.new_context(**context_options)
-    context.set_default_timeout(30000)
-
-    yield context
-    context.close()
+    if permissions:
+        context_args["permissions"] = sorted(set(permissions))
+    return context_args
 
 
-@pytest.fixture(scope="function")
-def page(context: BrowserContext) -> Generator[Page, None, None]:
-    """Create a new page with console/error logging for debugging."""
-    page = context.new_page()
+@pytest.fixture(scope="function", autouse=True)
+def instrument_page(page: Page) -> Generator[None, None, None]:
+    """Add console/error logging while keeping plugin-managed page lifecycle."""
+    page.context.set_default_timeout(30000)
 
     def handle_console(msg):
         if msg.type == "error":
@@ -59,8 +60,7 @@ def page(context: BrowserContext) -> Generator[Page, None, None]:
     page.on("console", handle_console)
     page.on("pageerror", lambda err: print(f"[PAGE ERROR] {err}"))
 
-    yield page
-    page.close()
+    yield
 
 
 @pytest.fixture(scope="module")
@@ -77,7 +77,7 @@ def app(request):
 @pytest.fixture
 def page_at_app(app, page: Page):
     """Navigate to the app and wait for it to be ready."""
-    page._pivot_keys = app.pivot_keys
+    setattr(page, "_pivot_keys", app.pivot_keys)
     page.goto(app.server_url)
     page.wait_for_selector("text=Pivot Table E2E Test App", timeout=30000)
     page.add_style_tag(
