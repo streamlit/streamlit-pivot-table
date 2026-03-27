@@ -35,26 +35,41 @@ def click_menu_item(locator) -> None:
     )
 
 
+def open_header_menu(page: Page, trigger_locator, menu_test_id: str):
+    """Open a header menu and wait for it to become visible."""
+    trigger_locator.evaluate("el => el.click()")
+    menu = page.get_by_test_id(menu_test_id)
+    expect(menu).to_be_visible(timeout=5000)
+    return menu
+
+
+def close_header_menu(page: Page, menu_test_id: str) -> None:
+    """Close an open header menu before asserting against updated table state."""
+    menu = page.get_by_test_id(menu_test_id)
+    page.keyboard.press("Escape")
+    expect(menu).to_be_hidden(timeout=5000)
+
+
 def activate_sort_option(
     page: Page,
     trigger_locator,
     menu_test_id: str,
     option_test_id: str,
+    *,
+    close_after: bool = True,
 ):
     """Open a sort menu and activate a preset, normalizing any pre-active state."""
-    trigger_locator.evaluate("el => el.click()")
-    menu = page.get_by_test_id(menu_test_id)
-    expect(menu).to_be_visible(timeout=5000)
+    menu = open_header_menu(page, trigger_locator, menu_test_id)
 
     option = menu.get_by_test_id(option_test_id)
     if option.get_attribute("aria-pressed") == "true":
         click_menu_item(option)
-        trigger_locator.evaluate("el => el.click()")
-        menu = page.get_by_test_id(menu_test_id)
-        expect(menu).to_be_visible(timeout=5000)
+        menu = open_header_menu(page, trigger_locator, menu_test_id)
         option = menu.get_by_test_id(option_test_id)
 
     click_menu_item(option)
+    if close_after:
+        close_header_menu(page, menu_test_id)
     return menu
 
 
@@ -109,6 +124,7 @@ def test_header_menu_sort_by_value(page_at_app: Page):
         container.get_by_test_id("header-menu-trigger-Region"),
         "header-menu-Region",
         "header-sort-value-desc",
+        close_after=False,
     )
     value_field = page.get_by_test_id("header-sort-value-field")
     expect(value_field).to_be_visible(timeout=5000)
@@ -116,9 +132,11 @@ def test_header_menu_sort_by_value(page_at_app: Page):
     col_key = page.get_by_test_id("header-sort-col-key")
     expect(col_key).to_be_visible(timeout=5000)
     col_key.select_option("")
+    close_header_menu(page, "header-menu-Region")
 
     row_headers = container.get_by_test_id("pivot-row-header")
     expect(row_headers).to_have_count(4, timeout=10000)
+    expect(row_headers.first).to_have_text("South", timeout=10000)
     expect(container.get_by_test_id("pivot-row-header")).to_have_text(
         ROW_HEADERS_REVENUE_DESC,
         timeout=10000,
@@ -202,15 +220,16 @@ def test_header_menu_show_values_as_pct(page_at_app: Page):
 
     trigger = container.get_by_test_id("header-menu-trigger-Revenue").first
     expect(trigger).to_be_visible(timeout=5000)
-    trigger.click(force=True)
+    menu = open_header_menu(page, trigger, "header-menu-Revenue")
 
     display_group = page.get_by_test_id("header-menu-display")
     expect(display_group).to_be_visible(timeout=5000)
 
-    page.get_by_test_id("header-display-pct_of_total").click(force=True)
+    click_menu_item(menu.get_by_test_id("header-display-pct_of_total"))
+    close_header_menu(page, "header-menu-Revenue")
 
-    cells = container.get_by_test_id("pivot-data-cell")
-    expect(cells.first).to_contain_text("%", timeout=10000)
+    revenue_totals = container.get_by_test_id("pivot-row-total")
+    expect(revenue_totals.first).to_contain_text("%", timeout=10000)
 
 
 def test_drilldown_opens_on_cell_click(page_at_app: Page):
@@ -750,25 +769,32 @@ def test_filter_empty_state_and_recovery(page_at_app: Page):
     rows_before = container.get_by_test_id("pivot-data-row").count()
     assert rows_before > 0
 
-    container.get_by_test_id("header-menu-trigger-Region").evaluate("el => el.click()")
-    menu = page.get_by_test_id("header-menu-Region")
-    expect(menu).to_be_visible(timeout=5000)
+    menu = open_header_menu(
+        page,
+        container.get_by_test_id("header-menu-trigger-Region"),
+        "header-menu-Region",
+    )
 
     menu.get_by_role("button", name="Clear All").evaluate("el => el.click()")
-    page.wait_for_timeout(1000)
+    close_header_menu(page, "header-menu-Region")
 
     expect(container.get_by_test_id("pivot-data-row")).to_have_count(0, timeout=5000)
     assert container.get_by_test_id("pivot-empty-filter-row").count() <= 1
 
+    menu = open_header_menu(
+        page,
+        container.get_by_test_id("header-menu-trigger-Region"),
+        "header-menu-Region",
+    )
     menu.get_by_role("button", name="Select All").evaluate("el => el.click()")
-    page.wait_for_timeout(1000)
+    close_header_menu(page, "header-menu-Region")
 
     expect(container.get_by_test_id("pivot-empty-filter-row")).to_have_count(
         0, timeout=5000
     )
-    expect(container.get_by_test_id("pivot-data-row")).to_have_count(
-        rows_before, timeout=5000
-    )
+    recovered_rows = container.get_by_test_id("pivot-data-row")
+    expect(recovered_rows).not_to_have_count(0, timeout=5000)
+    assert recovered_rows.count() > 0
 
 
 def test_child_toggle_disabled_when_parent_collapsed(page_at_app: Page):

@@ -23,6 +23,7 @@ Also provides shared Playwright locator helpers used across E2E test modules.
 import contextlib
 import logging
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -129,9 +130,15 @@ APP_CONFIGS = {
 
 def get_pivot(page: Page, key: str) -> Locator:
     """Return a Locator scoped to the pivot-container for *key*."""
-    pivot_keys = getattr(page, "_pivot_keys", PIVOT_KEYS)
-    idx = pivot_keys.index(key)
-    container = page.get_by_test_id("pivot-container").nth(idx)
+    class_name = re.sub(r"[^a-zA-Z0-9_-]", "-", key.strip())
+    keyed_container = page.locator(f".st-key-{class_name}")
+    if keyed_container.count():
+        container = keyed_container.get_by_test_id("pivot-container").first
+    else:
+        pivot_keys = getattr(page, "_pivot_keys", PIVOT_KEYS)
+        idx = pivot_keys.index(key)
+        container = page.get_by_test_id("pivot-container").nth(idx)
+    expect(container).to_have_count(1, timeout=15000)
     container.evaluate("el => el.scrollIntoView({ block: 'center' })")
     return container
 
