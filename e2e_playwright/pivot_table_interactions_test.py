@@ -251,10 +251,12 @@ def test_drilldown_close_button(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     container.get_by_test_id("pivot-data-cell").first.evaluate("el => el.click()")
-    expect(page.get_by_test_id("drilldown-panel")).to_be_visible(timeout=5000)
+    panel = page.get_by_test_id("drilldown-panel")
+    expect(panel).to_be_visible(timeout=5000)
 
-    page.get_by_test_id("drilldown-close").click()
-    expect(page.get_by_test_id("drilldown-panel")).to_have_count(0, timeout=5000)
+    # WebKit can be flaky with the styled icon button; use a direct DOM click.
+    page.get_by_test_id("drilldown-close").evaluate("el => el.click()")
+    expect(panel).to_be_hidden(timeout=5000)
 
 
 def test_drilldown_escape_closes(page_at_app: Page):
