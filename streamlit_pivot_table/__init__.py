@@ -367,7 +367,7 @@ class PivotTableResult(TypedDict, total=False):
 #   [[tool.streamlit.component.components]] name = ... -> component.name
 # See component_manifest_handler.py line 65 for the join logic.
 _component = st.components.v2.component(
-    "streamlit-pivot-table.streamlit_pivot_table",
+    "streamlit-pivot.streamlit_pivot_table",
     js="index-*.js",
     css="index-*.css",
     html='<div class="react-root"></div>',
