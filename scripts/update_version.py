@@ -20,20 +20,24 @@ Usage:
     python scripts/update_version.py 1.2.3
 """
 
+import json
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION_FILES = [
+PYPROJECT_FILES = [
     ROOT / "pyproject.toml",
     ROOT / "streamlit_pivot" / "pyproject.toml",
 ]
+FRONTEND_DIR = ROOT / "streamlit_pivot" / "frontend"
+TEST_REQUIREMENTS = ROOT / "e2e_playwright" / "test-requirements.txt"
 PYPROJECT_VERSION_RE = re.compile(r'^(version\s*=\s*")([^"]+)(")', re.MULTILINE)
+WHEEL_RE = re.compile(r"(dist/streamlit_pivot-)[^-]+(-py3-none-any\.whl)")
 
 
 def update_version(new_version: str) -> None:
-    for filepath in VERSION_FILES:
+    for filepath in PYPROJECT_FILES:
         content = filepath.read_text()
         updated, count = PYPROJECT_VERSION_RE.subn(rf"\g<1>{new_version}\g<3>", content)
         if count == 0:
@@ -41,6 +45,27 @@ def update_version(new_version: str) -> None:
         else:
             filepath.write_text(updated)
             print(f"Updated {filepath} -> {new_version}")
+
+    for name in ("package.json", "package-lock.json"):
+        pkg_file = FRONTEND_DIR / name
+        data = json.loads(pkg_file.read_text())
+        data["version"] = new_version
+        if (
+            name == "package-lock.json"
+            and "packages" in data
+            and "" in data["packages"]
+        ):
+            data["packages"][""]["version"] = new_version
+        pkg_file.write_text(json.dumps(data, indent=2) + "\n")
+        print(f"Updated {pkg_file} -> {new_version}")
+
+    content = TEST_REQUIREMENTS.read_text()
+    updated, count = WHEEL_RE.subn(rf"\g<1>{new_version}\g<2>", content)
+    if count:
+        TEST_REQUIREMENTS.write_text(updated)
+        print(f"Updated {TEST_REQUIREMENTS} -> {new_version}")
+    else:
+        print(f"WARNING: No wheel reference found in {TEST_REQUIREMENTS}")
 
 
 def main() -> None:

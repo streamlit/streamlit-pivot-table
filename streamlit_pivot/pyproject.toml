@@ -4,7 +4,7 @@
 # The Python wrapper must use this exact key in st.components.v2.component().
 [project]
 name = "streamlit-pivot"
-version = "0.1.0"
+version = "0.0.0"
 
 [[tool.streamlit.component.components]]
 name = "streamlit_pivot"

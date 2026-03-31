@@ -128,10 +128,9 @@ jobs:
           path: dist/
           retention-days: 30
 
-      - name: Publish to TestPyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          repository-url: https://test.pypi.org/legacy/
           packages-dir: dist/
           verbose: true
 
@@ -154,5 +153,5 @@ jobs:
         if: always()
         run: |
           echo "Release v$VERSION completed successfully!"
-          echo "TestPyPI: https://test.pypi.org/project/streamlit-pivot/$VERSION/"
+          echo "PyPI: https://pypi.org/project/streamlit-pivot/$VERSION/"
           echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v$VERSION"
