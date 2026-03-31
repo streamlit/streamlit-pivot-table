@@ -91,16 +91,16 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
-          cache-dependency-path: 'streamlit_pivot_table/frontend/package-lock.json'
+          cache-dependency-path: 'streamlit_pivot/frontend/package-lock.json'
 
       - name: Install frontend dependencies
         run: |
-          cd streamlit_pivot_table/frontend
+          cd streamlit_pivot/frontend
           npm ci
 
       - name: Build frontend
         run: |
-          cd streamlit_pivot_table/frontend
+          cd streamlit_pivot/frontend
           npm run build
 
       - name: Build Python package
@@ -150,27 +150,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Send Slack notification (success)
-        if: success()
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          PYPI_URL: "https://test.pypi.org/project/streamlit-pivot/${{ needs.release.outputs.version }}/"
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\": \"streamlit-pivot v$VERSION has been released to TestPyPI! $PYPI_URL\"}" \
-            $SLACK_WEBHOOK
-
-      - name: Send Slack notification (failure)
-        if: failure()
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\": \"streamlit-pivot v$VERSION release failed! Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
-            $SLACK_WEBHOOK
-
       - name: Release summary
-        if: success()
+        if: always()
         run: |
           echo "Release v$VERSION completed successfully!"
           echo "TestPyPI: https://test.pypi.org/project/streamlit-pivot/$VERSION/"

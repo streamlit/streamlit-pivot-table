@@ -1,25 +1,25 @@
 ---
-name: streamlit-pivot-table
-description: "Build Streamlit apps with st_pivot_table — a pivot table component supporting multi-dimensional pivoting, sorting, filtering, subtotals, conditional formatting, data export, drill-down, and synthetic measures. Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot_table or st_pivot_table, needs interactive data summarization, wants to deploy a pivot table to Snowflake SiS on SPCS, or has a .whl for a custom component. Triggers: pivot table, streamlit_pivot_table, st_pivot_table, pivot, crosstab, data summarization, whl, wheel, custom component, SiS component, SPCS."
+name: streamlit-pivot
+description: "Build Streamlit apps with st_pivot_table — a pivot table component supporting multi-dimensional pivoting, sorting, filtering, subtotals, conditional formatting, data export, drill-down, and synthetic measures. Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot or st_pivot_table, needs interactive data summarization, wants to deploy a pivot table to Snowflake SiS on SPCS, or has a .whl for a custom component. Triggers: pivot table, streamlit_pivot, st_pivot_table, pivot, crosstab, data summarization, whl, wheel, custom component, SiS component, SPCS."
 ---
 
 # Streamlit Pivot Table Component
 
-`streamlit_pivot_table` provides `st_pivot_table` — a pivot table component built with Streamlit Components V2, React, and TypeScript. Supports multi-dimensional pivoting, interactive sorting/filtering, subtotals with collapse/expand, conditional formatting, data export, drill-down detail panels, and synthetic measures.
+`streamlit_pivot` provides `st_pivot_table` — a pivot table component built with Streamlit Components V2, React, and TypeScript. Supports multi-dimensional pivoting, interactive sorting/filtering, subtotals with collapse/expand, conditional formatting, data export, drill-down detail panels, and synthetic measures.
 
 **Requirements:** Python >= 3.10, Streamlit >= 1.51
 
 ## When to Use
 
 - User wants to add a pivot table to a Streamlit app
-- User mentions `streamlit_pivot_table` or `st_pivot_table`
+- User mentions `streamlit_pivot` or `st_pivot_table`
 - User needs interactive data summarization with row/column dimensions and aggregated measures
 - User wants to deploy a pivot table component to Snowflake SiS on SPCS (see [Deploying to SiS on SPCS](#deploying-to-sis-on-spcs))
 
 ## Installation
 
 ```sh
-pip install streamlit-pivot-table
+pip install streamlit-pivot
 ```
 
 ## Quick Start
@@ -27,7 +27,7 @@ pip install streamlit-pivot-table
 ```python
 import pandas as pd
 import streamlit as st
-from streamlit_pivot_table import st_pivot_table
+from streamlit_pivot import st_pivot_table
 
 df = pd.read_csv("sales.csv")
 
@@ -547,7 +547,7 @@ This section covers deploying the pivot table component (as a `.whl` file) into 
 
 ```
 To set up your SiS on SPCS app with the pivot table component, I need:
-1. The path to your .whl file (e.g., ~/Downloads/streamlit_pivot_table-0.1.0-py3-none-any.whl)
+1. The path to your .whl file (e.g., ~/Downloads/streamlit_pivot-0.1.0-py3-none-any.whl)
 2. Do you have an existing SiS project directory with snowflake.yml, or should I create one from scratch?
 3. What Snowflake table(s) will the app query?
 4. What compute pool should the app run on? (e.g., MY_COMPUTE_POOL)
@@ -557,8 +557,8 @@ To set up your SiS on SPCS app with the pivot table component, I need:
 
 **After the user responds**, derive these values from the `.whl` filename and use them in ALL subsequent steps:
 
-- **`WHL_FILENAME`**: The `.whl` file name (e.g., `streamlit_pivot_table-0.1.0-py3-none-any.whl`)
-- **`PACKAGE_NAME`**: The portion before the first version segment, with hyphens replaced by underscores (e.g., `streamlit_pivot_table`)
+- **`WHL_FILENAME`**: The `.whl` file name (e.g., `streamlit_pivot-0.1.0-py3-none-any.whl`)
+- **`PACKAGE_NAME`**: The portion before the first version segment, with hyphens replaced by underscores (e.g., `streamlit_pivot`)
 - **`TABLE_NAMES`**: The Snowflake table(s) the user wants to query
 - **`COMPUTE_POOL`**: The SPCS compute pool name for the app runtime
 
@@ -657,7 +657,7 @@ python -c "import inspect; from <PACKAGE_NAME> import <COMPONENT_FUNCTION>; prin
 ```python
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
-from streamlit_pivot_table import st_pivot_table
+from streamlit_pivot import st_pivot_table
 
 session = get_active_session()
 df = session.sql("SELECT * FROM <TABLE_NAME> LIMIT 1000").to_pandas()

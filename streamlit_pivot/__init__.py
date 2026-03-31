@@ -29,7 +29,7 @@ try:
     from streamlit.dataframe_util import convert_anything_to_pandas_df
 except ImportError as e:
     raise ImportError(
-        "streamlit_pivot_table requires Streamlit >= 1.51. "
+        "streamlit_pivot requires Streamlit >= 1.51. "
         "Install it with: pip install 'streamlit>=1.51'"
     ) from e
 
@@ -110,7 +110,7 @@ VALID_NULL_MODES = frozenset(("exclude", "zero", "separate"))
 
 
 _warned_keys: set[str] = set()
-_PYTHON_CONFIG_STATE_PREFIX = "__streamlit_pivot_table_python_config__:"
+_PYTHON_CONFIG_STATE_PREFIX = "__streamlit_pivot_python_config__:"
 
 
 def _normalize_aggregation_config(
@@ -362,12 +362,12 @@ class PivotTableResult(TypedDict, total=False):
 # Registration key follows the CCv2 packaged-component convention:
 #   "<project.name>.<component.name>"
 # where both segments come from the in-package manifest at
-# streamlit_pivot_table/pyproject.toml:
-#   [project] name = "streamlit-pivot-table"          -> project.name
+# streamlit_pivot/pyproject.toml:
+#   [project] name = "streamlit-pivot"                 -> project.name
 #   [[tool.streamlit.component.components]] name = ... -> component.name
 # See component_manifest_handler.py line 65 for the join logic.
 _component = st.components.v2.component(
-    "streamlit-pivot.streamlit_pivot_table",
+    "streamlit-pivot.streamlit_pivot",
     js="index-*.js",
     css="index-*.css",
     html='<div class="react-root"></div>',

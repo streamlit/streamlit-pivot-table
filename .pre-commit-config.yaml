@@ -32,14 +32,14 @@ repos:
         pass_filenames: false
         exclude: |
           (?x)
-          ^streamlit_pivot_table/frontend/public/
-          |^streamlit_pivot_table/frontend/node_modules/
-          |^streamlit_pivot_table/frontend/package-lock\.json$
-          |^streamlit_pivot_table/frontend/\.prettierrc$
-          |^streamlit_pivot_table/frontend/\.env$
+          ^streamlit_pivot/frontend/public/
+          |^streamlit_pivot/frontend/node_modules/
+          |^streamlit_pivot/frontend/package-lock\.json$
+          |^streamlit_pivot/frontend/\.prettierrc$
+          |^streamlit_pivot/frontend/\.env$
       - id: format-ts-js
         name: Checks that all JS/TS files are formatted correctly
-        entry: bash -c 'cd streamlit_pivot_table/frontend && npm run format'
+        entry: bash -c 'cd streamlit_pivot/frontend && npm run format'
         language: system
         always_run: true
         pass_filenames: false
@@ -57,8 +57,8 @@ repos:
           - --fuzzy-match-generates-todo
         exclude: |
           (?x)
-          ^streamlit_pivot_table/frontend/public/
-          |^streamlit_pivot_table/frontend/.yarn/
+          ^streamlit_pivot/frontend/public/
+          |^streamlit_pivot/frontend/.yarn/
       - id: insert-license
         name: Add license for all Python files
         files: \.py$|\.pyi$
@@ -83,7 +83,7 @@ repos:
       - id: trailing-whitespace
         exclude: |
           (?x)
-          ^streamlit_pivot_table/frontend/public
+          ^streamlit_pivot/frontend/public
           |^NOTICES$
       - id: check-added-large-files
         args: ["--maxkb=1024"]

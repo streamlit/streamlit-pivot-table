@@ -20,7 +20,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from streamlit_pivot_table import st_pivot_table
+from streamlit_pivot import st_pivot_table
 
 from pivot_table_app_support import (
     handle_click,

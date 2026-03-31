@@ -41,15 +41,15 @@ IGNORE_PATTERN = re.compile(
     # Exclude yarn.lock
     r"|yarn\.lock$"
     # Exclude .yarn folder
-    r"|streamlit_pivot_table\/frontend\/\.yarn/"
+    r"|streamlit_pivot\/frontend\/\.yarn/"
     # .gitignore
     r"|\.(gitignore)$"
     # MANIFEST.in
     r"|MANIFEST\.in$"
     # .env file
-    r"|streamlit_pivot_table\/frontend\/\.env$"
+    r"|streamlit_pivot\/frontend\/\.env$"
     # Vendored files
-    r"|^streamlit_pivot_table/frontend/public/"
+    r"|^streamlit_pivot/frontend/public/"
     # Exclude e2e_playwright/test-requirements.txt
     r"|e2e_playwright/test-requirements.txt$"
     # Exclude CSV data files

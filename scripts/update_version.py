@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILES = [
     ROOT / "pyproject.toml",
-    ROOT / "streamlit_pivot_table" / "pyproject.toml",
+    ROOT / "streamlit_pivot" / "pyproject.toml",
 ]
 PYPROJECT_VERSION_RE = re.compile(r'^(version\s*=\s*")([^"]+)(")', re.MULTILINE)
 

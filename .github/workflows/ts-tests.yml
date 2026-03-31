@@ -41,11 +41,11 @@ jobs:
           cache-dependency-path: "**/package-lock.json"
       - name: Install frontend dependencies
         run: |
-          cd streamlit_pivot_table/frontend
+          cd streamlit_pivot/frontend
           npm ci
       - name: Run frontend tests
         run: |
-          cd streamlit_pivot_table/frontend
+          cd streamlit_pivot/frontend
           npm test
       - name: Audit frontend licenses
         run: python scripts/audit_frontend_licenses.py

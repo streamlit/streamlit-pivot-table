@@ -45,11 +45,11 @@ jobs:
           cache-dependency-path: "**/package-lock.json"
       - name: Install frontend dependencies
         run: |
-          cd streamlit_pivot_table/frontend
+          cd streamlit_pivot/frontend
           npm ci
       - name: Build frontend
         run: |
-          cd streamlit_pivot_table/frontend
+          cd streamlit_pivot/frontend
           npm run build
 
       - name: Create Python environment cache key

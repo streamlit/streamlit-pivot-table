@@ -1,7 +1,7 @@
 {
   "files": [
     {
-      "filepath": "/Users/mbarnes/Desktop/Streamlit/feature-demos/streamlit-pivot-table/streamlit_pivot_table/frontend/src/engine/PivotData.bench.ts",
+      "filepath": "/Users/mbarnes/Desktop/Streamlit/feature-demos/streamlit-pivot-table/streamlit_pivot/frontend/src/engine/PivotData.bench.ts",
       "groups": [
         {
           "fullName": "src/engine/PivotData.bench.ts > PivotData computation benchmarks",

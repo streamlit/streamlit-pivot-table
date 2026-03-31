@@ -28,7 +28,7 @@ def pivot_module():
     with patch(
         "streamlit.components.v2.component", return_value=lambda **_kwargs: None
     ):
-        return import_module("streamlit_pivot_table")
+        return import_module("streamlit_pivot")
 
 
 @pytest.fixture

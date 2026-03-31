@@ -1,4 +1,4 @@
-# streamlit-pivot-table
+# streamlit-pivot
 
 Pivot table component for [Streamlit](https://streamlit.io). Built with Streamlit Components V2, React, and TypeScript.
 
@@ -7,7 +7,7 @@ Supports multi-dimensional pivoting, interactive sorting and filtering, subtotal
 ## Installation
 
 ```sh
-pip install streamlit-pivot-table
+pip install streamlit-pivot
 ```
 
 **Requirements:** Python >= 3.10, Streamlit >= 1.51
@@ -17,7 +17,7 @@ pip install streamlit-pivot-table
 ```python
 import pandas as pd
 import streamlit as st
-from streamlit_pivot_table import st_pivot_table
+from streamlit_pivot import st_pivot_table
 
 df = pd.read_csv("sales.csv")
 
@@ -576,7 +576,7 @@ The example app (`streamlit_app.py`) contains 13 sections covering the major fea
 ### Building the frontend
 
 ```sh
-cd streamlit_pivot_table/frontend
+cd streamlit_pivot/frontend
 npm install
 npm run build
 ```
@@ -584,7 +584,7 @@ npm run build
 ### Running tests
 
 ```sh
-cd streamlit_pivot_table/frontend
+cd streamlit_pivot/frontend
 npx vitest run
 ```
 
@@ -593,7 +593,7 @@ npx vitest run
 1. Build the frontend assets:
 
    ```sh
-   cd streamlit_pivot_table/frontend
+   cd streamlit_pivot/frontend
    npm install
    npm run build
    ```
@@ -604,7 +604,7 @@ npx vitest run
    uv build
    ```
 
-Output: `dist/streamlit_pivot_table-0.1.0-py3-none-any.whl`
+Output: `dist/streamlit_pivot-0.1.0-py3-none-any.whl`
 
 ### Requirements
 

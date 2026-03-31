@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from streamlit_pivot_table import st_pivot_table
+from streamlit_pivot import st_pivot_table
 
 import streamlit as st
 

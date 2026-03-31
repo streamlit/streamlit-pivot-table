@@ -27,7 +27,7 @@ from typing import NoReturn, TypeAlias, cast
 PackageInfo: TypeAlias = tuple[str, str]
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-FRONTEND_DIR = SCRIPT_DIR.parent / "streamlit_pivot_table/frontend"
+FRONTEND_DIR = SCRIPT_DIR.parent / "streamlit_pivot/frontend"
 
 ACCEPTABLE_LICENSES = {
     "MIT",

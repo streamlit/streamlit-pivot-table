@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-FRONTEND_DIR = SCRIPT_DIR.parent / "streamlit_pivot_table/frontend"
+FRONTEND_DIR = SCRIPT_DIR.parent / "streamlit_pivot/frontend"
 OUTPUT_FILE = SCRIPT_DIR.parent / "NOTICES"
 
 if __name__ == "__main__":
@@ -32,7 +32,7 @@ if __name__ == "__main__":
                 "--customPath",
                 "/dev/stdin",
                 "--excludePackages",
-                "streamlit_pivot_table",
+                "streamlit_pivot",
             ],
             cwd=str(FRONTEND_DIR),
             stdin=subprocess.PIPE,

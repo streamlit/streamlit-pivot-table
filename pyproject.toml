@@ -56,14 +56,14 @@ devel = [
 with-streamlit = ["streamlit>=1.51.0"]
 
 [tool.setuptools]
-packages = ["streamlit_pivot_table"]
+packages = ["streamlit_pivot"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-streamlit_pivot_table = ["frontend/build/**/*", "pyproject.toml"]
+streamlit_pivot = ["frontend/build/**/*", "pyproject.toml"]
 
 [tool.setuptools.exclude-package-data]
-streamlit_pivot_table = [
+streamlit_pivot = [
   "frontend/node_modules/**/*",
   "frontend/src/**/*",
   "frontend/package-lock.json",

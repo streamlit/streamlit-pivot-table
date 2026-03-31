@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 
 with patch("streamlit.components.v2.component", return_value=lambda **_kwargs: None):
-    pivot_module = import_module("streamlit_pivot_table")
+    pivot_module = import_module("streamlit_pivot")
 
 _default_config = pivot_module._default_config
 _normalize_aggregation_config = pivot_module._normalize_aggregation_config
