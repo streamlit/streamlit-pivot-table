@@ -15,7 +15,8 @@
     "bench": "vitest bench --run",
     "bench:ci": "vitest bench --run --outputJson bench-results.json",
     "bench:check": "vitest bench --run --outputJson bench-results.json && node scripts/check-bench-regression.mjs",
-    "bench:save-baseline": "vitest bench --run --outputJson bench-baseline.json"
+    "bench:save-baseline": "vitest bench --run --outputJson bench-baseline.json",
+    "bench:memory": "node --expose-gc scripts/bench-memory.mjs"
   },
   "browserslist": [
     ">0.2%",
