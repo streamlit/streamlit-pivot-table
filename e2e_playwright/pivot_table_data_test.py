@@ -24,6 +24,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from e2e_utils import get_pivot, open_settings_popover
+from pivot_table_app_support import _load_main_fixture
 
 
 def test_conditional_formatting_color_scale(page_at_app: Page):
@@ -251,10 +252,17 @@ def test_config_import_apply(page_at_app: Page):
 
 
 def test_conditional_formatting_threshold(page_at_app: Page):
-    """Threshold rule applies bold + background to cells above the threshold."""
+    """Threshold rule applies bold + background to qualifying cells."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_threshold")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    threshold = 5000
+    grouped_means = (
+        _load_main_fixture()
+        .groupby(["Region", "Year"], observed=True)["Revenue"]
+        .mean()
+    )
+    expect_unstyled_cells = bool((grouped_means <= threshold).any())
 
     cells = container.get_by_test_id("pivot-data-cell")
     expect(cells.first).to_be_visible(timeout=5000)
@@ -271,7 +279,10 @@ def test_conditional_formatting_threshold(page_at_app: Page):
             unstyled_count += 1
 
     assert styled_count > 0, "Expected at least one cell to have threshold styling"
-    assert unstyled_count > 0, "Expected at least one cell without threshold styling"
+    if expect_unstyled_cells:
+        assert (
+            unstyled_count > 0
+        ), "Expected at least one cell without threshold styling"
 
 
 def test_csv_download_content(page_at_app: Page):
@@ -327,6 +338,7 @@ def test_sticky_headers_during_scroll(page_at_app: Page):
     assert header_box_after is not None
 
     wrapper_box = wrapper.bounding_box()
+    assert wrapper_box is not None
     assert (
         header_box_after["y"] >= wrapper_box["y"] - 2
     ), "Sticky header should remain within the wrapper viewport"

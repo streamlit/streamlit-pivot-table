@@ -70,14 +70,17 @@ export function parseArrowToRecords(arrowData: unknown): DataRecord[] {
   if (!table) return [];
 
   const columnNames = table.schema.fields.map((f) => f.name);
+  const columns = columnNames.map((name) => ({
+    name,
+    vector: table.getChild(name),
+  }));
   const numRows = table.numRows;
   const records: DataRecord[] = new Array(numRows);
 
   for (let i = 0; i < numRows; i++) {
     const record: DataRecord = {};
-    for (const col of columnNames) {
-      const column = table.getChild(col);
-      record[col] = column ? column.get(i) : null;
+    for (const column of columns) {
+      record[column.name] = column.vector ? column.vector.get(i) : null;
     }
     records[i] = record;
   }

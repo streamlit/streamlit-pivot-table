@@ -1,0 +1,156 @@
+name: Performance Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      e2e_rows:
+        description: "Large-load E2E row count"
+        required: true
+        default: "100000"
+        type: choice
+        options:
+          - "100000"
+          - "250000"
+      e2e_suite:
+        description: "Isolated E2E suite to run"
+        required: true
+        default: "data"
+        type: choice
+        options:
+          - data
+          - interactions
+          - toolbar
+          - all-isolated
+  schedule:
+    - cron: "0 8 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-performance
+  cancel-in-progress: true
+
+jobs:
+  frontend-bench:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout streamlit-pivot-table code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: "recursive"
+          fetch-depth: 2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Install frontend dependencies
+        run: |
+          cd streamlit_pivot/frontend
+          npm ci
+
+      - name: Run frontend bench regression check
+        run: |
+          cd streamlit_pivot/frontend
+          npm run bench:check
+
+  python-perf:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout streamlit-pivot-table code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: "recursive"
+          fetch-depth: 2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[devel,with-streamlit]"
+
+      - name: Run Python performance harness
+        run: python tests/perf_benchmark.py
+
+  large-e2e:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout streamlit-pivot-table code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: "recursive"
+          fetch-depth: 2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Install frontend dependencies
+        run: |
+          cd streamlit_pivot/frontend
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd streamlit_pivot/frontend
+          npm run build
+
+      - name: Build the package
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip setuptools wheel build
+          python -m build
+
+      - name: Install Python test dependencies
+        run: |
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r e2e_playwright/test-requirements.txt
+          python -m playwright install --with-deps
+
+      - name: Run isolated large-load E2E
+        run: |
+          source venv/bin/activate
+          rows="${{ github.event.inputs.e2e_rows }}"
+          suite="${{ github.event.inputs.e2e_suite }}"
+          if [[ -z "$rows" ]]; then
+            rows="100000"
+          fi
+          if [[ -z "$suite" ]]; then
+            suite="data"
+          fi
+          python scripts/run_large_e2e_matrix.py --rows "$rows" --suite "$suite"

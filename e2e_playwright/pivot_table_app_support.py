@@ -17,10 +17,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import streamlit as st
-import pandas as pd
+import pandas as pd  # type: ignore[import-untyped]
 
 _DATA_DIR = Path(__file__).parent.parent / "tests" / "golden_data"
 
@@ -36,9 +37,28 @@ def init_page() -> None:
     st.write(f"Reruns: {st.session_state['rerun_count']}")
 
 
+def _load_main_fixture() -> pd.DataFrame:
+    """Load the main test dataset, optionally scaled up for local validation."""
+    requested_rows = os.getenv("E2E_MAIN_DATASET_ROWS")
+    if not requested_rows:
+        return pd.read_csv(_DATA_DIR / "small.csv")
+
+    target_rows = int(requested_rows)
+    if target_rows <= 0:
+        raise ValueError("E2E_MAIN_DATASET_ROWS must be a positive integer")
+
+    base = pd.read_csv(_DATA_DIR / "medium.csv")
+    replace = target_rows > len(base)
+    return (
+        base.sample(n=target_rows, replace=replace, random_state=42)
+        .reset_index(drop=True)
+        .copy()
+    )
+
+
 def load_data() -> dict[str, pd.DataFrame]:
     """Load shared fixture dataframes for the E2E apps."""
-    df = pd.read_csv(_DATA_DIR / "small.csv")
+    df = _load_main_fixture()
     df_single = pd.read_csv(_DATA_DIR / "edge_single_row.csv")
     df_nulls = pd.read_csv(_DATA_DIR / "edge_nulls.csv")
     sparse_df = pd.DataFrame(

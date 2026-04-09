@@ -22,6 +22,7 @@ from pathlib import Path
 from playwright.sync_api import Page, expect
 
 from e2e_utils import get_pivot, open_settings_popover
+from pivot_table_app_support import _load_main_fixture
 
 ROW_HEADERS_KEY_ASC = ["East", "North", "South", "West"]
 ROW_HEADERS_KEY_DESC = ["West", "South", "North", "East"]
@@ -118,6 +119,13 @@ def test_header_menu_sort_by_value(page_at_app: Page):
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    expected_order = (
+        _load_main_fixture()
+        .groupby("Region", observed=True)["Revenue"]
+        .sum()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
 
     activate_sort_option(
         page,
@@ -136,10 +144,9 @@ def test_header_menu_sort_by_value(page_at_app: Page):
 
     row_headers = container.get_by_test_id("pivot-row-header")
     expect(row_headers).to_have_count(4, timeout=10000)
-    expect(row_headers.first).to_have_text("South", timeout=10000)
+    expect(row_headers.first).to_have_text(expected_order[0], timeout=10000)
     expect(container.get_by_test_id("pivot-row-header")).to_have_text(
-        ROW_HEADERS_REVENUE_DESC,
-        timeout=10000,
+        expected_order, timeout=10000
     )
 
 
