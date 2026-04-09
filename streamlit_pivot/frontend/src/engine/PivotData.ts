@@ -118,6 +118,13 @@ export class PivotData {
 
   /** Unique string values per column, built lazily by getUniqueValues(). */
   private _uniqueValuesCache: Map<string, string[]> | null = null;
+  /** Precomputed record indexes by field/value for common interaction fields. */
+  private readonly _recordIndexesByFieldValue: Map<
+    string,
+    Map<string, number[]>
+  > = new Map();
+  /** Fields whose distinct values/indexes are worth precomputing. */
+  private readonly _indexedFields: ReadonlySet<string>;
 
   constructor(
     records: DataRecord[],
@@ -143,6 +150,11 @@ export class PivotData {
         getAggregatorFactory(getAggregationForField(field, config)),
       ]),
     );
+    this._indexedFields = new Set([
+      ...config.rows,
+      ...config.columns,
+      ...Object.keys(config.filters ?? {}),
+    ]);
 
     for (const valField of this._allAggregatedFields) {
       this._grandTotalAggs.set(
@@ -253,8 +265,26 @@ export class PivotData {
 
   private _processRecords(): void {
     const allAggregatedFields = this._allAggregatedFields;
+    const uniqueValueSets = new Map<string, Set<string>>();
+    for (const field of this._indexedFields) {
+      uniqueValueSets.set(field, new Set());
+      this._recordIndexesByFieldValue.set(field, new Map());
+    }
 
-    for (const record of this._records) {
+    for (const [recordIndex, record] of this._records.entries()) {
+      for (const field of this._indexedFields) {
+        const resolved = this._resolveDimValue(field, record[field]);
+        uniqueValueSets.get(field)?.add(resolved);
+        const perField = this._recordIndexesByFieldValue.get(field);
+        if (!perField) continue;
+        const existing = perField.get(resolved);
+        if (existing) {
+          existing.push(recordIndex);
+        } else {
+          perField.set(resolved, [recordIndex]);
+        }
+      }
+
       if (!this._shouldInclude(record)) continue;
 
       const rowKey = this._config.rows.map((r) =>
@@ -329,6 +359,15 @@ export class PivotData {
           this._pushToSumAgg(grandSumAgg, record, valField);
         }
       }
+    }
+
+    if (uniqueValueSets.size > 0) {
+      this._uniqueValuesCache = new Map(
+        [...uniqueValueSets.entries()].map(([field, values]) => [
+          field,
+          [...values].sort((a, b) => a.localeCompare(b)),
+        ]),
+      );
     }
   }
 
@@ -1027,8 +1066,26 @@ export class PivotData {
   ): { records: DataRecord[]; totalCount: number } {
     const matched: DataRecord[] = [];
     let totalCount = 0;
+    let candidateIndexes: number[] | null = null;
+    for (const [field, value] of Object.entries(filters)) {
+      const indexed = this._recordIndexesByFieldValue.get(field)?.get(value);
+      if (!indexed) {
+        candidateIndexes = [];
+        break;
+      }
+      if (
+        candidateIndexes === null ||
+        indexed.length < candidateIndexes.length
+      ) {
+        candidateIndexes = indexed;
+      }
+    }
 
-    for (const record of this._records) {
+    const recordIndexes =
+      candidateIndexes ?? this._records.map((_, index) => index);
+
+    for (const recordIndex of recordIndexes) {
+      const record = this._records[recordIndex];
       if (!this._shouldInclude(record)) continue;
 
       let matchesClick = true;

@@ -25,6 +25,7 @@ import {
 } from "react";
 import type { PivotData, DataRecord } from "../engine/PivotData";
 import type { CellClickPayload } from "../engine/types";
+import { measureSync, type PerfActionMeasurement } from "../engine/perf";
 import styles from "./DrilldownPanel.module.css";
 
 const RECORD_LIMIT = 500;
@@ -33,6 +34,7 @@ export interface DrilldownPanelProps {
   pivotData: PivotData;
   payload: CellClickPayload;
   onClose: () => void;
+  onMeasured?: (action: PerfActionMeasurement) => void;
 }
 
 const CloseIcon: FC = () => (
@@ -78,6 +80,7 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
   pivotData,
   payload,
   onClose,
+  onMeasured,
 }): ReactElement => {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -96,10 +99,21 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
     [onClose],
   );
 
-  const { records, totalCount } = useMemo(
-    () => pivotData.getMatchingRecords(payload.filters, RECORD_LIMIT),
-    [pivotData, payload.filters],
-  );
+  const { records, totalCount, elapsedMs } = useMemo(() => {
+    const measured = measureSync(() =>
+      pivotData.getMatchingRecords(payload.filters, RECORD_LIMIT),
+    );
+    return { ...measured.result, elapsedMs: measured.elapsedMs };
+  }, [pivotData, payload.filters]);
+
+  useEffect(() => {
+    if (!onMeasured) return;
+    onMeasured({
+      kind: "drilldown",
+      elapsedMs: Math.round(elapsedMs * 100) / 100,
+      totalCount,
+    });
+  }, [elapsedMs, onMeasured, totalCount]);
 
   const columns = useMemo(() => pivotData.getColumnNames(), [pivotData]);
 

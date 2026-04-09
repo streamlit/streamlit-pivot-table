@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -108,6 +109,11 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Extra argument forwarded directly to pytest. Repeat as needed.",
     )
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        help="Optional JSON file for structured matrix results.",
+    )
     return parser.parse_args()
 
 
@@ -128,6 +134,24 @@ def main() -> int:
         print(
             f"{status} rows={result.rows:,} suite={result.suite} "
             f"elapsed={result.elapsed_s:.2f}s"
+        )
+
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(
+            json.dumps(
+                [
+                    {
+                        "rows": result.rows,
+                        "suite": result.suite,
+                        "elapsed_s": result.elapsed_s,
+                        "return_code": result.return_code,
+                    }
+                    for result in results
+                ],
+                indent=2,
+            ),
+            encoding="utf-8",
         )
 
     return 1 if failures else 0

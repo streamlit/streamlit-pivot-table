@@ -776,6 +776,32 @@ export interface CellClickPayload {
   valueField?: string;
 }
 
+export interface PivotPerfAction {
+  kind: "initial_mount" | "sort" | "filter" | "drilldown";
+  elapsedMs: number;
+  axis?: "row" | "col";
+  field?: string;
+  totalCount?: number;
+}
+
+export interface PivotPerfMetrics {
+  parseMs: number;
+  pivotComputeMs: number;
+  renderMs: number;
+  firstMountMs: number;
+  sourceRows: number;
+  sourceCols: number;
+  totalRows: number;
+  totalCols: number;
+  totalCells: number;
+  executionMode: "client_only" | "threshold_hybrid";
+  needsVirtualization: boolean;
+  columnsTruncated: boolean;
+  truncatedColumnCount?: number;
+  warnings: string[];
+  lastAction?: PivotPerfAction;
+}
+
 // ---------------------------------------------------------------------------
 // Null handling (developer constraint, passed via data channel)
 // ---------------------------------------------------------------------------
@@ -817,6 +843,10 @@ export interface PivotTableData {
   enable_drilldown?: boolean;
   /** Base filename (without extension) for exported files. */
   export_filename?: string;
+  /** Performance execution mode used for this render path. */
+  execution_mode?: "client_only" | "threshold_hybrid";
+  /** Human-readable reason why the threshold_hybrid path was selected. */
+  server_mode_reason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -825,4 +855,5 @@ export interface PivotTableData {
 
 export interface PivotTableState {
   config: PivotConfigV1;
+  perf_metrics?: PivotPerfMetrics;
 }

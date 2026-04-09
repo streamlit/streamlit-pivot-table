@@ -32,6 +32,7 @@ import {
   DEFAULT_CONFIG,
   getRenderedValueFields,
   isSyntheticMeasure,
+  type PivotPerfMetrics,
   stringifyPivotConfig,
   validatePivotConfigV1,
   type PivotConfigV1,
@@ -50,7 +51,8 @@ import {
   logMetrics,
   checkBudgets,
   DEFAULT_BUDGETS,
-  type PerfMetrics,
+  type PerfActionMeasurement,
+  type PivotPerfMetrics as PivotPerfMetricsModel,
 } from "./engine/perf";
 import { checkRenderBudget } from "./shared/budgetCheck";
 import ErrorBoundary from "./shared/ErrorBoundary";
@@ -63,6 +65,7 @@ import WarningBanner from "./shared/WarningBanner";
 export type PivotRootState = {
   config: PivotConfigV1;
   cell_click: CellClickPayload;
+  perf_metrics?: PivotPerfMetrics;
 };
 
 export type PivotRootProps = Pick<
@@ -85,6 +88,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   menu_limit,
   enable_drilldown,
   export_filename,
+  execution_mode,
   setStateValue,
   setTriggerValue,
 }): ReactElement => {
@@ -126,7 +130,10 @@ const PivotRoot: FC<PivotRootProps> = ({
     [currentConfig],
   );
 
-  const records = useMemo(() => parseArrowToRecords(dataframe), [dataframe]);
+  const { records, parseMs } = useMemo(() => {
+    const measured = measureSync(() => parseArrowToRecords(dataframe));
+    return { records: measured.result, parseMs: measured.elapsedMs };
+  }, [dataframe]);
 
   const rawAllColumns = useMemo(
     () => getArrowColumnNames(dataframe),
@@ -194,15 +201,25 @@ const PivotRoot: FC<PivotRootProps> = ({
   }, [pivotData, currentConfig]);
 
   useEffect(() => {
-    if (budget?.needsVirtualization || height != null)
-      setIsTableScrollable(true);
+    setIsTableScrollable(
+      Boolean(budget?.needsVirtualization || height != null),
+    );
   }, [budget?.needsVirtualization, height]);
 
   const renderStartRef = useRef(0);
-  const [debugMetrics, setDebugMetrics] = useState<PerfMetrics | null>(null);
+  const [debugMetrics, setDebugMetrics] =
+    useState<PivotPerfMetricsModel | null>(null);
   const renderCountRef = useRef(0);
   const prevPivotDataRef = useRef<PivotData | null>(null);
   const prevConfigJsonRef = useRef<string>(currentConfigJson);
+  const initialMetricsPublishedRef = useRef(false);
+  const perfMetricsJsonRef = useRef("");
+  const pendingActionRef = useRef<{
+    kind: PerfActionMeasurement["kind"];
+    startedAt: number;
+    axis?: "row" | "col";
+    field?: string;
+  } | null>(null);
 
   if (pivotData !== prevPivotDataRef.current) {
     prevPivotDataRef.current = pivotData;
@@ -224,22 +241,79 @@ const PivotRoot: FC<PivotRootProps> = ({
     const renderMs =
       Math.round((performance.now() - renderStartRef.current) * 100) / 100;
     renderCountRef.current += 1;
-    const metrics: PerfMetrics = {
+    let lastAction = debugMetrics?.lastAction;
+    if (!initialMetricsPublishedRef.current) {
+      initialMetricsPublishedRef.current = true;
+      lastAction = {
+        kind: "initial_mount",
+        elapsedMs: Math.round((parseMs + computeMs + renderMs) * 100) / 100,
+      };
+    } else if (pendingActionRef.current) {
+      lastAction = {
+        kind: pendingActionRef.current.kind,
+        elapsedMs:
+          Math.round(
+            (performance.now() - pendingActionRef.current.startedAt) * 100,
+          ) / 100,
+        axis: pendingActionRef.current.axis,
+        field: pendingActionRef.current.field,
+      };
+      pendingActionRef.current = null;
+    }
+
+    const metrics: PivotPerfMetricsModel = {
+      parseMs,
       pivotComputeMs: computeMs,
       renderMs,
+      firstMountMs:
+        debugMetrics?.firstMountMs ??
+        Math.round((parseMs + computeMs + renderMs) * 100) / 100,
+      sourceRows: records.length,
+      sourceCols: rawAllColumns.length,
       totalRows: pivotData.uniqueRowKeyCount,
       totalCols: pivotData.uniqueColKeyCount,
       totalCells: pivotData.totalCellCount,
+      executionMode: execution_mode ?? "client_only",
+      needsVirtualization: Boolean(budget?.needsVirtualization),
+      columnsTruncated: Boolean(budget?.columnsTruncated),
+      truncatedColumnCount: budget?.truncatedColumnCount,
+      warnings: [],
+      lastAction,
     };
+    const warnings = [...(budget?.warnings ?? [])];
+    for (const warning of checkBudgets(metrics)) {
+      if (!warnings.includes(warning)) warnings.push(warning);
+    }
+    metrics.warnings = warnings;
+    if (containerRef.current) {
+      containerRef.current.setAttribute(
+        "data-perf-metrics",
+        JSON.stringify(metrics),
+      );
+    }
     if (process.env.NODE_ENV === "development") {
       logMetrics(metrics);
     }
-    // Capture metrics from the first render cycle after pivotData changes.
-    // Capped at 2 to avoid a setState → re-render feedback loop.
-    if (renderCountRef.current <= 2) {
+    if (renderCountRef.current <= 2 || !debugMetrics) {
       setDebugMetrics(metrics);
     }
-  });
+  }, [
+    budget,
+    computeMs,
+    execution_mode,
+    parseMs,
+    pivotData,
+    rawAllColumns.length,
+    records.length,
+  ]);
+
+  useEffect(() => {
+    if (!debugMetrics) return;
+    const nextJson = JSON.stringify(debugMetrics);
+    if (nextJson === perfMetricsJsonRef.current) return;
+    perfMetricsJsonRef.current = nextJson;
+    setStateValue("perf_metrics", debugMetrics as PivotPerfMetrics);
+  }, [debugMetrics, setStateValue]);
 
   const perfWarnings = useMemo(() => {
     if (!debugMetrics) {
@@ -287,6 +361,11 @@ const PivotRoot: FC<PivotRootProps> = ({
 
   const handleSortChange = useCallback(
     (axis: "row" | "col", sort: SortConfig | undefined) => {
+      pendingActionRef.current = {
+        kind: "sort",
+        startedAt: performance.now(),
+        axis,
+      };
       const key = axis === "row" ? "row_sort" : "col_sort";
       handleConfigChange({ ...currentConfig, [key]: sort });
     },
@@ -295,6 +374,11 @@ const PivotRoot: FC<PivotRootProps> = ({
 
   const handleFilterChange = useCallback(
     (field: string, filter: DimensionFilter | undefined) => {
+      pendingActionRef.current = {
+        kind: "filter",
+        startedAt: performance.now(),
+        field,
+      };
       const filters = { ...(currentConfig.filters ?? {}) };
       if (filter) {
         filters[field] = filter;
@@ -308,6 +392,15 @@ const PivotRoot: FC<PivotRootProps> = ({
       });
     },
     [currentConfig, handleConfigChange],
+  );
+
+  const handleDrilldownMeasured = useCallback(
+    (action: PerfActionMeasurement) => {
+      setDebugMetrics((prev) =>
+        prev ? { ...prev, lastAction: action } : prev,
+      );
+    },
+    [],
   );
 
   const handleShowValuesAsChange = useCallback(
@@ -519,6 +612,7 @@ const PivotRoot: FC<PivotRootProps> = ({
             pivotData={pivotData}
             payload={drilldownPayload}
             onClose={() => setDrilldownPayload(null)}
+            onMeasured={handleDrilldownMeasured}
           />
         )}
 
@@ -536,6 +630,7 @@ const PivotRoot: FC<PivotRootProps> = ({
             }}
           >
             <span>compute: {debugMetrics.pivotComputeMs.toFixed(1)}ms</span>
+            <span>parse: {debugMetrics.parseMs.toFixed(1)}ms</span>
             <span>render: {debugMetrics.renderMs.toFixed(1)}ms</span>
             <span>rows: {debugMetrics.totalRows}</span>
             <span>cols: {debugMetrics.totalCols}</span>

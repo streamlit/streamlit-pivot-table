@@ -30,6 +30,29 @@ export interface PerfMetrics {
   totalCells: number;
 }
 
+export type PerfActionKind = "initial_mount" | "sort" | "filter" | "drilldown";
+
+export interface PerfActionMeasurement {
+  kind: PerfActionKind;
+  elapsedMs: number;
+  axis?: "row" | "col";
+  field?: string;
+  totalCount?: number;
+}
+
+export interface PivotPerfMetrics extends PerfMetrics {
+  parseMs: number;
+  sourceRows: number;
+  sourceCols: number;
+  firstMountMs: number;
+  executionMode: "client_only" | "threshold_hybrid";
+  needsVirtualization: boolean;
+  columnsTruncated: boolean;
+  truncatedColumnCount?: number;
+  warnings: string[];
+  lastAction?: PerfActionMeasurement;
+}
+
 export interface PerfBudgets {
   /** Max compute time in ms before warning (medium dataset target) */
   maxComputeMs: number;
@@ -101,13 +124,24 @@ export function checkBudgets(
 /**
  * Log metrics to console in debug mode.
  */
-export function logMetrics(metrics: PerfMetrics, label = "PivotTable"): void {
+export function logMetrics(
+  metrics: PerfMetrics | PivotPerfMetrics,
+  label = "PivotTable",
+): void {
   if (process.env.NODE_ENV !== "production") {
+    const extras =
+      "parseMs" in metrics
+        ? ` parse=${metrics.parseMs.toFixed(1)}ms mode=${metrics.executionMode}`
+        : "";
+    const action =
+      "lastAction" in metrics && metrics.lastAction
+        ? ` action=${metrics.lastAction.kind}:${metrics.lastAction.elapsedMs.toFixed(1)}ms`
+        : "";
     console.log(
-      `[${label}] compute=${metrics.pivotComputeMs.toFixed(1)}ms ` +
+      `[${label}]${extras} compute=${metrics.pivotComputeMs.toFixed(1)}ms ` +
         `render=${metrics.renderMs.toFixed(1)}ms ` +
         `rows=${metrics.totalRows} cols=${metrics.totalCols} ` +
-        `cells=${metrics.totalCells}`,
+        `cells=${metrics.totalCells}${action}`,
     );
   }
 }

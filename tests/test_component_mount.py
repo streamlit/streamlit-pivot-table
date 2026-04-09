@@ -142,3 +142,63 @@ def test_missing_on_config_change_uses_noop_callback(
     )
 
     assert calls[0]["on_config_change"] is pivot_module._noop_callback
+
+
+def test_mount_includes_perf_metrics_state_and_callback(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+    )
+
+    mount_kwargs = calls[0]
+    assert mount_kwargs["default"]["perf_metrics"] is None
+    assert mount_kwargs["on_perf_metrics_change"] is pivot_module._noop_callback
+
+
+def test_threshold_hybrid_preaggregates_compatible_large_configs(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "threshold_hybrid"
+    assert payload["enable_drilldown"] is False
+    assert len(payload["dataframe"]) <= len(large_df)
+
+
+def test_threshold_hybrid_falls_back_for_incompatible_configs(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="avg",
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "client_only"

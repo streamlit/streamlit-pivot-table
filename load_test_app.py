@@ -22,15 +22,22 @@ Run locally:
 from __future__ import annotations
 
 import json
+import os
+import sys
 from dataclasses import dataclass
 from math import prod
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
 import streamlit as st
 
-from streamlit_pivot import PivotConfig, SortConfig, st_pivot_table
+APP_ROOT = str(Path(__file__).resolve().parent)
+if APP_ROOT in sys.path:
+    sys.path.remove(APP_ROOT)
+
+from streamlit_pivot import PivotConfig, SortConfig, st_pivot_table  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,8 @@ PROFILES: dict[str, Profile] = {
 }
 
 ROW_OPTIONS = {
+    "10k": 10_000,
+    "50k": 50_000,
     "100k": 100_000,
     "250k": 250_000,
     "500k": 500_000,
@@ -141,6 +150,7 @@ VALUES_KEY = "load_playground_values"
 HEIGHT_KEY = "load_playground_height"
 SUBTOTALS_KEY = "load_playground_show_subtotals"
 TOTALS_KEY = "load_playground_show_totals"
+EXECUTION_MODE_KEY = "load_playground_execution_mode"
 LAST_SYNCED_CONFIG_KEY = "_load_playground_last_synced_config_json"
 PIVOT_WIDGET_KEY = "load_playground_pivot"
 
@@ -207,10 +217,20 @@ def estimate_groups(
 
 
 def _sync_profile_defaults() -> None:
-    profile_name = st.session_state.get(PROFILE_NAME_KEY, next(iter(PROFILES)))
+    default_row_label = os.getenv("LOAD_TEST_ROWS", next(iter(ROW_OPTIONS)))
+    default_profile_name = os.getenv("LOAD_TEST_PROFILE", next(iter(PROFILES)))
+    default_execution_mode = os.getenv("LOAD_TEST_EXECUTION_MODE", "auto")
+    if default_row_label not in ROW_OPTIONS:
+        default_row_label = next(iter(ROW_OPTIONS))
+    if default_profile_name not in PROFILES:
+        default_profile_name = next(iter(PROFILES))
+    if default_execution_mode not in {"auto", "client_only", "threshold_hybrid"}:
+        default_execution_mode = "auto"
+
+    profile_name = st.session_state.get(PROFILE_NAME_KEY, default_profile_name)
     profile = PROFILES[profile_name]
 
-    st.session_state.setdefault(ROW_LABEL_KEY, next(iter(ROW_OPTIONS)))
+    st.session_state.setdefault(ROW_LABEL_KEY, default_row_label)
     st.session_state.setdefault(PROFILE_NAME_KEY, profile_name)
     st.session_state.setdefault(SEED_KEY, 42)
     st.session_state.setdefault(ROWS_KEY, list(profile.default_rows))
@@ -219,6 +239,7 @@ def _sync_profile_defaults() -> None:
     st.session_state.setdefault(HEIGHT_KEY, 560)
     st.session_state.setdefault(SUBTOTALS_KEY, False)
     st.session_state.setdefault(TOTALS_KEY, True)
+    st.session_state.setdefault(EXECUTION_MODE_KEY, default_execution_mode)
 
 
 def _reset_layout_to_profile_defaults() -> None:
@@ -302,6 +323,11 @@ with st.sidebar:
     )
     show_subtotals = st.checkbox("Show subtotals", key=SUBTOTALS_KEY)
     show_totals = st.checkbox("Show grand totals", key=TOTALS_KEY)
+    execution_mode = st.selectbox(
+        "Execution mode",
+        ["auto", "client_only", "threshold_hybrid"],
+        key=EXECUTION_MODE_KEY,
+    )
 
 if not selected_values:
     st.error("Select at least one measure.")
@@ -393,8 +419,52 @@ result = st_pivot_table(
     column_alignment=column_alignment,
     interactive=True,
     height=table_height,
-    enable_drilldown=False,
+    enable_drilldown=True,
+    execution_mode=execution_mode,
 )
 
 with st.expander("Current config", expanded=False):
     st.json(result["config"])
+
+perf_metrics = cast(
+    dict[str, Any] | None,
+    st.session_state.get(PIVOT_WIDGET_KEY, {}).get("perf_metrics"),
+)
+if perf_metrics:
+    comparison_row = {
+        "rows": n_rows,
+        "shape": profile_name,
+        "row_groups": estimated_row_groups,
+        "col_groups": estimated_col_groups,
+        "visible_cells": estimated_visible_cells,
+        "first_render_ms": perf_metrics.get("firstMountMs"),
+        "sort_ms": (
+            perf_metrics.get("lastAction", {}).get("elapsedMs")
+            if perf_metrics.get("lastAction", {}).get("kind") == "sort"
+            else None
+        ),
+        "filter_ms": (
+            perf_metrics.get("lastAction", {}).get("elapsedMs")
+            if perf_metrics.get("lastAction", {}).get("kind") == "filter"
+            else None
+        ),
+        "drilldown_ms": (
+            perf_metrics.get("lastAction", {}).get("elapsedMs")
+            if perf_metrics.get("lastAction", {}).get("kind") == "drilldown"
+            else None
+        ),
+        "virtualized": perf_metrics.get("needsVirtualization"),
+        "truncated": perf_metrics.get("columnsTruncated"),
+        "warnings": len(perf_metrics.get("warnings", [])),
+        "execution_mode": perf_metrics.get("executionMode"),
+    }
+    with st.expander("Current performance metrics", expanded=True):
+        st.json(perf_metrics)
+    with st.expander("Comparison row", expanded=True):
+        st.write(comparison_row)
+        st.text_area(
+            "COMPARISON_ROW_JSON",
+            value=json.dumps(comparison_row, sort_keys=True),
+            height=160,
+            disabled=True,
+        )

@@ -61,6 +61,7 @@ const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
         menu_limit={data?.menu_limit}
         enable_drilldown={data?.enable_drilldown}
         export_filename={data?.export_filename}
+        execution_mode={data?.execution_mode}
         setStateValue={setStateValue}
         setTriggerValue={setTriggerValue}
       />

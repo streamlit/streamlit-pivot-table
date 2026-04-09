@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from math import prod
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 if TYPE_CHECKING:
@@ -107,10 +108,83 @@ VALID_SHOW_VALUES_AS = frozenset(("raw", "pct_of_total", "pct_of_row", "pct_of_c
 VALID_ALIGNMENTS = frozenset(("left", "center", "right"))
 VALID_COND_FMT_TYPES = frozenset(("color_scale", "data_bars", "threshold"))
 VALID_NULL_MODES = frozenset(("exclude", "zero", "separate"))
+SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS = frozenset(("sum", "count", "min", "max"))
 
 
 _warned_keys: set[str] = set()
 _PYTHON_CONFIG_STATE_PREFIX = "__streamlit_pivot_python_config__:"
+
+
+def _estimate_group_count(df: Any, fields: list[str]) -> int:
+    if not fields:
+        return 1
+    distinct_counts = [int(df[field].nunique(dropna=False)) for field in fields]
+    return min(len(df), int(prod(distinct_counts)))
+
+
+def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
+    if config.get("synthetic_measures"):
+        return False, "threshold_hybrid currently skips synthetic measures"
+    aggregation = config.get("aggregation", {})
+    unsupported = sorted(
+        agg
+        for agg in set(aggregation.values())
+        if agg not in SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS
+    )
+    if unsupported:
+        return (
+            False,
+            "threshold_hybrid currently supports only "
+            f"{sorted(SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS)} aggregations; "
+            f"found {unsupported}",
+        )
+    return True, "config is compatible with threshold_hybrid"
+
+
+def _should_use_threshold_hybrid(
+    df: Any,
+    config: PivotConfig,
+    execution_mode: str,
+) -> tuple[bool, str]:
+    compatible, reason = _can_use_threshold_hybrid(config)
+    if execution_mode == "client_only":
+        return False, "execution_mode forced client_only"
+    if execution_mode == "threshold_hybrid":
+        return compatible, (
+            "execution_mode forced threshold_hybrid" if compatible else reason
+        )
+    if not compatible:
+        return False, reason
+
+    row_groups = _estimate_group_count(df, config.get("rows", []))
+    col_groups = _estimate_group_count(df, config.get("columns", []))
+    rendered_values = max(1, len(config.get("values", [])))
+    visible_cells = row_groups * min(col_groups, 200) * rendered_values
+    if len(df) >= 250_000 and (
+        visible_cells > 5_000 or col_groups > 200 or row_groups > 5_000
+    ):
+        return True, (
+            "auto-selected threshold_hybrid because the dataset is large and the "
+            "estimated pivot shape exceeds the client-side comfort budget"
+        )
+    return False, "auto-selected client_only because the dataset stays within budget"
+
+
+def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
+    group_fields = [*config.get("rows", []), *config.get("columns", [])]
+    aggregation = config.get("aggregation", {})
+    value_fields = config.get("values", [])
+    if group_fields:
+        return (
+            df.groupby(group_fields, dropna=False, observed=True)[value_fields]
+            .agg(aggregation)
+            .reset_index()
+        )
+
+    aggregated = df[value_fields].agg(aggregation)
+    if hasattr(aggregated, "to_frame"):
+        aggregated = aggregated.to_frame().T
+    return aggregated.reset_index(drop=True)
 
 
 def _normalize_aggregation_config(
@@ -344,6 +418,36 @@ class CellClickPayload(TypedDict):
     valueField: str
 
 
+class PerfActionMeasurement(TypedDict, total=False):
+    """Payload fired by setStateValue("perf_metrics", ...)."""
+
+    kind: str
+    elapsedMs: float
+    axis: str
+    field: str
+    totalCount: int
+
+
+class PivotPerfMetrics(TypedDict, total=False):
+    """Performance metrics published by the frontend for the current pivot view."""
+
+    parseMs: float
+    pivotComputeMs: float
+    renderMs: float
+    firstMountMs: float
+    sourceRows: int
+    sourceCols: int
+    totalRows: int
+    totalCols: int
+    totalCells: int
+    executionMode: str
+    needsVirtualization: bool
+    columnsTruncated: bool
+    truncatedColumnCount: int
+    warnings: list[str]
+    lastAction: PerfActionMeasurement
+
+
 # ---------------------------------------------------------------------------
 # Return type
 # ---------------------------------------------------------------------------
@@ -353,6 +457,7 @@ class PivotTableResult(TypedDict, total=False):
     """Value returned by st_pivot_table() to the caller."""
 
     config: PivotConfig
+    perf_metrics: PivotPerfMetrics
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +529,7 @@ def st_pivot_table(
     # Phase 4 parameters
     enable_drilldown: bool = True,
     export_filename: str | None = None,
+    execution_mode: str = "auto",
 ) -> PivotTableResult:
     """Create a pivot table component.
 
@@ -550,6 +656,12 @@ def st_pivot_table(
         Base filename (without extension) used when exporting data.
         The date and file extension are appended automatically.
         Defaults to ``"pivot-table"`` when not set.
+    execution_mode : str
+        Performance execution mode. ``"auto"`` (default) keeps the client-side
+        path unless the dataset is large enough to trigger the threshold_hybrid
+        pre-aggregation path. ``"client_only"`` always ships raw rows to the
+        frontend. ``"threshold_hybrid"`` forces server-side pre-aggregation when
+        the current config is compatible with the prototype.
 
     Returns
     -------
@@ -572,6 +684,10 @@ def st_pivot_table(
         ) from exc
     if not isinstance(show_totals, bool):
         raise TypeError(f"show_totals must be a bool, got {type(show_totals).__name__}")
+    if execution_mode not in {"auto", "client_only", "threshold_hybrid"}:
+        raise ValueError(
+            "execution_mode must be one of: 'auto', 'client_only', 'threshold_hybrid'"
+        )
     if show_row_totals is not None and not isinstance(show_row_totals, (bool, list)):
         raise TypeError(
             f"show_row_totals must be bool, list[str], or None, got {type(show_row_totals).__name__}"
@@ -894,12 +1010,25 @@ def st_pivot_table(
     # Controlled-state hydration: preserve persisted user config across normal
     # reruns, but let explicit Python config changes take precedence.
     config_to_send = _resolve_config_to_send(st.session_state, key, initial_config)
+    use_threshold_hybrid, threshold_reason = _should_use_threshold_hybrid(
+        data, config_to_send, execution_mode
+    )
+    materialized_data = (
+        _prepare_threshold_hybrid_frame(data, config_to_send)
+        if use_threshold_hybrid
+        else data
+    )
+    effective_execution_mode = (
+        "threshold_hybrid" if use_threshold_hybrid else "client_only"
+    )
 
     data_payload: dict[str, Any] = {
-        "dataframe": data,
+        "dataframe": materialized_data,
         "height": height,
         "max_height": max_height,
         "config": config_to_send,
+        "execution_mode": effective_execution_mode,
+        "server_mode_reason": threshold_reason,
     }
     if null_handling is not None:
         data_payload["null_handling"] = null_handling
@@ -924,16 +1053,17 @@ def st_pivot_table(
                 f"menu_limit must be a positive integer, got {menu_limit!r}"
             )
         data_payload["menu_limit"] = menu_limit
-    if not enable_drilldown:
+    if not enable_drilldown or use_threshold_hybrid:
         data_payload["enable_drilldown"] = False
     if export_filename is not None:
         data_payload["export_filename"] = export_filename
 
     mount_kwargs: dict[str, Any] = {
         "key": key,
-        "default": {"config": config_to_send},
+        "default": {"config": config_to_send, "perf_metrics": None},
         "data": data_payload,
         "on_config_change": on_config_change or _noop_callback,
+        "on_perf_metrics_change": _noop_callback,
     }
 
     if on_cell_click is not None:
