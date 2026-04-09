@@ -182,6 +182,8 @@ def test_threshold_hybrid_preaggregates_compatible_large_configs(
     assert payload["execution_mode"] == "threshold_hybrid"
     assert payload["enable_drilldown"] is False
     assert len(payload["dataframe"]) <= len(large_df)
+    assert payload["server_mode_reason"]
+    assert "Drill-down" in payload["server_mode_reason"]
 
 
 def test_threshold_hybrid_falls_back_for_incompatible_configs(
@@ -196,7 +198,7 @@ def test_threshold_hybrid_falls_back_for_incompatible_configs(
         rows=["Region"],
         columns=["Year"],
         values=["Revenue"],
-        aggregation="avg",
+        aggregation="median",
         execution_mode="threshold_hybrid",
     )
 

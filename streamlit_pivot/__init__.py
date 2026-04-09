@@ -22,6 +22,8 @@ import warnings
 from math import prod
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
+import pandas as pd
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -108,7 +110,9 @@ VALID_SHOW_VALUES_AS = frozenset(("raw", "pct_of_total", "pct_of_row", "pct_of_c
 VALID_ALIGNMENTS = frozenset(("left", "center", "right"))
 VALID_COND_FMT_TYPES = frozenset(("color_scale", "data_bars", "threshold"))
 VALID_NULL_MODES = frozenset(("exclude", "zero", "separate"))
-SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS = frozenset(("sum", "count", "min", "max"))
+SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS = frozenset(
+    ("sum", "count", "min", "max", "avg")
+)
 
 
 _warned_keys: set[str] = set()
@@ -150,8 +154,11 @@ def _should_use_threshold_hybrid(
     if execution_mode == "client_only":
         return False, "execution_mode forced client_only"
     if execution_mode == "threshold_hybrid":
-        return compatible, (
-            "execution_mode forced threshold_hybrid" if compatible else reason
+        if not compatible:
+            return False, reason
+        return True, (
+            "Server pre-aggregation is enabled because execution_mode is "
+            "'threshold_hybrid' (automatic row-count thresholds are not applied)."
         )
     if not compatible:
         return False, reason
@@ -160,31 +167,72 @@ def _should_use_threshold_hybrid(
     col_groups = _estimate_group_count(df, config.get("columns", []))
     rendered_values = max(1, len(config.get("values", [])))
     visible_cells = row_groups * min(col_groups, 200) * rendered_values
-    if len(df) >= 250_000 and (
+    estimated_pivot_groups = row_groups * col_groups
+    high_cardinality = estimated_pivot_groups > 10_000
+    row_threshold = 100_000 if high_cardinality else 250_000
+    if len(df) >= row_threshold and (
         visible_cells > 5_000 or col_groups > 200 or row_groups > 5_000
     ):
+        card_note = (
+            "high estimated pivot cardinality"
+            if high_cardinality
+            else "moderate estimated pivot cardinality"
+        )
         return True, (
-            "auto-selected threshold_hybrid because the dataset is large and the "
-            "estimated pivot shape exceeds the client-side comfort budget"
+            f"auto-selected threshold_hybrid: dataset has at least {row_threshold:,} "
+            f"rows with {card_note}, and the estimated pivot shape exceeds the "
+            "client-side comfort budget."
         )
     return False, "auto-selected client_only because the dataset stays within budget"
 
 
 def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
     group_fields = [*config.get("rows", []), *config.get("columns", [])]
-    aggregation = config.get("aggregation", {})
-    value_fields = config.get("values", [])
-    if group_fields:
-        return (
-            df.groupby(group_fields, dropna=False, observed=True)[value_fields]
-            .agg(aggregation)
-            .reset_index()
-        )
+    aggregation = dict(config.get("aggregation", {}))
+    value_fields = list(config.get("values", []))
 
-    aggregated = df[value_fields].agg(aggregation)
-    if hasattr(aggregated, "to_frame"):
-        aggregated = aggregated.to_frame().T
-    return aggregated.reset_index(drop=True)
+    if not value_fields:
+        if not group_fields:
+            return df.iloc[0:0].copy()
+        return pd.DataFrame(columns=group_fields)
+
+    named: dict[str, pd.NamedAgg] = {}
+    avg_fields: list[str] = []
+
+    for vf in value_fields:
+        agg = aggregation.get(vf, "sum")
+        if agg == "avg":
+            avg_fields.append(vf)
+            named[f"{vf}__sum"] = pd.NamedAgg(column=vf, aggfunc="sum")
+            named[f"{vf}__cnt"] = pd.NamedAgg(column=vf, aggfunc="count")
+        else:
+            named[vf] = pd.NamedAgg(column=vf, aggfunc=agg)
+
+    if not group_fields:
+        row: dict[str, Any] = {}
+        for vf in value_fields:
+            agg = aggregation.get(vf, "sum")
+            ser = df[vf]
+            if agg == "avg":
+                cnt = int(ser.count())
+                row[vf] = float(ser.sum() / cnt) if cnt else float("nan")
+            else:
+                row[vf] = ser.agg(agg)
+        return pd.DataFrame([row])
+
+    out = (
+        df.groupby(group_fields, dropna=False, observed=True).agg(**named).reset_index()
+    )
+
+    for vf in avg_fields:
+        sum_col = f"{vf}__sum"
+        cnt_col = f"{vf}__cnt"
+        cnt = out[cnt_col].astype("float64")
+        sm = out[sum_col].astype("float64")
+        out[vf] = sm.div(cnt).where(cnt > 0)
+        out = out.drop(columns=[sum_col, cnt_col])
+
+    return out
 
 
 def _normalize_aggregation_config(
@@ -1013,6 +1061,13 @@ def st_pivot_table(
     use_threshold_hybrid, threshold_reason = _should_use_threshold_hybrid(
         data, config_to_send, execution_mode
     )
+    if use_threshold_hybrid:
+        drill_note = (
+            " Drill-down is unavailable in this mode because values are "
+            "pre-aggregated on the server rather than built from raw rows."
+        )
+        if drill_note not in threshold_reason:
+            threshold_reason = f"{threshold_reason}{drill_note}"
     materialized_data = (
         _prepare_threshold_hybrid_frame(data, config_to_send)
         if use_threshold_hybrid

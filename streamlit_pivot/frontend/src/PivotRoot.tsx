@@ -89,6 +89,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   enable_drilldown,
   export_filename,
   execution_mode,
+  server_mode_reason,
   setStateValue,
   setTriggerValue,
 }): ReactElement => {
@@ -334,8 +335,14 @@ const PivotRoot: FC<PivotRootProps> = ({
     for (const pw of perfWarnings) {
       if (!w.includes(pw)) w.push(pw);
     }
+    if (execution_mode === "threshold_hybrid") {
+      const hybridInfo =
+        server_mode_reason?.trim() ||
+        "This table uses server pre-aggregated data. Drill-down to raw rows is not available.";
+      if (!w.includes(hybridInfo)) w.push(hybridInfo);
+    }
     return w;
-  }, [budget, perfWarnings]);
+  }, [budget, perfWarnings, execution_mode, server_mode_reason]);
 
   const handleConfigChange = useCallback(
     (newConfig: PivotConfigV1) => {
@@ -430,8 +437,10 @@ const PivotRoot: FC<PivotRootProps> = ({
   );
 
   const safeMaxRows = useMemo(() => {
-    if (!pivotData || budget?.needsVirtualization) return undefined;
-    const effectiveCols = budget?.columnsTruncated
+    if (!pivotData || !budget || budget.needsVirtualization) return undefined;
+    // Non-virtual path: cap rows from DOM budget using displayed column count
+    // (no legacy 200-cap when wide mode + virtualization; that path returns above).
+    const effectiveCols = budget.columnsTruncated
       ? budget.truncatedColumnCount
       : pivotData.uniqueColKeyCount;
     const colsPerCell = Math.max(
