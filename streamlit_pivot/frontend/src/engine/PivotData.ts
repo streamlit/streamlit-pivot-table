@@ -22,6 +22,7 @@ import {
   getAggregatorFactory,
 } from "./aggregators";
 import {
+  type ColumnarDataSource,
   getAggregationForField,
   type DimensionFilter,
   type NullHandlingConfig,
@@ -30,6 +31,7 @@ import {
   type SyntheticMeasureConfig,
   type SortConfig,
 } from "./types";
+import { DataRecordSource } from "./parseArrow";
 import { formatNumber } from "./formatters";
 
 export type DataRecord = Record<string, unknown>;
@@ -88,8 +90,11 @@ export function mixedCompare(a: string, b: string): number {
  */
 export class PivotData {
   private readonly _config: PivotConfigV1;
-  private readonly _records: DataRecord[];
+  private readonly _dataSource: ColumnarDataSource;
+  /** Set when constructed from `DataRecord[]`; null for pure columnar (Arrow) input. */
+  private readonly _materializedRecords: DataRecord[] | null;
   private readonly _options: PivotDataOptions;
+  private _valueFloatArrays: Map<string, Float64Array | null> | null = null;
 
   /** All value-like source fields that must be aggregated from records. */
   private readonly _allAggregatedFields: readonly string[];
@@ -127,13 +132,21 @@ export class PivotData {
   private readonly _indexedFields: ReadonlySet<string>;
 
   constructor(
-    records: DataRecord[],
+    input: DataRecord[] | ColumnarDataSource,
     config: PivotConfigV1,
     options?: PivotDataOptions,
   ) {
     this._config = config;
-    this._records = records;
     this._options = options ?? {};
+    if (Array.isArray(input)) {
+      const columns =
+        input.length > 0 ? Object.keys(input[0] as DataRecord) : [];
+      this._dataSource = new DataRecordSource(input, columns);
+      this._materializedRecords = input;
+    } else {
+      this._dataSource = input;
+      this._materializedRecords = null;
+    }
     this._syntheticById = new Map(
       (config.synthetic_measures ?? []).map((m) => [m.id, m]),
     );
@@ -186,11 +199,11 @@ export class PivotData {
   // Filtering
   // ---------------------------------------------------------------------------
 
-  private _shouldInclude(record: DataRecord): boolean {
+  private _shouldIncludeRow(rowIndex: number): boolean {
     const filters = this._config.filters;
     if (!filters) return true;
     for (const [field, filter] of Object.entries(filters)) {
-      const val = String(record[field] ?? "");
+      const val = String(this._dataSource.getValue(rowIndex, field) ?? "");
       if (filter.include && filter.include.length > 0) {
         if (!filter.include.includes(val)) return false;
       } else if (filter.exclude && filter.exclude.length > 0) {
@@ -224,20 +237,39 @@ export class PivotData {
   // Record processing
   // ---------------------------------------------------------------------------
 
-  private _pushToAgg(
-    agg: Aggregator,
-    record: DataRecord,
-    valField: string,
-  ): void {
-    agg.push(this._resolveAggValue(valField, record[valField]));
+  private _pushAggValue(agg: Aggregator, valField: string, raw: unknown): void {
+    agg.push(this._resolveAggValue(valField, raw));
   }
 
-  private _pushToSumAgg(
-    agg: Aggregator,
-    record: DataRecord,
+  private _getValueArrays(): Map<string, Float64Array | null> {
+    if (!this._valueFloatArrays) {
+      this._valueFloatArrays = new Map();
+      for (const vf of this._allAggregatedFields) {
+        this._valueFloatArrays.set(
+          vf,
+          this._dataSource.getFloat64Column?.(vf) ?? null,
+        );
+      }
+    }
+    return this._valueFloatArrays;
+  }
+
+  private _rawAggValue(
+    rowIndex: number,
     valField: string,
-  ): void {
-    agg.push(this._resolveAggValue(valField, record[valField]));
+    valueArrays: Map<string, Float64Array | null>,
+  ): unknown {
+    const arr = valueArrays.get(valField);
+    if (arr) return arr[rowIndex];
+    return this._dataSource.getValue(rowIndex, valField);
+  }
+
+  private _materializeRow(rowIndex: number): DataRecord {
+    const record: DataRecord = {};
+    for (const col of this._dataSource.getColumnNames()) {
+      record[col] = this._dataSource.getValue(rowIndex, col);
+    }
+    return record;
   }
 
   private _evaluateSynthetic(
@@ -265,15 +297,20 @@ export class PivotData {
 
   private _processRecords(): void {
     const allAggregatedFields = this._allAggregatedFields;
+    const valueArrays = this._getValueArrays();
+    const numRows = this._dataSource.numRows;
     const uniqueValueSets = new Map<string, Set<string>>();
     for (const field of this._indexedFields) {
       uniqueValueSets.set(field, new Set());
       this._recordIndexesByFieldValue.set(field, new Map());
     }
 
-    for (const [recordIndex, record] of this._records.entries()) {
+    for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
       for (const field of this._indexedFields) {
-        const resolved = this._resolveDimValue(field, record[field]);
+        const resolved = this._resolveDimValue(
+          field,
+          this._dataSource.getValue(recordIndex, field),
+        );
         uniqueValueSets.get(field)?.add(resolved);
         const perField = this._recordIndexesByFieldValue.get(field);
         if (!perField) continue;
@@ -285,13 +322,13 @@ export class PivotData {
         }
       }
 
-      if (!this._shouldInclude(record)) continue;
+      if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const rowKey = this._config.rows.map((r) =>
-        this._resolveDimValue(r, record[r]),
+        this._resolveDimValue(r, this._dataSource.getValue(recordIndex, r)),
       );
       const colKey = this._config.columns.map((c) =>
-        this._resolveDimValue(c, record[c]),
+        this._resolveDimValue(c, this._dataSource.getValue(recordIndex, c)),
       );
       const rowKeyStr = makeKeyString(rowKey);
       const colKeyStr = makeKeyString(colKey);
@@ -304,20 +341,21 @@ export class PivotData {
       }
 
       for (const valField of allAggregatedFields) {
+        const rawVal = this._rawAggValue(recordIndex, valField, valueArrays);
         const cellKeyStr = `${rowKeyStr}\x01${colKeyStr}\x01${valField}`;
         let cellAgg = this._cellAggs.get(cellKeyStr);
         if (!cellAgg) {
           cellAgg = this._factoryForField(valField).create();
           this._cellAggs.set(cellKeyStr, cellAgg);
         }
-        this._pushToAgg(cellAgg, record, valField);
+        this._pushAggValue(cellAgg, valField, rawVal);
         if (this._hasSyntheticMeasures) {
           let cellSumAgg = this._cellSumAggs.get(cellKeyStr);
           if (!cellSumAgg) {
             cellSumAgg = createAggregator("sum");
             this._cellSumAggs.set(cellKeyStr, cellSumAgg);
           }
-          this._pushToSumAgg(cellSumAgg, record, valField);
+          this._pushAggValue(cellSumAgg, valField, rawVal);
         }
 
         const rowTotalKeyStr = `${rowKeyStr}\x01${valField}`;
@@ -326,14 +364,14 @@ export class PivotData {
           rowTotalAgg = this._factoryForField(valField).create();
           this._rowTotalAggs.set(rowTotalKeyStr, rowTotalAgg);
         }
-        this._pushToAgg(rowTotalAgg, record, valField);
+        this._pushAggValue(rowTotalAgg, valField, rawVal);
         if (this._hasSyntheticMeasures) {
           let rowSumAgg = this._rowTotalSumAggs.get(rowTotalKeyStr);
           if (!rowSumAgg) {
             rowSumAgg = createAggregator("sum");
             this._rowTotalSumAggs.set(rowTotalKeyStr, rowSumAgg);
           }
-          this._pushToSumAgg(rowSumAgg, record, valField);
+          this._pushAggValue(rowSumAgg, valField, rawVal);
         }
 
         const colTotalKeyStr = `${colKeyStr}\x01${valField}`;
@@ -342,21 +380,21 @@ export class PivotData {
           colTotalAgg = this._factoryForField(valField).create();
           this._colTotalAggs.set(colTotalKeyStr, colTotalAgg);
         }
-        this._pushToAgg(colTotalAgg, record, valField);
+        this._pushAggValue(colTotalAgg, valField, rawVal);
         if (this._hasSyntheticMeasures) {
           let colSumAgg = this._colTotalSumAggs.get(colTotalKeyStr);
           if (!colSumAgg) {
             colSumAgg = createAggregator("sum");
             this._colTotalSumAggs.set(colTotalKeyStr, colSumAgg);
           }
-          this._pushToSumAgg(colSumAgg, record, valField);
+          this._pushAggValue(colSumAgg, valField, rawVal);
         }
 
         const grandAgg = this._grandTotalAggs.get(valField)!;
-        this._pushToAgg(grandAgg, record, valField);
+        this._pushAggValue(grandAgg, valField, rawVal);
         if (this._hasSyntheticMeasures) {
           const grandSumAgg = this._grandTotalSumAggs.get(valField)!;
-          this._pushToSumAgg(grandSumAgg, record, valField);
+          this._pushAggValue(grandSumAgg, valField, rawVal);
         }
       }
     }
@@ -623,43 +661,41 @@ export class PivotData {
     const rowDims = this._config.rows;
     if (rowDims.length < 2) return this._subtotalAggs;
 
-    for (const record of this._records) {
-      if (!this._shouldInclude(record)) continue;
+    const valueArrays = this._getValueArrays();
+    const numRows = this._dataSource.numRows;
+    for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
+      if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const fullRowKey = rowDims.map((r) =>
-        this._resolveDimValue(r, record[r]),
+        this._resolveDimValue(r, this._dataSource.getValue(recordIndex, r)),
       );
       const colKey = this._config.columns.map((c) =>
-        this._resolveDimValue(c, record[c]),
+        this._resolveDimValue(c, this._dataSource.getValue(recordIndex, c)),
       );
       const colKeyStr = makeKeyString(colKey);
 
-      // Build subtotals for each prefix level (0..rowDims.length-2).
-      // Level i means the parent key is fullRowKey[0..i].
       for (let level = 0; level < rowDims.length - 1; level++) {
         const parentKey = fullRowKey.slice(0, level + 1);
         const parentKeyStr = makeKeyString(parentKey);
 
         for (const valField of this._allAggregatedFields) {
-          // Subtotal per cell (parent x col x valField)
+          const rawVal = this._rawAggValue(recordIndex, valField, valueArrays);
           const cellKey = `${parentKeyStr}\x01${colKeyStr}\x01${valField}`;
           let cellAgg = this._subtotalAggs.get(cellKey);
           if (!cellAgg) {
             cellAgg = this._factoryForField(valField).create();
             this._subtotalAggs.set(cellKey, cellAgg);
           }
-          this._pushToAgg(cellAgg, record, valField);
+          this._pushAggValue(cellAgg, valField, rawVal);
           if (this._hasSyntheticMeasures) {
             let cellSumAgg = this._subtotalSumAggs.get(cellKey);
             if (!cellSumAgg) {
               cellSumAgg = createAggregator("sum");
               this._subtotalSumAggs.set(cellKey, cellSumAgg);
             }
-            this._pushToSumAgg(cellSumAgg, record, valField);
+            this._pushAggValue(cellSumAgg, valField, rawVal);
           }
 
-          // Subtotal row total (parent x valField) — only when column dims
-          // exist, otherwise the cell key already serves as the row total.
           if (colKeyStr !== "") {
             const rowTotalKey = `${parentKeyStr}\x01\x01${valField}`;
             let rowAgg = this._subtotalAggs.get(rowTotalKey);
@@ -667,14 +703,14 @@ export class PivotData {
               rowAgg = this._factoryForField(valField).create();
               this._subtotalAggs.set(rowTotalKey, rowAgg);
             }
-            this._pushToAgg(rowAgg, record, valField);
+            this._pushAggValue(rowAgg, valField, rawVal);
             if (this._hasSyntheticMeasures) {
               let rowSumAgg = this._subtotalSumAggs.get(rowTotalKey);
               if (!rowSumAgg) {
                 rowSumAgg = createAggregator("sum");
                 this._subtotalSumAggs.set(rowTotalKey, rowSumAgg);
               }
-              this._pushToSumAgg(rowSumAgg, record, valField);
+              this._pushAggValue(rowSumAgg, valField, rawVal);
             }
           }
         }
@@ -838,12 +874,16 @@ export class PivotData {
     const emptyRowKeyStr = makeKeyString([]);
     const buildCross = rowDims.length >= 2;
 
-    for (const record of this._records) {
-      if (!this._shouldInclude(record)) continue;
+    const valueArrays = this._getValueArrays();
+    const numRows = this._dataSource.numRows;
+    for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
+      if (!this._shouldIncludeRow(recordIndex)) continue;
 
-      const rowKey = rowDims.map((r) => this._resolveDimValue(r, record[r]));
+      const rowKey = rowDims.map((r) =>
+        this._resolveDimValue(r, this._dataSource.getValue(recordIndex, r)),
+      );
       const fullColKey = colDims.map((c) =>
-        this._resolveDimValue(c, record[c]),
+        this._resolveDimValue(c, this._dataSource.getValue(recordIndex, c)),
       );
       const rowKeyStr = makeKeyString(rowKey);
 
@@ -852,41 +892,39 @@ export class PivotData {
         const colPrefixStr = makeKeyString(colPrefix);
 
         for (const valField of this._allAggregatedFields) {
-          // Per-row col-group subtotal
+          const rawVal = this._rawAggValue(recordIndex, valField, valueArrays);
           const cellKey = `${rowKeyStr}\x01${colPrefixStr}\x01${valField}`;
           let cellAgg = this._colSubtotalAggs.get(cellKey);
           if (!cellAgg) {
             cellAgg = this._factoryForField(valField).create();
             this._colSubtotalAggs.set(cellKey, cellAgg);
           }
-          this._pushToAgg(cellAgg, record, valField);
+          this._pushAggValue(cellAgg, valField, rawVal);
           if (this._hasSyntheticMeasures) {
             let cellSumAgg = this._colSubtotalSumAggs.get(cellKey);
             if (!cellSumAgg) {
               cellSumAgg = createAggregator("sum");
               this._colSubtotalSumAggs.set(cellKey, cellSumAgg);
             }
-            this._pushToSumAgg(cellSumAgg, record, valField);
+            this._pushAggValue(cellSumAgg, valField, rawVal);
           }
 
-          // Grand-row col-group subtotal (all rows combined)
           const grandKey = `${emptyRowKeyStr}\x01${colPrefixStr}\x01${valField}`;
           let grandAgg = this._colSubtotalAggs.get(grandKey);
           if (!grandAgg) {
             grandAgg = this._factoryForField(valField).create();
             this._colSubtotalAggs.set(grandKey, grandAgg);
           }
-          this._pushToAgg(grandAgg, record, valField);
+          this._pushAggValue(grandAgg, valField, rawVal);
           if (this._hasSyntheticMeasures) {
             let grandSumAgg = this._colSubtotalSumAggs.get(grandKey);
             if (!grandSumAgg) {
               grandSumAgg = createAggregator("sum");
               this._colSubtotalSumAggs.set(grandKey, grandSumAgg);
             }
-            this._pushToSumAgg(grandSumAgg, record, valField);
+            this._pushAggValue(grandSumAgg, valField, rawVal);
           }
 
-          // Row-group × col-group cross-section subtotals
           if (buildCross) {
             for (let rowLevel = 0; rowLevel < rowDims.length - 1; rowLevel++) {
               const parentKey = rowKey.slice(0, rowLevel + 1);
@@ -897,14 +935,14 @@ export class PivotData {
                 crossAgg = this._factoryForField(valField).create();
                 this._crossSubtotalAggs!.set(crossKey, crossAgg);
               }
-              this._pushToAgg(crossAgg, record, valField);
+              this._pushAggValue(crossAgg, valField, rawVal);
               if (this._hasSyntheticMeasures) {
                 let crossSumAgg = this._crossSubtotalSumAggs!.get(crossKey);
                 if (!crossSumAgg) {
                   crossSumAgg = createAggregator("sum");
                   this._crossSubtotalSumAggs!.set(crossKey, crossSumAgg);
                 }
-                this._pushToSumAgg(crossSumAgg, record, valField);
+                this._pushAggValue(crossSumAgg, valField, rawVal);
               }
             }
           }
@@ -997,8 +1035,9 @@ export class PivotData {
     let cached = this._uniqueValuesCache.get(field);
     if (!cached) {
       const set = new Set<string>();
-      for (const record of this._records) {
-        set.add(String(record[field] ?? ""));
+      const n = this._dataSource.numRows;
+      for (let i = 0; i < n; i++) {
+        set.add(String(this._dataSource.getValue(i, field) ?? ""));
       }
       cached = [...set].sort((a, b) => a.localeCompare(b));
       this._uniqueValuesCache.set(field, cached);
@@ -1015,7 +1054,7 @@ export class PivotData {
   }
 
   get recordCount(): number {
-    return this._records.length;
+    return this._dataSource.numRows;
   }
 
   get uniqueRowKeyCount(): number {
@@ -1045,13 +1084,17 @@ export class PivotData {
 
   getColumnNames(): string[] {
     if (!this._columnNamesCache) {
-      const cols = new Set<string>();
-      for (const record of this._records) {
-        for (const key of Object.keys(record)) {
-          cols.add(key);
+      if (this._materializedRecords) {
+        const cols = new Set<string>();
+        for (const record of this._materializedRecords) {
+          for (const key of Object.keys(record)) {
+            cols.add(key);
+          }
         }
+        this._columnNamesCache = [...cols];
+      } else {
+        this._columnNamesCache = [...this._dataSource.getColumnNames()];
       }
-      this._columnNamesCache = [...cols];
     }
     return this._columnNamesCache;
   }
@@ -1066,6 +1109,7 @@ export class PivotData {
   ): { records: DataRecord[]; totalCount: number } {
     const matched: DataRecord[] = [];
     let totalCount = 0;
+    const numRows = this._dataSource.numRows;
     let candidateIndexes: number[] | null = null;
     for (const [field, value] of Object.entries(filters)) {
       const indexed = this._recordIndexesByFieldValue.get(field)?.get(value);
@@ -1081,16 +1125,19 @@ export class PivotData {
       }
     }
 
-    const recordIndexes =
-      candidateIndexes ?? this._records.map((_, index) => index);
+    const useFullScan = candidateIndexes === null;
+    const scanLength = useFullScan ? numRows : candidateIndexes!.length;
 
-    for (const recordIndex of recordIndexes) {
-      const record = this._records[recordIndex];
-      if (!this._shouldInclude(record)) continue;
+    for (let i = 0; i < scanLength; i++) {
+      const recordIndex = useFullScan ? i : candidateIndexes![i]!;
+      if (!this._shouldIncludeRow(recordIndex)) continue;
 
       let matchesClick = true;
       for (const [field, value] of Object.entries(filters)) {
-        const recordVal = this._resolveDimValue(field, record[field]);
+        const recordVal = this._resolveDimValue(
+          field,
+          this._dataSource.getValue(recordIndex, field),
+        );
         if (recordVal !== value) {
           matchesClick = false;
           break;
@@ -1100,7 +1147,11 @@ export class PivotData {
 
       totalCount++;
       if (matched.length < limit) {
-        matched.push(record);
+        matched.push(
+          this._materializedRecords
+            ? this._materializedRecords[recordIndex]!
+            : this._materializeRow(recordIndex),
+        );
       }
     }
 

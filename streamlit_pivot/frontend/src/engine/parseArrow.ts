@@ -15,8 +15,9 @@
  * limitations under the License.
  */
 
-import { tableFromIPC, Table } from "apache-arrow";
+import { tableFromIPC, Table, Vector } from "apache-arrow";
 import type { DataRecord } from "./PivotData";
+import type { ColumnarDataSource } from "./types";
 
 /**
  * CCv2 delivers DataFrames as Apache Arrow Table objects (not raw Uint8Array).
@@ -59,6 +60,94 @@ function toTable(arrowData: unknown): Table | null {
   }
 
   return null;
+}
+
+export class ArrowDataSource implements ColumnarDataSource {
+  private readonly columnMap = new Map<string, Vector>();
+  private readonly float64Cache = new Map<string, Float64Array | null>();
+
+  constructor(private readonly table: Table) {
+    for (const field of table.schema.fields) {
+      const child = table.getChild(field.name);
+      if (child) this.columnMap.set(field.name, child);
+    }
+  }
+
+  get numRows(): number {
+    return this.table.numRows;
+  }
+
+  getValue(rowIndex: number, fieldName: string): unknown {
+    const vec = this.columnMap.get(fieldName);
+    return vec ? vec.get(rowIndex) : undefined;
+  }
+
+  getColumnNames(): string[] {
+    return this.table.schema.fields.map((f) => f.name);
+  }
+
+  getFloat64Column(fieldName: string): Float64Array | null {
+    if (this.float64Cache.has(fieldName)) {
+      return this.float64Cache.get(fieldName)!;
+    }
+    const vec = this.columnMap.get(fieldName);
+    if (!vec) {
+      this.float64Cache.set(fieldName, null);
+      return null;
+    }
+    try {
+      const arr = vec.toArray();
+      if (arr instanceof Float64Array) {
+        this.float64Cache.set(fieldName, arr);
+        return arr;
+      }
+      if (
+        arr instanceof Float32Array ||
+        arr instanceof Int32Array ||
+        arr instanceof Int16Array ||
+        arr instanceof Int8Array ||
+        arr instanceof Uint32Array ||
+        arr instanceof Uint16Array ||
+        arr instanceof Uint8Array
+      ) {
+        const f64 = new Float64Array(arr.length);
+        for (let i = 0; i < arr.length; i++) f64[i] = arr[i]!;
+        this.float64Cache.set(fieldName, f64);
+        return f64;
+      }
+    } catch {
+      // toArray() not supported for this type
+    }
+    this.float64Cache.set(fieldName, null);
+    return null;
+  }
+}
+
+export class DataRecordSource implements ColumnarDataSource {
+  constructor(
+    private readonly records: DataRecord[],
+    private readonly columns: string[],
+  ) {}
+
+  get numRows(): number {
+    return this.records.length;
+  }
+
+  getValue(rowIndex: number, fieldName: string): unknown {
+    return this.records[rowIndex]![fieldName];
+  }
+
+  getColumnNames(): string[] {
+    return this.columns;
+  }
+}
+
+export function createArrowDataSource(
+  arrowData: unknown,
+): ColumnarDataSource | null {
+  const table = toTable(arrowData);
+  if (!table) return null;
+  return new ArrowDataSource(table);
 }
 
 /**

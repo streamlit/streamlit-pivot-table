@@ -73,6 +73,8 @@ export const LEGACY_MAX_COLUMN_CARDINALITY = 200;
 export const FEATURE_FLAGS = {
   /** When false, column cardinality uses {@link LEGACY_MAX_COLUMN_CARDINALITY} (200). */
   wideColumnMode: true,
+  /** Skip `DataRecord[]` materialization; feed Arrow column vectors into PivotData. */
+  arrowColumnar: true,
 };
 
 export const DEFAULT_BUDGETS: PerfBudgets = {

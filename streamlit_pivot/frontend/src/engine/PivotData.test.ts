@@ -27,8 +27,10 @@ import {
   normalizeAggregationConfig,
   type AggregationConfig,
   type AggregationType,
+  type ColumnarDataSource,
   type PivotConfigV1,
 } from "./types";
+import { DataRecordSource } from "./parseArrow";
 import { measureSync, DEFAULT_BUDGETS } from "./perf";
 
 type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
@@ -1646,5 +1648,81 @@ describe("PivotData - getColumnNames", () => {
     expect(cols).toContain("revenue");
     expect(cols).toContain("profit");
     expect(cols).toHaveLength(4);
+  });
+});
+
+describe("PivotData - DataRecordSource wrapper", () => {
+  it("matches array-backed aggregates and keys", () => {
+    const cfg = makeConfig();
+    const fromArray = new PivotData(SAMPLE_DATA, cfg);
+    const source = new DataRecordSource(
+      SAMPLE_DATA,
+      Object.keys(SAMPLE_DATA[0]!),
+    );
+    const fromSource = new PivotData(source, cfg);
+    expect(fromSource.getRowKeys()).toEqual(fromArray.getRowKeys());
+    expect(fromSource.getColKeys()).toEqual(fromArray.getColKeys());
+    expect(fromSource.getAggregator(["US"], ["2023"]).value()).toEqual(
+      fromArray.getAggregator(["US"], ["2023"]).value(),
+    );
+  });
+});
+
+class TestColumnarSource implements ColumnarDataSource {
+  constructor(private readonly rows: DataRecord[]) {}
+
+  get numRows(): number {
+    return this.rows.length;
+  }
+
+  getValue(rowIndex: number, fieldName: string): unknown {
+    return this.rows[rowIndex]![fieldName];
+  }
+
+  getColumnNames(): string[] {
+    return Object.keys(this.rows[0] ?? {});
+  }
+}
+
+describe("PivotData - non-materialized columnar source", () => {
+  it("getMatchingRecords materializes rows on demand", () => {
+    const cfg = makeConfig();
+    const src = new TestColumnarSource([...SAMPLE_DATA]);
+    const pd = new PivotData(src, cfg);
+    const r = pd.getMatchingRecords({ region: "US", year: "2023" });
+    expect(r.totalCount).toBe(2);
+    expect(r.records).toHaveLength(2);
+    expect(
+      r.records.every((row) => row.region === "US" && row.year === "2023"),
+    ).toBe(true);
+  });
+
+  it("getUniqueValues scans the columnar source", () => {
+    const src = new TestColumnarSource(SAMPLE_DATA);
+    const pd = new PivotData(src, makeConfig());
+    expect(pd.getUniqueValues("region")).toEqual(["EU", "US"]);
+  });
+
+  it("aggregates match array-backed results", () => {
+    const cfg = makeConfig();
+    const fromArray = new PivotData(SAMPLE_DATA, cfg);
+    const fromColumnar = new PivotData(
+      new TestColumnarSource(SAMPLE_DATA),
+      cfg,
+    );
+    expect(fromColumnar.getRowKeys()).toEqual(fromArray.getRowKeys());
+    expect(fromColumnar.getColKeys()).toEqual(fromArray.getColKeys());
+    expect(fromColumnar.getGrandTotal().value()).toEqual(
+      fromArray.getGrandTotal().value(),
+    );
+    expect(fromColumnar.recordCount).toBe(fromArray.recordCount);
+  });
+
+  it("getColumnNames works without materialized records", () => {
+    const src = new TestColumnarSource(SAMPLE_DATA);
+    const pd = new PivotData(src, makeConfig());
+    expect(pd.getColumnNames()).toEqual(
+      expect.arrayContaining(["region", "year", "revenue", "profit"]),
+    );
   });
 });

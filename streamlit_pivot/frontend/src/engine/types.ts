@@ -857,3 +857,11 @@ export interface PivotTableState {
   config: PivotConfigV1;
   perf_metrics?: PivotPerfMetrics;
 }
+
+/** Abstraction over row-oriented `DataRecord[]` and columnar Arrow table access. */
+export interface ColumnarDataSource {
+  readonly numRows: number;
+  getValue(rowIndex: number, fieldName: string): unknown;
+  getColumnNames(): string[];
+  getFloat64Column?(fieldName: string): Float64Array | null;
+}

@@ -42,11 +42,13 @@ import {
 } from "./engine/types";
 import { PivotData, type PivotDataOptions } from "./engine/PivotData";
 import {
+  createArrowDataSource,
   parseArrowToRecords,
   getArrowColumnNames,
   getNumericColumns,
 } from "./engine/parseArrow";
 import {
+  FEATURE_FLAGS,
   measureSync,
   logMetrics,
   checkBudgets,
@@ -131,9 +133,20 @@ const PivotRoot: FC<PivotRootProps> = ({
     [currentConfig],
   );
 
-  const { records, parseMs } = useMemo(() => {
+  const { pivotInput, parseMs } = useMemo(() => {
+    if (FEATURE_FLAGS.arrowColumnar) {
+      const measured = measureSync(() => createArrowDataSource(dataframe));
+      const ds = measured.result;
+      return {
+        pivotInput: ds && ds.numRows > 0 ? ds : null,
+        parseMs: measured.elapsedMs,
+      };
+    }
     const measured = measureSync(() => parseArrowToRecords(dataframe));
-    return { records: measured.result, parseMs: measured.elapsedMs };
+    return {
+      pivotInput: measured.result.length > 0 ? measured.result : null,
+      parseMs: measured.elapsedMs,
+    };
   }, [dataframe]);
 
   const rawAllColumns = useMemo(
@@ -185,12 +198,12 @@ const PivotRoot: FC<PivotRootProps> = ({
   );
 
   const { pivotData, computeMs } = useMemo(() => {
-    if (records.length === 0) return { pivotData: null, computeMs: 0 };
+    if (!pivotInput) return { pivotData: null, computeMs: 0 };
     const measured = measureSync(
-      () => new PivotData(records, currentConfig, pivotOptions),
+      () => new PivotData(pivotInput, currentConfig, pivotOptions),
     );
     return { pivotData: measured.result, computeMs: measured.elapsedMs };
-  }, [records, currentConfig, pivotOptions]);
+  }, [pivotInput, currentConfig, pivotOptions]);
 
   const budget = useMemo(() => {
     if (!pivotData) return null;
@@ -268,7 +281,7 @@ const PivotRoot: FC<PivotRootProps> = ({
       firstMountMs:
         debugMetrics?.firstMountMs ??
         Math.round((parseMs + computeMs + renderMs) * 100) / 100,
-      sourceRows: records.length,
+      sourceRows: pivotData.recordCount,
       sourceCols: rawAllColumns.length,
       totalRows: pivotData.uniqueRowKeyCount,
       totalCols: pivotData.uniqueColKeyCount,
@@ -304,7 +317,7 @@ const PivotRoot: FC<PivotRootProps> = ({
     parseMs,
     pivotData,
     rawAllColumns.length,
-    records.length,
+    pivotInput,
   ]);
 
   // perf_metrics are exposed via the data-perf-metrics DOM attribute (set
