@@ -48,6 +48,7 @@ Community = "https://discuss.streamlit.io/"
 devel = [
   "wheel",
   "pytest==7.4.0",
+  "pytest-cov>=4.1.0",
   "playwright==1.55.0",
   "requests==2.31.0",
   "pytest-playwright-snapshot==1.0",

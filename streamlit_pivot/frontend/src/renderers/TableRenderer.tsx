@@ -331,6 +331,10 @@ function buildTotalCellStyle(
 
 /**
  * Format a total/subtotal cell value respecting number_format and show_values_as.
+ *
+ * When isTotalOfShowAsAxis is null (subtotal data cells, col-group subtotals),
+ * callers supply showAsDenominators so percentages use the correct base values
+ * (row total for pct_of_row, column total for pct_of_col).
  */
 function formatTotalCellValue(
   agg: { value(): number | null; format(empty: string): string },
@@ -338,6 +342,7 @@ function formatTotalCellValue(
   config: PivotConfigV1,
   pivotData: PivotData,
   isTotalOfShowAsAxis: "row" | "col" | "grand" | null,
+  showAsDenominators?: { row?: number | null; col?: number | null },
 ): string {
   const rawValue = agg.value();
   const showAs = config.show_values_as?.[valField];
@@ -353,12 +358,14 @@ function formatTotalCellValue(
       return grand ? formatPercent(rawValue / grand) : config.empty_cell_value;
     }
     if (showAs === "pct_of_row") {
+      const denom = showAsDenominators?.row;
+      if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
       return config.empty_cell_value;
     }
     if (showAs === "pct_of_col") {
-      const colTotal = rawValue;
-      const grand = pivotData.getGrandTotal(valField).value();
-      return grand ? formatPercent(colTotal / grand) : config.empty_cell_value;
+      const denom = showAsDenominators?.col;
+      if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
+      return config.empty_cell_value;
     }
   }
 
@@ -1134,6 +1141,12 @@ export function renderDataRow(
               config,
               pivotData,
               null,
+              {
+                row: pivotData.getRowTotal(rowKey, valField).value(),
+                col: pivotData
+                  .getColGroupGrandSubtotal(slot.key, valField)
+                  .value(),
+              },
             );
             const cellStyle = buildTotalCellStyle(
               cellValue,
@@ -1433,6 +1446,17 @@ export function renderSubtotalRow(
             config,
             pivotData,
             null,
+            {
+              row: pivotData
+                .getSubtotalAggregator(parentKey, [], valField)
+                .value(),
+              col:
+                slot.collapsedLevel !== undefined
+                  ? pivotData
+                      .getColGroupGrandSubtotal(slot.key, valField)
+                      .value()
+                  : pivotData.getColTotal(slot.key, valField).value(),
+            },
           );
           const cellStyle = buildTotalCellStyle(
             cellValue,

@@ -99,6 +99,7 @@ function formatExportTotalValue(
   mode: ExportContent,
   isTotalOfShowAsAxis: "row" | "col" | "grand" | null,
   agg: { format: (empty: string) => string },
+  showAsDenominators?: { row?: number | null; col?: number | null },
 ): string {
   if (rawValue === null)
     return mode === "formatted" ? config.empty_cell_value : "";
@@ -117,10 +118,15 @@ function formatExportTotalValue(
       const grand = pivotData.getGrandTotal(valField).value();
       return grand ? formatPercent(rawValue / grand) : config.empty_cell_value;
     }
-    if (showAs === "pct_of_row") return config.empty_cell_value;
+    if (showAs === "pct_of_row") {
+      const denom = showAsDenominators?.row;
+      if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
+      return config.empty_cell_value;
+    }
     if (showAs === "pct_of_col") {
-      const grand = pivotData.getGrandTotal(valField).value();
-      return grand ? formatPercent(rawValue / grand) : config.empty_cell_value;
+      const denom = showAsDenominators?.col;
+      if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
+      return config.empty_cell_value;
     }
   }
 
@@ -260,6 +266,12 @@ export function buildExportGrid(
               mode,
               null,
               agg,
+              {
+                row: pivotData
+                  .getSubtotalAggregator(groupedRow.key, [], valField)
+                  .value(),
+                col: pivotData.getColTotal(colKey, valField).value(),
+              },
             ),
           );
         }

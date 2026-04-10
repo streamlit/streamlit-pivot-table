@@ -43,6 +43,7 @@ SCRIPT = Path(__file__).parent / "pivot_table.py"
 TOOLBAR_SCRIPT = Path(__file__).parent / "pivot_table_toolbar_app.py"
 INTERACTIONS_SCRIPT = Path(__file__).parent / "pivot_table_interactions_app.py"
 DATA_SCRIPT = Path(__file__).parent / "pivot_table_data_app.py"
+GOLDEN_SCRIPT = Path(__file__).parent / "pivot_table_golden_app.py"
 
 PIVOT_KEYS = [
     "test_pivot",
@@ -117,6 +118,18 @@ DATA_PIVOT_KEYS = [
     "test_pivot_synthetic",
 ]
 
+GOLDEN_PIVOT_KEYS = [
+    "golden_a",
+    "golden_c",
+    "golden_e",
+    "golden_f",
+    "golden_f2",
+    "golden_h",
+    "golden_f3",
+    "golden_no_totals",
+    "golden_export",
+]
+
 APP_CONFIGS = {
     "default": {"script": SCRIPT, "pivot_keys": PIVOT_KEYS},
     "pivot_table_test.py": {"script": TOOLBAR_SCRIPT, "pivot_keys": TOOLBAR_PIVOT_KEYS},
@@ -125,6 +138,10 @@ APP_CONFIGS = {
         "pivot_keys": INTERACTIONS_PIVOT_KEYS,
     },
     "pivot_table_data_test.py": {"script": DATA_SCRIPT, "pivot_keys": DATA_PIVOT_KEYS},
+    "pivot_table_golden_test.py": {
+        "script": GOLDEN_SCRIPT,
+        "pivot_keys": GOLDEN_PIVOT_KEYS,
+    },
 }
 
 

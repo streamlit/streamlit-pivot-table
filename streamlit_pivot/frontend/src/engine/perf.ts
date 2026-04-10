@@ -74,6 +74,12 @@ export const DEFAULT_BUDGETS: PerfBudgets = {
   maxColumnCardinality: 1000,
 };
 
+/** Runtime feature toggles for pivot performance / layout behavior. */
+export const FEATURE_FLAGS = {
+  /** Wide-column mode: cardinality cap is `DEFAULT_BUDGETS.maxColumnCardinality` with virtualization. */
+  wideColumnMode: true,
+} as const;
+
 /**
  * Measure execution time of a synchronous function.
  */

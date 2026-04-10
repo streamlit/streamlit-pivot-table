@@ -43,10 +43,14 @@ jobs:
         run: |
           cd streamlit_pivot/frontend
           npm ci
-      - name: Run frontend tests
+      - name: Run frontend tests with coverage
         run: |
           cd streamlit_pivot/frontend
-          npm test
+          npm test -- --coverage
+      - name: Run frontend bench regression check
+        run: |
+          cd streamlit_pivot/frontend
+          npm run bench:check
       - name: Audit frontend licenses
         run: python scripts/audit_frontend_licenses.py
       - name: Validate NOTICES

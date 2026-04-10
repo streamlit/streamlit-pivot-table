@@ -44,6 +44,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[devel,with-streamlit]"
 
-      - name: Run Python unit tests
+      - name: Run Python unit tests with coverage
         run: |
-          python -m pytest tests/
+          python -m pytest tests/ --cov=streamlit_pivot --cov-report=term-missing --cov-report=html
+
+      - name: Run Python performance harness
+        run: python tests/perf_benchmark.py

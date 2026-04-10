@@ -26,6 +26,17 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: { modules: { classNameStrategy: "non-scoped" } },
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/**/*.bench.{ts,tsx}",
+        "src/test/**",
+      ],
+      reporter: ["text", "html", "json-summary"],
+      reportsDirectory: "./coverage",
+    },
   },
   bench: {
     include: ["src/**/*.bench.{ts,tsx}"],

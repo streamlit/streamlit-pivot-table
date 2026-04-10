@@ -54,3 +54,4 @@ coverage/
 ########################################################################
 # uv lockfiles (regenerated locally)
 uv.lock
+htmlcov/
