@@ -43,12 +43,10 @@ import {
 import { PivotData, type PivotDataOptions } from "./engine/PivotData";
 import {
   createArrowDataSource,
-  parseArrowToRecords,
   getArrowColumnNames,
   getNumericColumns,
 } from "./engine/parseArrow";
 import {
-  FEATURE_FLAGS,
   measureSync,
   logMetrics,
   checkBudgets,
@@ -134,17 +132,10 @@ const PivotRoot: FC<PivotRootProps> = ({
   );
 
   const { pivotInput, parseMs } = useMemo(() => {
-    if (FEATURE_FLAGS.arrowColumnar) {
-      const measured = measureSync(() => createArrowDataSource(dataframe));
-      const ds = measured.result;
-      return {
-        pivotInput: ds && ds.numRows > 0 ? ds : null,
-        parseMs: measured.elapsedMs,
-      };
-    }
-    const measured = measureSync(() => parseArrowToRecords(dataframe));
+    const measured = measureSync(() => createArrowDataSource(dataframe));
+    const ds = measured.result;
     return {
-      pivotInput: measured.result.length > 0 ? measured.result : null,
+      pivotInput: ds && ds.numRows > 0 ? ds : null,
       parseMs: measured.elapsedMs,
     };
   }, [dataframe]);

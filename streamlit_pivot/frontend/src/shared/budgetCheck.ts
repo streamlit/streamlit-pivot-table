@@ -18,8 +18,6 @@
 import {
   COLUMN_VIRTUALIZATION_THRESHOLD,
   DEFAULT_BUDGETS,
-  FEATURE_FLAGS,
-  LEGACY_MAX_COLUMN_CARDINALITY,
 } from "../engine/perf";
 
 export interface BudgetResult {
@@ -53,41 +51,6 @@ export function checkRenderBudget(
 ): BudgetResult {
   const warnings: string[] = [];
   const needsColumnVirtualization = colCount > COLUMN_VIRTUALIZATION_THRESHOLD;
-
-  if (!FEATURE_FLAGS.wideColumnMode) {
-    let columnsTruncated = false;
-    let truncatedColumnCount = colCount;
-
-    if (colCount > LEGACY_MAX_COLUMN_CARDINALITY) {
-      columnsTruncated = true;
-      truncatedColumnCount = LEGACY_MAX_COLUMN_CARDINALITY;
-      warnings.push(
-        `Column cardinality (${colCount}) exceeds limit (${LEGACY_MAX_COLUMN_CARDINALITY}). ` +
-          `Showing first ${LEGACY_MAX_COLUMN_CARDINALITY} columns.`,
-      );
-    }
-
-    const needsVirtualization = exceedsCellBudget(
-      rowCount,
-      truncatedColumnCount,
-      valueCount,
-    );
-
-    if (needsVirtualization) {
-      warnings.push(
-        `Total cells (${(rowCount * truncatedColumnCount * Math.max(valueCount, 1)).toLocaleString()}) exceeds DOM budget ` +
-          `(${DEFAULT_BUDGETS.maxVisibleCells.toLocaleString()}). Virtualization enabled.`,
-      );
-    }
-
-    return {
-      needsVirtualization,
-      needsColumnVirtualization,
-      columnsTruncated,
-      truncatedColumnCount,
-      warnings,
-    };
-  }
 
   const maxColCap = DEFAULT_BUDGETS.maxColumnCardinality;
   const colsAfterHardCap = Math.min(colCount, maxColCap);
