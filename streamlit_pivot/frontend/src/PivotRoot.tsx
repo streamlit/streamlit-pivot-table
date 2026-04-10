@@ -214,7 +214,6 @@ const PivotRoot: FC<PivotRootProps> = ({
   const prevPivotDataRef = useRef<PivotData | null>(null);
   const prevConfigJsonRef = useRef<string>(currentConfigJson);
   const initialMetricsPublishedRef = useRef(false);
-  const perfMetricsJsonRef = useRef("");
   const pendingActionRef = useRef<{
     kind: PerfActionMeasurement["kind"];
     startedAt: number;
@@ -308,13 +307,11 @@ const PivotRoot: FC<PivotRootProps> = ({
     records.length,
   ]);
 
-  useEffect(() => {
-    if (!debugMetrics) return;
-    const nextJson = JSON.stringify(debugMetrics);
-    if (nextJson === perfMetricsJsonRef.current) return;
-    perfMetricsJsonRef.current = nextJson;
-    setStateValue("perf_metrics", debugMetrics as PivotPerfMetrics);
-  }, [debugMetrics, setStateValue]);
+  // perf_metrics are exposed via the data-perf-metrics DOM attribute (set
+  // above) for debugging and E2E tests.  We intentionally do NOT push them
+  // back through setStateValue because the resulting Streamlit rerun creates
+  // a timing window that can swallow concurrent trigger events (cell clicks,
+  // toolbar changes) — especially on slower browsers like WebKit.
 
   const perfWarnings = useMemo(() => {
     if (!debugMetrics) {

@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import re
+
 from playwright.sync_api import Page, expect
 
 from e2e_utils import get_pivot, open_settings_popover
@@ -101,6 +103,13 @@ def test_cell_click_on_data_cell(page_at_app: Page):
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
     expect(page.get_by_text("Cell click count: 0")).to_be_visible()
+
+    # Wait for the component's initial perf-metrics render cycle to settle
+    # so that any state-driven Streamlit reruns complete before we click.
+    expect(container).to_have_attribute(
+        "data-perf-metrics", re.compile(r".+"), timeout=10000
+    )
+    page.wait_for_timeout(500)
 
     cell = container.get_by_test_id("pivot-data-cell").first
     cell.scroll_into_view_if_needed()
