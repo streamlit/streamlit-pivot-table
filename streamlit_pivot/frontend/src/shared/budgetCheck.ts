@@ -15,13 +15,31 @@
  * limitations under the License.
  */
 
-import { DEFAULT_BUDGETS } from "../engine/perf";
+import {
+  COLUMN_VIRTUALIZATION_THRESHOLD,
+  DEFAULT_BUDGETS,
+  FEATURE_FLAGS,
+  LEGACY_MAX_COLUMN_CARDINALITY,
+} from "../engine/perf";
 
 export interface BudgetResult {
   needsVirtualization: boolean;
+  /** True when column count exceeds the threshold where horizontal windowing is recommended. */
+  needsColumnVirtualization: boolean;
   columnsTruncated: boolean;
   truncatedColumnCount: number;
   warnings: string[];
+}
+
+function exceedsCellBudget(
+  rowCount: number,
+  colCount: number,
+  valueCount: number,
+): boolean {
+  return (
+    rowCount * colCount * Math.max(valueCount, 1) >
+    DEFAULT_BUDGETS.maxVisibleCells
+  );
 }
 
 /**
@@ -34,32 +52,83 @@ export function checkRenderBudget(
   valueCount: number,
 ): BudgetResult {
   const warnings: string[] = [];
-  let needsVirtualization = false;
+  const needsColumnVirtualization = colCount > COLUMN_VIRTUALIZATION_THRESHOLD;
+
+  if (!FEATURE_FLAGS.wideColumnMode) {
+    let columnsTruncated = false;
+    let truncatedColumnCount = colCount;
+
+    if (colCount > LEGACY_MAX_COLUMN_CARDINALITY) {
+      columnsTruncated = true;
+      truncatedColumnCount = LEGACY_MAX_COLUMN_CARDINALITY;
+      warnings.push(
+        `Column cardinality (${colCount}) exceeds limit (${LEGACY_MAX_COLUMN_CARDINALITY}). ` +
+          `Showing first ${LEGACY_MAX_COLUMN_CARDINALITY} columns.`,
+      );
+    }
+
+    const needsVirtualization = exceedsCellBudget(
+      rowCount,
+      truncatedColumnCount,
+      valueCount,
+    );
+
+    if (needsVirtualization) {
+      warnings.push(
+        `Total cells (${(rowCount * truncatedColumnCount * Math.max(valueCount, 1)).toLocaleString()}) exceeds DOM budget ` +
+          `(${DEFAULT_BUDGETS.maxVisibleCells.toLocaleString()}). Virtualization enabled.`,
+      );
+    }
+
+    return {
+      needsVirtualization,
+      needsColumnVirtualization,
+      columnsTruncated,
+      truncatedColumnCount,
+      warnings,
+    };
+  }
+
+  const maxColCap = DEFAULT_BUDGETS.maxColumnCardinality;
+  const colsAfterHardCap = Math.min(colCount, maxColCap);
+  const exceedsHardCap = colCount > maxColCap;
+
+  const needsVirtualizationFromCells = exceedsCellBudget(
+    rowCount,
+    colsAfterHardCap,
+    valueCount,
+  );
+  const needsVirtualization =
+    needsVirtualizationFromCells || needsColumnVirtualization;
+
   let columnsTruncated = false;
   let truncatedColumnCount = colCount;
 
-  if (colCount > DEFAULT_BUDGETS.maxColumnCardinality) {
-    columnsTruncated = true;
-    truncatedColumnCount = DEFAULT_BUDGETS.maxColumnCardinality;
-    warnings.push(
-      `Column cardinality (${colCount}) exceeds limit (${DEFAULT_BUDGETS.maxColumnCardinality}). ` +
-        `Showing first ${DEFAULT_BUDGETS.maxColumnCardinality} columns.`,
-    );
-  }
+  if (needsVirtualization) {
+    truncatedColumnCount = colsAfterHardCap;
+    columnsTruncated = exceedsHardCap;
 
-  const effectiveCells =
-    rowCount * truncatedColumnCount * Math.max(valueCount, 1);
+    if (exceedsHardCap) {
+      warnings.push(
+        `Column cardinality (${colCount}) exceeds limit (${maxColCap}). ` +
+          `Showing first ${maxColCap} columns.`,
+      );
+    }
 
-  if (effectiveCells > DEFAULT_BUDGETS.maxVisibleCells) {
-    needsVirtualization = true;
-    warnings.push(
-      `Total cells (${effectiveCells.toLocaleString()}) exceeds DOM budget ` +
-        `(${DEFAULT_BUDGETS.maxVisibleCells.toLocaleString()}). Virtualization enabled.`,
-    );
+    if (needsVirtualizationFromCells) {
+      warnings.push(
+        `Total cells (${(rowCount * colsAfterHardCap * Math.max(valueCount, 1)).toLocaleString()}) exceeds DOM budget ` +
+          `(${DEFAULT_BUDGETS.maxVisibleCells.toLocaleString()}). Virtualization enabled.`,
+      );
+    }
+  } else {
+    truncatedColumnCount = colCount;
+    columnsTruncated = false;
   }
 
   return {
     needsVirtualization,
+    needsColumnVirtualization,
     columnsTruncated,
     truncatedColumnCount,
     warnings,

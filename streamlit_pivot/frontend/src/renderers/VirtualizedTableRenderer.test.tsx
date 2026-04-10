@@ -163,6 +163,27 @@ describe("VirtualizedTableRenderer", () => {
     expect(cellText).not.toMatch(/^R\d+$/);
   });
 
+  it("wide column counts stay DOM-bounded (500+ columns)", () => {
+    const records = makeRecords(4, 600);
+    const config = makeConfig({ show_totals: false });
+    const pivotData = new PivotData(records, config);
+
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+        columnWidth={120}
+      />,
+    );
+
+    const dataRows = screen.getAllByTestId("pivot-data-row");
+    const dataCells = screen.getAllByTestId("pivot-data-cell");
+    const cellsPerRow = dataCells.length / dataRows.length;
+    expect(cellsPerRow).toBeLessThan(600);
+    expect(dataCells.length).toBeLessThan(600 * dataRows.length);
+  });
+
   it("column windowing with multiple row dims still renders all row header columns", () => {
     // Create records with 2 row dimensions
     const records: DataRecord[] = [];

@@ -110,4 +110,10 @@ describe("PivotData computation benchmarks", () => {
   bench("stress dataset (200K rows, 500x20 grid)", () => {
     new PivotData(stress.records, stress.config);
   });
+
+  // Wide columns: 50,000 rows, 20 regions, 1,000 years -> 20,000 unique cells
+  const wide = generateRecords(50000, 20, 1000);
+  bench("wide columns (50K rows, 20x1000 grid)", () => {
+    new PivotData(wide.records, wide.config);
+  });
 });

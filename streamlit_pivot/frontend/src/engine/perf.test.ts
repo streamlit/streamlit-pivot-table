@@ -36,7 +36,7 @@ describe("DEFAULT_BUDGETS", () => {
   it("matches expected values", () => {
     expect(DEFAULT_BUDGETS).toMatchInlineSnapshot(`
       {
-        "maxColumnCardinality": 200,
+        "maxColumnCardinality": 1000,
         "maxComputeMs": 500,
         "maxRenderMs": 200,
         "maxVisibleCells": 5000,
@@ -78,7 +78,7 @@ describe("checkBudgets", () => {
   });
 
   it("warns when column cardinality exceeds cap", () => {
-    const warnings = checkBudgets({ ...okMetrics, totalCols: 250 });
+    const warnings = checkBudgets({ ...okMetrics, totalCols: 1200 });
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("column values exceed cardinality cap");
   });
@@ -88,7 +88,7 @@ describe("checkBudgets", () => {
       pivotComputeMs: 800,
       renderMs: 400,
       totalRows: 5000,
-      totalCols: 300,
+      totalCols: 1200,
       totalCells: 10000,
     };
     const warnings = checkBudgets(badMetrics);

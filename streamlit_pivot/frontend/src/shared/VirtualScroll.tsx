@@ -24,6 +24,7 @@ import {
   useEffect,
   useMemo,
 } from "react";
+import { COLUMN_VIRTUALIZATION_THRESHOLD } from "../engine/perf";
 
 export interface VirtualScrollProps {
   totalRows: number;
@@ -98,6 +99,14 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   const totalContentWidth = totalColumns * columnWidth;
   const viewportWidth = measuredWidth || totalContentWidth;
 
+  const effectiveOverscanColumns = useMemo(
+    () =>
+      totalColumns > COLUMN_VIRTUALIZATION_THRESHOLD
+        ? Math.max(overscanColumns, 6)
+        : overscanColumns,
+    [totalColumns, overscanColumns],
+  );
+
   const { startRow, endRow } = useMemo(() => {
     const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscanRows);
     const visibleCount = Math.ceil(bodyHeight / rowHeight);
@@ -108,15 +117,21 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   const { startCol, endCol } = useMemo(() => {
     const start = Math.max(
       0,
-      Math.floor(scrollLeft / columnWidth) - overscanColumns,
+      Math.floor(scrollLeft / columnWidth) - effectiveOverscanColumns,
     );
     const visibleCount = Math.ceil(viewportWidth / columnWidth);
     const end = Math.min(
       totalColumns,
-      start + visibleCount + overscanColumns * 2,
+      start + visibleCount + effectiveOverscanColumns * 2,
     );
     return { startCol: start, endCol: end };
-  }, [scrollLeft, columnWidth, viewportWidth, totalColumns, overscanColumns]);
+  }, [
+    scrollLeft,
+    columnWidth,
+    viewportWidth,
+    totalColumns,
+    effectiveOverscanColumns,
+  ]);
 
   const colRange: [number, number] = [startCol, endCol];
 

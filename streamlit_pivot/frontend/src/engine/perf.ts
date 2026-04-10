@@ -60,15 +60,26 @@ export interface PerfBudgets {
   maxRenderMs: number;
   /** Max visible cells before virtualization activates */
   maxVisibleCells: number;
-  /** Max unique column values before truncation */
+  /** Max unique column values before truncation (wide-column mode cap) */
   maxColumnCardinality: number;
 }
+
+/** Column count above which horizontal windowing is preferred (legacy cap when wideColumnMode is off). */
+export const COLUMN_VIRTUALIZATION_THRESHOLD = 200;
+
+/** Hard cap when {@link FEATURE_FLAGS.wideColumnMode} is false (backward compatible). */
+export const LEGACY_MAX_COLUMN_CARDINALITY = 200;
+
+export const FEATURE_FLAGS = {
+  /** When false, column cardinality uses {@link LEGACY_MAX_COLUMN_CARDINALITY} (200). */
+  wideColumnMode: true,
+};
 
 export const DEFAULT_BUDGETS: PerfBudgets = {
   maxComputeMs: 500,
   maxRenderMs: 200,
   maxVisibleCells: 5000,
-  maxColumnCardinality: 200,
+  maxColumnCardinality: 1000,
 };
 
 /**

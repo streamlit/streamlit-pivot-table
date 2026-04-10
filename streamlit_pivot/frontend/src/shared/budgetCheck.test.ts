@@ -15,15 +15,24 @@
  * limitations under the License.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { checkRenderBudget } from "./budgetCheck";
-import { DEFAULT_BUDGETS } from "../engine/perf";
+import {
+  DEFAULT_BUDGETS,
+  FEATURE_FLAGS,
+  LEGACY_MAX_COLUMN_CARDINALITY,
+} from "../engine/perf";
 
 describe("checkRenderBudget", () => {
+  afterEach(() => {
+    FEATURE_FLAGS.wideColumnMode = true;
+  });
+
   it("returns no warnings for small pivot", () => {
     const result = checkRenderBudget(10, 5, 1);
     expect(result.needsVirtualization).toBe(false);
     expect(result.columnsTruncated).toBe(false);
+    expect(result.needsColumnVirtualization).toBe(false);
     expect(result.warnings).toHaveLength(0);
   });
 
@@ -38,12 +47,29 @@ describe("checkRenderBudget", () => {
     expect(result.warnings.length).toBeGreaterThan(0);
   });
 
-  it("truncates columns when cardinality exceeds limit", () => {
-    const result = checkRenderBudget(10, 300, 1);
+  it("truncates columns when cardinality exceeds limit (wideColumnMode on)", () => {
+    const result = checkRenderBudget(10, 1500, 1);
     expect(result.columnsTruncated).toBe(true);
     expect(result.truncatedColumnCount).toBe(
       DEFAULT_BUDGETS.maxColumnCardinality,
     );
+    expect(result.warnings.some((w) => w.includes("Column cardinality"))).toBe(
+      true,
+    );
+  });
+
+  it("does not truncate at 500 columns when wideColumnMode is true", () => {
+    const result = checkRenderBudget(10, 500, 1);
+    expect(result.columnsTruncated).toBe(false);
+    expect(result.truncatedColumnCount).toBe(500);
+    expect(result.needsColumnVirtualization).toBe(true);
+  });
+
+  it("truncates at 200 columns when wideColumnMode is false (backward compat)", () => {
+    FEATURE_FLAGS.wideColumnMode = false;
+    const result = checkRenderBudget(10, 500, 1);
+    expect(result.columnsTruncated).toBe(true);
+    expect(result.truncatedColumnCount).toBe(LEGACY_MAX_COLUMN_CARDINALITY);
     expect(result.warnings.some((w) => w.includes("Column cardinality"))).toBe(
       true,
     );
