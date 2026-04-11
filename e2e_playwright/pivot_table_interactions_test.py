@@ -823,3 +823,81 @@ def test_child_toggle_disabled_when_parent_collapsed(page_at_app: Page):
 
     expect(category_toggle).not_to_have_attribute("role", "button", timeout=5000)
     expect(category_toggle).to_have_attribute("title", "Expand Region first")
+
+
+# ---------------------------------------------------------------------------
+# Drilldown Pagination (client-only & hybrid)
+# ---------------------------------------------------------------------------
+
+
+def _open_drilldown_with_pagination(page: Page, pivot_key: str):
+    """Click the first data cell (Alpha × 2023 → 700 records) and wait for pagination."""
+    container = get_pivot(page, pivot_key)
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    container.get_by_test_id("pivot-data-cell").first.evaluate("el => el.click()")
+    panel = page.get_by_test_id("drilldown-panel")
+    expect(panel).to_be_visible(timeout=10000)
+    expect(page.get_by_test_id("drilldown-pagination")).to_be_visible(timeout=10000)
+    return container, panel
+
+
+def test_drilldown_client_pagination_shows_controls(page_at_app: Page):
+    """Client-only: clicking a cell with >500 records shows pagination controls."""
+    page = page_at_app
+    _, panel = _open_drilldown_with_pagination(page, "test_pivot_drilldown_pagination")
+    expect(panel.get_by_test_id("drilldown-prev")).to_be_visible()
+    expect(panel.get_by_test_id("drilldown-next")).to_be_visible()
+    expect(panel.locator("text=Page 1 of 2")).to_be_visible()
+    expect(panel.locator("text=1–500 of 700 records")).to_be_visible()
+
+
+def test_drilldown_client_pagination_navigates(page_at_app: Page):
+    """Client-only: Next navigates to page 2; Prev returns to page 1."""
+    page = page_at_app
+    _, panel = _open_drilldown_with_pagination(page, "test_pivot_drilldown_pagination")
+
+    expect(panel.get_by_test_id("drilldown-prev")).to_be_disabled()
+    panel.get_by_test_id("drilldown-next").click()
+
+    expect(panel.locator("text=Page 2 of 2")).to_be_visible(timeout=5000)
+    expect(panel.locator("text=501–700 of 700 records")).to_be_visible()
+    expect(panel.get_by_test_id("drilldown-next")).to_be_disabled()
+
+    panel.get_by_test_id("drilldown-prev").click()
+    expect(panel.locator("text=Page 1 of 2")).to_be_visible(timeout=5000)
+
+
+def test_drilldown_hybrid_pagination_shows_controls(page_at_app: Page):
+    """Hybrid mode: clicking a cell with >500 records shows pagination controls."""
+    page = page_at_app
+    _, panel = _open_drilldown_with_pagination(
+        page, "test_pivot_drilldown_pagination_hybrid"
+    )
+    expect(panel.get_by_test_id("drilldown-prev")).to_be_visible()
+    expect(panel.get_by_test_id("drilldown-next")).to_be_visible()
+    expect(panel.locator("text=Page 1 of 2")).to_be_visible()
+    expect(panel.locator("text=1–500 of 700 records")).to_be_visible()
+
+
+def test_drilldown_hybrid_pagination_navigates(page_at_app: Page):
+    """Hybrid mode: Next navigates to page 2; Prev returns to page 1."""
+    page = page_at_app
+    _, panel = _open_drilldown_with_pagination(
+        page, "test_pivot_drilldown_pagination_hybrid"
+    )
+
+    expect(panel.get_by_test_id("drilldown-prev")).to_be_disabled()
+    panel.get_by_test_id("drilldown-next").click()
+
+    # Hybrid page changes trigger a full Streamlit rerun; re-query the panel
+    # from the page to avoid stale references and allow extra time.
+    panel = page.get_by_test_id("drilldown-panel")
+    expect(panel).to_be_visible(timeout=30000)
+    expect(panel.locator("text=Page 2 of 2")).to_be_visible(timeout=30000)
+    expect(panel.locator("text=501–700 of 700 records")).to_be_visible()
+    expect(panel.get_by_test_id("drilldown-next")).to_be_disabled()
+
+    panel.get_by_test_id("drilldown-prev").click()
+    panel = page.get_by_test_id("drilldown-panel")
+    expect(panel).to_be_visible(timeout=30000)
+    expect(panel.locator("text=Page 1 of 2")).to_be_visible(timeout=30000)

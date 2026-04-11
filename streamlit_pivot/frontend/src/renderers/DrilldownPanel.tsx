@@ -22,6 +22,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import type { PivotData, DataRecord } from "../engine/PivotData";
 import type { CellClickPayload } from "../engine/types";
@@ -35,6 +36,20 @@ export interface DrilldownPanelProps {
   payload: CellClickPayload;
   onClose: () => void;
   onMeasured?: (action: PerfActionMeasurement) => void;
+  /** Pre-fetched rows from a hybrid-mode server round-trip. */
+  serverRecords?: Record<string, unknown>[];
+  /** Column names for server-provided rows, in display order. */
+  serverColumns?: string[];
+  /** Total matching row count before capping (server mode). */
+  serverTotalCount?: number;
+  /** True while waiting for the server round-trip to complete. */
+  isLoading?: boolean;
+  /** Current zero-based page index (server pagination). */
+  serverPage?: number;
+  /** Rows per page (server pagination). */
+  serverPageSize?: number;
+  /** Called when the user navigates to a different page. */
+  onPageChange?: (page: number) => void;
 }
 
 const CloseIcon: FC = () => (
@@ -81,6 +96,13 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
   payload,
   onClose,
   onMeasured,
+  serverRecords,
+  serverColumns,
+  serverTotalCount,
+  isLoading,
+  serverPage,
+  serverPageSize,
+  onPageChange,
 }): ReactElement => {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -99,12 +121,36 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
     [onClose],
   );
 
-  const { records, totalCount, elapsedMs } = useMemo(() => {
+  const useServerData = serverRecords != null;
+  const [clientPage, setClientPage] = useState(0);
+
+  const { allRecords, totalCount, elapsedMs } = useMemo(() => {
+    if (useServerData) {
+      return {
+        allRecords: serverRecords as DataRecord[],
+        totalCount: serverTotalCount ?? serverRecords!.length,
+        elapsedMs: 0,
+      };
+    }
     const measured = measureSync(() =>
-      pivotData.getMatchingRecords(payload.filters, RECORD_LIMIT),
+      pivotData.getMatchingRecords(payload.filters, Infinity),
     );
-    return { ...measured.result, elapsedMs: measured.elapsedMs };
-  }, [pivotData, payload.filters]);
+    return {
+      allRecords: measured.result.records,
+      totalCount: measured.result.totalCount,
+      elapsedMs: measured.elapsedMs,
+    };
+  }, [
+    pivotData,
+    payload.filters,
+    useServerData,
+    serverRecords,
+    serverTotalCount,
+  ]);
+
+  useEffect(() => {
+    setClientPage(0);
+  }, [payload.filters]);
 
   useEffect(() => {
     if (!onMeasured) return;
@@ -115,13 +161,45 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
     });
   }, [elapsedMs, onMeasured, totalCount]);
 
-  const columns = useMemo(() => pivotData.getColumnNames(), [pivotData]);
+  const columns = useMemo(() => {
+    if (serverColumns) return serverColumns;
+    return pivotData.getColumnNames();
+  }, [pivotData, serverColumns]);
 
   const headerText = formatDrilldownHeader(payload);
-  const cappedMessage =
-    totalCount > RECORD_LIMIT
-      ? `Showing ${RECORD_LIMIT} of ${totalCount} records`
-      : `${totalCount} record${totalCount !== 1 ? "s" : ""}`;
+  const pageSize = serverPageSize ?? RECORD_LIMIT;
+  const currentPage = useServerData ? (serverPage ?? 0) : clientPage;
+  const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 1;
+  const hasPagination =
+    totalPages > 1 && (useServerData ? onPageChange != null : true);
+
+  const records = useMemo(() => {
+    if (useServerData) return allRecords;
+    const start = currentPage * pageSize;
+    return allRecords.slice(start, start + pageSize);
+  }, [useServerData, allRecords, currentPage, pageSize]);
+
+  const rangeStart = currentPage * pageSize + 1;
+  const rangeEnd = Math.min(rangeStart + records.length - 1, totalCount);
+
+  const handlePageChange = useCallback(
+    (page: number) => {
+      if (onPageChange) {
+        onPageChange(page);
+      } else {
+        setClientPage(page);
+      }
+    },
+    [onPageChange],
+  );
+
+  const cappedMessage = isLoading
+    ? "Loading…"
+    : hasPagination
+      ? `${rangeStart}–${rangeEnd} of ${totalCount} records`
+      : totalCount > records.length
+        ? `Showing ${records.length} of ${totalCount} records`
+        : `${totalCount} record${totalCount !== 1 ? "s" : ""}`;
 
   return (
     <div
@@ -146,36 +224,66 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
           <CloseIcon />
         </button>
       </div>
-      {records.length === 0 ? (
+      {isLoading ? (
+        <div className={styles.emptyMessage}>Loading drill-down data…</div>
+      ) : records.length === 0 ? (
         <div className={styles.emptyMessage}>No matching records found.</div>
       ) : (
-        <div className={styles.tableWrapper}>
-          <table className={styles.table} data-testid="drilldown-table">
-            <thead>
-              <tr>
-                {columns.map((col) => (
-                  <th key={col} className={styles.th}>
-                    {col}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((record: DataRecord, idx: number) => (
-                <tr
-                  key={idx}
-                  className={idx % 2 === 1 ? styles.altRow : undefined}
-                >
+        <>
+          <div className={styles.tableWrapper}>
+            <table className={styles.table} data-testid="drilldown-table">
+              <thead>
+                <tr>
                   {columns.map((col) => (
-                    <td key={col} className={styles.td}>
-                      {formatCellValue(record[col])}
-                    </td>
+                    <th key={col} className={styles.th}>
+                      {col}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {records.map((record: DataRecord, idx: number) => (
+                  <tr
+                    key={idx}
+                    className={idx % 2 === 1 ? styles.altRow : undefined}
+                  >
+                    {columns.map((col) => (
+                      <td key={col} className={styles.td}>
+                        {formatCellValue(record[col])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {hasPagination && (
+            <div
+              className={styles.pagination}
+              data-testid="drilldown-pagination"
+            >
+              <button
+                className={styles.pageButton}
+                disabled={currentPage === 0 || isLoading}
+                onClick={() => handlePageChange(currentPage - 1)}
+                data-testid="drilldown-prev"
+              >
+                ← Prev
+              </button>
+              <span className={styles.pageInfo}>
+                Page {currentPage + 1} of {totalPages}
+              </span>
+              <button
+                className={styles.pageButton}
+                disabled={currentPage >= totalPages - 1 || isLoading}
+                onClick={() => handlePageChange(currentPage + 1)}
+                data-testid="drilldown-next"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

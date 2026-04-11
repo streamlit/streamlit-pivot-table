@@ -129,3 +129,124 @@ def test_prepare_threshold_hybrid_frame_shape_preaggregated(
     got = pivot_module._prepare_threshold_hybrid_frame(df, cfg)
     assert len(got) <= expected_max_rows
     assert list(got.columns) == ["r", "c", "v"]
+
+
+# ---- Hybrid drill-down tests ----
+
+
+class TestComputeHybridDrilldown:
+    """Tests for _compute_hybrid_drilldown (server-side drill-down filtering)."""
+
+    @pytest.fixture
+    def df(self):
+        return pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU", "US"],
+                "year": ["2023", "2024", "2023", "2024", "2023"],
+                "revenue": [100, 150, 200, 250, 50],
+                "profit": [40, 60, 80, 100, 20],
+            }
+        )
+
+    def test_single_filter_returns_matching_rows(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}}
+        )
+        assert total == 3
+        assert len(records) == 3
+        assert page == 0
+        assert all(r["region"] == "US" for r in records)
+
+    def test_multi_filter_returns_intersection(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US", "year": "2023"}}
+        )
+        assert total == 2
+        assert len(records) == 2
+        revenues = sorted(r["revenue"] for r in records)
+        assert revenues == [50, 100]
+
+    def test_columns_include_all_df_columns(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "EU"}}
+        )
+        assert columns == ["region", "year", "revenue", "profit"]
+
+    def test_empty_filters_returns_all_rows(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {}}
+        )
+        assert total == 5
+        assert len(records) == 5
+
+    def test_no_match_returns_empty(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "APAC"}}
+        )
+        assert total == 0
+        assert len(records) == 0
+
+    def test_page_size_caps_returned_records(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}}, page_size=2
+        )
+        assert total == 3
+        assert len(records) == 2
+        assert page == 0
+
+    def test_page_1_returns_remaining_records(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}, "page": 1}, page_size=2
+        )
+        assert total == 3
+        assert len(records) == 1
+        assert page == 1
+
+    def test_page_beyond_end_returns_empty(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}, "page": 99}, page_size=2
+        )
+        assert total == 3
+        assert len(records) == 0
+        assert page == 99
+
+    def test_negative_page_clamps_to_zero(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}, "page": -5}, page_size=2
+        )
+        assert page == 0
+        assert len(records) == 2
+
+    def test_null_sentinel_matches_nan_rows(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "region": ["US", None, "EU", None],
+                "revenue": [100, 200, 300, 400],
+            }
+        )
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "(null)"}}
+        )
+        assert total == 2
+        assert len(records) == 2
+        revenues = sorted(r["revenue"] for r in records)
+        assert revenues == [200, 400]
+
+    def test_numeric_dimension_filter_matches_via_string_coercion(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "year": [2023, 2023, 2024],
+                "revenue": [100, 50, 200],
+            }
+        )
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"year": "2023"}}
+        )
+        assert total == 2
+        assert len(records) == 2
+
+    def test_unknown_filter_column_is_ignored(self, pivot_module, df):
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"nonexistent": "value", "region": "US"}}
+        )
+        assert total == 3

@@ -97,6 +97,8 @@ INTERACTIONS_PIVOT_KEYS = [
     "test_pivot_per_measure_row_totals",
     "test_pivot_per_measure_col_totals",
     "test_pivot_col_groups",
+    "test_pivot_drilldown_pagination",
+    "test_pivot_drilldown_pagination_hybrid",
 ]
 
 DATA_PIVOT_KEYS = [

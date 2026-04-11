@@ -146,3 +146,340 @@ describe("DrilldownPanel", () => {
     expect(screen.getByText("3 records")).toBeInTheDocument();
   });
 });
+
+describe("DrilldownPanel — server mode (hybrid drill-down)", () => {
+  const SERVER_RECORDS = [
+    { region: "US", year: "2023", revenue: 100, profit: 40 },
+    { region: "US", year: "2023", revenue: 50, profit: 20 },
+  ];
+  const SERVER_COLUMNS = ["region", "year", "revenue", "profit"];
+
+  it("renders server-provided records instead of calling pivotData", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={SERVER_RECORDS}
+        serverColumns={SERVER_COLUMNS}
+        serverTotalCount={2}
+      />,
+    );
+    expect(screen.getByTestId("drilldown-table")).toBeInTheDocument();
+    expect(screen.getByText("2 records")).toBeInTheDocument();
+    const rows = screen
+      .getByTestId("drilldown-table")
+      .querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(2);
+  });
+
+  it("uses serverColumns for table headers", () => {
+    const pd = makePivotData();
+    const customCols = ["revenue", "profit"];
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={SERVER_RECORDS}
+        serverColumns={customCols}
+        serverTotalCount={2}
+      />,
+    );
+    const headers = screen
+      .getByTestId("drilldown-table")
+      .querySelectorAll("th");
+    const headerTexts = Array.from(headers).map((h) => h.textContent);
+    expect(headerTexts).toEqual(["revenue", "profit"]);
+  });
+
+  it("shows capped message when serverTotalCount exceeds returned rows", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={SERVER_RECORDS}
+        serverColumns={SERVER_COLUMNS}
+        serverTotalCount={1200}
+      />,
+    );
+    expect(screen.getByText("Showing 2 of 1200 records")).toBeInTheDocument();
+  });
+
+  it("shows loading state before server data arrives", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        isLoading
+      />,
+    );
+    expect(screen.getByText(/Loading drill-down data/)).toBeInTheDocument();
+    expect(screen.queryByTestId("drilldown-table")).not.toBeInTheDocument();
+  });
+
+  it("header count shows Loading while waiting for server", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        isLoading
+      />,
+    );
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+  });
+
+  it("shows empty message when server returns zero records", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={[]}
+        serverColumns={SERVER_COLUMNS}
+        serverTotalCount={0}
+      />,
+    );
+    expect(screen.getByText(/No matching records found/)).toBeInTheDocument();
+  });
+});
+
+describe("DrilldownPanel — server pagination", () => {
+  const PAGE_RECORDS = [
+    { region: "US", year: "2023", revenue: 100, profit: 40 },
+    { region: "US", year: "2023", revenue: 50, profit: 20 },
+  ];
+  const COLUMNS = ["region", "year", "revenue", "profit"];
+
+  it("shows pagination controls when totalCount exceeds pageSize", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={PAGE_RECORDS}
+        serverColumns={COLUMNS}
+        serverTotalCount={1200}
+        serverPage={0}
+        serverPageSize={500}
+        onPageChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("drilldown-pagination")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 3")).toBeInTheDocument();
+  });
+
+  it("shows range-based header on paginated view", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={PAGE_RECORDS}
+        serverColumns={COLUMNS}
+        serverTotalCount={1200}
+        serverPage={0}
+        serverPageSize={500}
+        onPageChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("1–2 of 1200 records")).toBeInTheDocument();
+  });
+
+  it("disables Prev on first page", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={PAGE_RECORDS}
+        serverColumns={COLUMNS}
+        serverTotalCount={1200}
+        serverPage={0}
+        serverPageSize={500}
+        onPageChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("drilldown-prev")).toBeDisabled();
+    expect(screen.getByTestId("drilldown-next")).not.toBeDisabled();
+  });
+
+  it("disables Next on last page", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={PAGE_RECORDS}
+        serverColumns={COLUMNS}
+        serverTotalCount={1200}
+        serverPage={2}
+        serverPageSize={500}
+        onPageChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("drilldown-next")).toBeDisabled();
+    expect(screen.getByTestId("drilldown-prev")).not.toBeDisabled();
+  });
+
+  it("calls onPageChange with next page number", () => {
+    const onPageChange = vi.fn();
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={PAGE_RECORDS}
+        serverColumns={COLUMNS}
+        serverTotalCount={1200}
+        serverPage={0}
+        serverPageSize={500}
+        onPageChange={onPageChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("drilldown-next"));
+    expect(onPageChange).toHaveBeenCalledWith(1);
+  });
+
+  it("calls onPageChange with previous page number", () => {
+    const onPageChange = vi.fn();
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={PAGE_RECORDS}
+        serverColumns={COLUMNS}
+        serverTotalCount={1200}
+        serverPage={1}
+        serverPageSize={500}
+        onPageChange={onPageChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("drilldown-prev"));
+    expect(onPageChange).toHaveBeenCalledWith(0);
+  });
+
+  it("hides pagination when only one page exists", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={PAGE_RECORDS}
+        serverColumns={COLUMNS}
+        serverTotalCount={2}
+        serverPage={0}
+        serverPageSize={500}
+        onPageChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("drilldown-pagination"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("DrilldownPanel — client-side pagination", () => {
+  function generateRecords(n: number): DataRecord[] {
+    return Array.from({ length: n }, (_, i) => ({
+      region: i % 2 === 0 ? "US" : "EU",
+      year: "2023",
+      revenue: 10 * (i + 1),
+      profit: 5 * (i + 1),
+    }));
+  }
+
+  it("shows pagination when client records exceed page size", () => {
+    const records = generateRecords(600);
+    const pd = makePivotData(records);
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload({ filters: {} })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("drilldown-pagination")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("1–500 of 600 records")).toBeInTheDocument();
+  });
+
+  it("navigates to next page via client-side pagination", () => {
+    const records = generateRecords(600);
+    const pd = makePivotData(records);
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload({ filters: {} })}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("drilldown-next"));
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getByText("501–600 of 600 records")).toBeInTheDocument();
+    expect(screen.getByTestId("drilldown-next")).toBeDisabled();
+  });
+
+  it("navigates back to previous page", () => {
+    const records = generateRecords(600);
+    const pd = makePivotData(records);
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload({ filters: {} })}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("drilldown-next"));
+    fireEvent.click(screen.getByTestId("drilldown-prev"));
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    expect(screen.getByTestId("drilldown-prev")).toBeDisabled();
+  });
+
+  it("hides pagination when all records fit on one page", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload({ filters: {} })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("drilldown-pagination"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("5 records")).toBeInTheDocument();
+  });
+
+  it("only shows page-sized slice of rows in the table", () => {
+    const records = generateRecords(600);
+    const pd = makePivotData(records);
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload({ filters: {} })}
+        onClose={vi.fn()}
+      />,
+    );
+    const rows = screen
+      .getByTestId("drilldown-table")
+      .querySelectorAll("tbody tr");
+    expect(rows).toHaveLength(500);
+  });
+});

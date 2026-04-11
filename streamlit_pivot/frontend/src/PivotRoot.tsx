@@ -62,10 +62,13 @@ import Toolbar from "./config/Toolbar";
 import DrilldownPanel from "./renderers/DrilldownPanel";
 import WarningBanner from "./shared/WarningBanner";
 
+export type DrilldownRequest = CellClickPayload & { page?: number };
+
 export type PivotRootState = {
   config: PivotConfigV1;
   cell_click: CellClickPayload;
   perf_metrics?: PivotPerfMetrics;
+  drilldown_request?: DrilldownRequest | null;
 };
 
 export type PivotRootProps = Pick<
@@ -90,6 +93,11 @@ const PivotRoot: FC<PivotRootProps> = ({
   export_filename,
   execution_mode,
   server_mode_reason,
+  drilldown_records,
+  drilldown_columns,
+  drilldown_total_count,
+  drilldown_page,
+  drilldown_page_size,
   setStateValue,
   setTriggerValue,
 }): ReactElement => {
@@ -356,15 +364,19 @@ const PivotRoot: FC<PivotRootProps> = ({
   );
 
   const drilldownEnabled = enable_drilldown == null || !!enable_drilldown;
+  const isHybridMode = execution_mode === "threshold_hybrid";
 
   const handleCellClick = useCallback(
     (payload: CellClickPayload) => {
       setTriggerValue("cell_click", payload);
       if (drilldownEnabled) {
         setDrilldownPayload(payload);
+        if (isHybridMode) {
+          setStateValue("drilldown_request", { ...payload, page: 0 });
+        }
       }
     },
-    [setTriggerValue, drilldownEnabled],
+    [setTriggerValue, setStateValue, drilldownEnabled, isHybridMode],
   );
 
   const handleSortChange = useCallback(
@@ -621,8 +633,29 @@ const PivotRoot: FC<PivotRootProps> = ({
           <DrilldownPanel
             pivotData={pivotData}
             payload={drilldownPayload}
-            onClose={() => setDrilldownPayload(null)}
+            onClose={() => {
+              setDrilldownPayload(null);
+              if (isHybridMode) {
+                setStateValue("drilldown_request", null);
+              }
+            }}
             onMeasured={handleDrilldownMeasured}
+            serverRecords={isHybridMode ? drilldown_records : undefined}
+            serverColumns={isHybridMode ? drilldown_columns : undefined}
+            serverTotalCount={isHybridMode ? drilldown_total_count : undefined}
+            isLoading={isHybridMode && !drilldown_records}
+            serverPage={isHybridMode ? drilldown_page : undefined}
+            serverPageSize={isHybridMode ? drilldown_page_size : undefined}
+            onPageChange={
+              isHybridMode
+                ? (page: number) => {
+                    setStateValue("drilldown_request", {
+                      ...drilldownPayload,
+                      page,
+                    });
+                  }
+                : undefined
+            }
           />
         )}
 

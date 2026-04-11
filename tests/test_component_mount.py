@@ -180,7 +180,9 @@ def test_threshold_hybrid_preaggregates_compatible_large_configs(
 
     payload = calls[0]["data"]
     assert payload["execution_mode"] == "threshold_hybrid"
-    assert payload["enable_drilldown"] is False
+    assert (
+        "enable_drilldown" not in payload
+    )  # drill-down is enabled (server round-trip)
     assert len(payload["dataframe"]) <= len(large_df)
     assert payload["server_mode_reason"]
     assert "Drill-down" in payload["server_mode_reason"]

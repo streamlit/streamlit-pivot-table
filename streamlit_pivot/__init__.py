@@ -117,6 +117,7 @@ SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS = frozenset(
 
 _warned_keys: set[str] = set()
 _PYTHON_CONFIG_STATE_PREFIX = "__streamlit_pivot_python_config__:"
+_DRILLDOWN_PAGE_SIZE = 500
 
 
 def _estimate_group_count(df: Any, fields: list[str]) -> int:
@@ -233,6 +234,33 @@ def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
         out = out.drop(columns=[sum_col, cnt_col])
 
     return out
+
+
+def _compute_hybrid_drilldown(
+    df: Any,
+    drilldown_request: dict[str, Any],
+    page_size: int = _DRILLDOWN_PAGE_SIZE,
+) -> tuple[list[dict[str, Any]], list[str], int, int]:
+    """Filter the original DataFrame for a hybrid-mode drill-down request.
+
+    Returns (records_list, column_names, total_matching_count, page).
+    """
+    filters: dict[str, str] = drilldown_request.get("filters", {})
+    page: int = max(0, int(drilldown_request.get("page", 0)))
+    mask = pd.Series(True, index=df.index)
+    for col, val in filters.items():
+        if col not in df.columns:
+            continue
+        if val == "(null)":
+            mask &= df[col].isna()
+        else:
+            mask &= df[col].astype(str) == str(val)
+    filtered = df[mask]
+    total_count = len(filtered)
+    offset = page * page_size
+    page_slice = filtered.iloc[offset : offset + page_size]
+    records = json.loads(page_slice.to_json(orient="records", date_format="iso"))
+    return records, list(page_slice.columns), total_count, page
 
 
 def _normalize_aggregation_config(
@@ -1063,8 +1091,8 @@ def st_pivot_table(
     )
     if use_threshold_hybrid:
         drill_note = (
-            " Drill-down is unavailable in this mode because values are "
-            "pre-aggregated on the server rather than built from raw rows."
+            " Drill-down uses a server round-trip to fetch matching rows "
+            "from the original dataset."
         )
         if drill_note not in threshold_reason:
             threshold_reason = f"{threshold_reason}{drill_note}"
@@ -1108,17 +1136,45 @@ def st_pivot_table(
                 f"menu_limit must be a positive integer, got {menu_limit!r}"
             )
         data_payload["menu_limit"] = menu_limit
-    if not enable_drilldown or use_threshold_hybrid:
+    if not enable_drilldown:
         data_payload["enable_drilldown"] = False
     if export_filename is not None:
         data_payload["export_filename"] = export_filename
 
+    # Server-side drill-down for hybrid mode: read the pending request from
+    # session state, filter the *original* (un-aggregated) DataFrame, and
+    # ship the matching rows back as JSON records.
+    if use_threshold_hybrid and enable_drilldown:
+        drilldown_request: dict[str, Any] | None = None
+        try:
+            state = st.session_state.get(key, {})
+            drilldown_request = (
+                state.get("drilldown_request") if isinstance(state, dict) else None
+            )
+        except (AttributeError, TypeError):
+            drilldown_request = None
+
+        if isinstance(drilldown_request, dict) and drilldown_request.get("filters"):
+            records, columns, total, page = _compute_hybrid_drilldown(
+                data, drilldown_request
+            )
+            data_payload["drilldown_records"] = records
+            data_payload["drilldown_columns"] = columns
+            data_payload["drilldown_total_count"] = total
+            data_payload["drilldown_page"] = page
+            data_payload["drilldown_page_size"] = _DRILLDOWN_PAGE_SIZE
+
     mount_kwargs: dict[str, Any] = {
         "key": key,
-        "default": {"config": config_to_send, "perf_metrics": None},
+        "default": {
+            "config": config_to_send,
+            "perf_metrics": None,
+            "drilldown_request": None,
+        },
         "data": data_payload,
         "on_config_change": on_config_change or _noop_callback,
         "on_perf_metrics_change": _noop_callback,
+        "on_drilldown_request_change": _noop_callback,
     }
 
     if on_cell_click is not None:

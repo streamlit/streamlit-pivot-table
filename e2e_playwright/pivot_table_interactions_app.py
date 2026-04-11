@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 from streamlit_pivot import st_pivot_table
@@ -28,6 +29,18 @@ from pivot_table_app_support import (
     load_data,
     noop,
 )
+
+
+def _make_drilldown_pagination_data() -> pd.DataFrame:
+    """Generate a dataset where one cell has >500 matching rows to trigger pagination."""
+    rows = []
+    for i in range(700):
+        rows.append({"Region": "Alpha", "Year": "2023", "Revenue": 10 + i})
+    for i in range(50):
+        rows.append({"Region": "Alpha", "Year": "2024", "Revenue": 100 + i})
+    for i in range(30):
+        rows.append({"Region": "Beta", "Year": "2023", "Revenue": 200 + i})
+    return pd.DataFrame(rows)
 
 
 def render_app(data):
@@ -212,6 +225,36 @@ def render_app(data):
         values=["Revenue"],
         aggregation="sum",
         show_totals=True,
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    drill_df = _make_drilldown_pagination_data()
+
+    st.subheader("Drilldown Pagination (Client)")
+    st_pivot_table(
+        drill_df,
+        key="test_pivot_drilldown_pagination",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        enable_drilldown=True,
+        execution_mode="client_only",
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("Drilldown Pagination (Hybrid)")
+    st_pivot_table(
+        drill_df,
+        key="test_pivot_drilldown_pagination_hybrid",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        enable_drilldown=True,
+        execution_mode="threshold_hybrid",
         interactive=True,
         on_config_change=noop,
     )

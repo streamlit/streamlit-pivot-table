@@ -142,3 +142,39 @@
 .altRow {
   background: color-mix(in srgb, var(--st-secondary-background-color) 30%, transparent);
 }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.2));
+  background: var(--st-secondary-background-color);
+}
+
+.pageButton {
+  background: transparent;
+  border: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.3));
+  color: var(--st-text-color);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: var(--st-base-radius, 4px);
+  font-size: 0.82em;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.pageButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--st-primary-color) 12%, transparent);
+}
+
+.pageButton:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pageInfo {
+  font-size: 0.8em;
+  opacity: 0.7;
+  white-space: nowrap;
+}

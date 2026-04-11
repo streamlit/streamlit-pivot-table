@@ -1080,6 +1080,105 @@ st_pivot_table(
     )
 
 # ---------------------------------------------------------------------------
+# Section 14: Server-Side Drill-Down (Hybrid Mode)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("14. Server-Side Drill-Down (Hybrid Mode)")
+
+st.markdown(
+    """
+When datasets are large enough to trigger **threshold_hybrid** mode, the pivot
+data is pre-aggregated on the server before being sent to the browser. In this
+mode, drill-down works via a **server round-trip**: clicking a cell sends a
+request to Python, which filters the *original* un-aggregated DataFrame and
+returns the matching rows.
+
+Because large cells can match thousands of rows, the results are **paginated**
+(500 rows per page) with **Prev / Next** controls.
+
+**Try it:**
+- Click any data cell — after a brief round-trip the drill-down panel appears.
+- If the cell has more than 500 matching rows, use the **← Prev / Next →**
+  buttons at the bottom of the panel to page through all results.
+- The header shows a range like "1–500 of 2,340 records" and the current page.
+
+**API parameter used:** `execution_mode` (set to `"threshold_hybrid"` here to
+force hybrid mode on a smaller dataset for demonstration purposes)
+"""
+)
+
+import numpy as np  # noqa: E402
+
+_rng = np.random.default_rng(42)
+_n = 50_000
+df_hybrid = pd.DataFrame(
+    {
+        "Region": _rng.choice(["North", "South", "East", "West"], _n),
+        "Category": _rng.choice(
+            ["Electronics", "Clothing", "Food", "Furniture", "Toys"], _n
+        ),
+        "Year": _rng.choice([2022, 2023, 2024], _n),
+        "Channel": _rng.choice(["Online", "Retail", "Wholesale"], _n),
+        "Revenue": _rng.uniform(10, 5000, _n).round(2),
+        "Profit": _rng.uniform(-500, 2000, _n).round(2),
+    }
+)
+
+st_pivot_table(
+    df_hybrid,
+    key="hybrid_drilldown_demo",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+    show_totals=True,
+    show_subtotals=True,
+    enable_drilldown=True,
+    execution_mode="threshold_hybrid",
+)
+
+with st.expander("View Code"):
+    st.code(
+        """
+import numpy as np
+
+rng = np.random.default_rng(42)
+n = 50_000
+df_hybrid = pd.DataFrame({
+    "Region": rng.choice(["North", "South", "East", "West"], n),
+    "Category": rng.choice(["Electronics", "Clothing", "Food", "Furniture", "Toys"], n),
+    "Year": rng.choice([2022, 2023, 2024], n),
+    "Channel": rng.choice(["Online", "Retail", "Wholesale"], n),
+    "Revenue": rng.uniform(10, 5000, n).round(2),
+    "Profit": rng.uniform(-500, 2000, n).round(2),
+})
+
+st_pivot_table(
+    df_hybrid,
+    key="hybrid_drilldown_demo",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+    show_totals=True,
+    show_subtotals=True,
+    enable_drilldown=True,
+    execution_mode="threshold_hybrid",
+)
+# Click any cell to see paginated server-side drill-down.
+""",
+        language="python",
+    )
+
+st.caption(
+    f"Dataset: {len(df_hybrid):,} rows × {len(df_hybrid.columns)} columns — "
+    "forced to threshold_hybrid mode for demonstration."
+)
+
+
+# ---------------------------------------------------------------------------
 # Footer: Raw Data
 # ---------------------------------------------------------------------------
 st.divider()

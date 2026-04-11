@@ -63,6 +63,11 @@ const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
         export_filename={data?.export_filename}
         execution_mode={data?.execution_mode}
         server_mode_reason={data?.server_mode_reason}
+        drilldown_records={data?.drilldown_records}
+        drilldown_columns={data?.drilldown_columns}
+        drilldown_total_count={data?.drilldown_total_count}
+        drilldown_page={data?.drilldown_page}
+        drilldown_page_size={data?.drilldown_page_size}
         setStateValue={setStateValue}
         setTriggerValue={setTriggerValue}
       />

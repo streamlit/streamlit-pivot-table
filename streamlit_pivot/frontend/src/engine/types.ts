@@ -847,6 +847,16 @@ export interface PivotTableData {
   execution_mode?: "client_only" | "threshold_hybrid";
   /** Human-readable reason why the threshold_hybrid path was selected. */
   server_mode_reason?: string;
+  /** Server-provided drill-down rows (hybrid mode round-trip). */
+  drilldown_records?: Record<string, unknown>[];
+  /** Column names for server drill-down rows, in display order. */
+  drilldown_columns?: string[];
+  /** Total matching rows across all pages (hybrid drill-down). */
+  drilldown_total_count?: number;
+  /** Zero-based page index for the current drill-down slice. */
+  drilldown_page?: number;
+  /** Number of rows per page (set by the server). */
+  drilldown_page_size?: number;
 }
 
 // ---------------------------------------------------------------------------
