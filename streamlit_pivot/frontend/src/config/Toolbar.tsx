@@ -1617,6 +1617,7 @@ interface ExportDataControlsProps {
 }
 
 const FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
+  { id: "xlsx", label: "Excel" },
   { id: "csv", label: "CSV" },
   { id: "tsv", label: "TSV" },
   { id: "clipboard", label: "Clipboard" },
@@ -1633,7 +1634,7 @@ const ExportDataControls: FC<ExportDataControlsProps> = ({
   exportFilename,
 }): ReactElement => {
   const [open, setOpen] = useState(false);
-  const [format, setFormat] = useState<ExportFormat>("csv");
+  const [format, setFormat] = useState<ExportFormat>("xlsx");
   const [content, setContent] = useState<ExportContent>("formatted");
   const [feedback, setFeedback] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1747,7 +1748,9 @@ const ExportDataControls: FC<ExportDataControlsProps> = ({
           >
             {format === "clipboard"
               ? "Copy to Clipboard"
-              : `Export ${format.toUpperCase()}`}
+              : format === "xlsx"
+                ? "Export Excel"
+                : `Export ${format.toUpperCase()}`}
           </button>
         </div>
       )}

@@ -60,7 +60,7 @@ and **value fields** to aggregate.
   - **Swap** (↔) — transposes row and column dimensions.
   - **Copy Config** — copies the current config as JSON to your clipboard.
   - **Import Config** — paste a JSON config to apply it.
-  - **Export Data** (↓) — export the table as CSV, TSV, or copy to clipboard
+  - **Export Data** (↓) — export the table as Excel, CSV, TSV, or copy to clipboard
     (see Section 11 for details).
   - **Settings** (⚙) — opens a popover with display toggles (e.g. Row Totals,
     Column Totals). More options appear here as you add features — see
@@ -812,13 +812,17 @@ st.subheader("11. Data Export")
 
 st.markdown(
     """
-Export the pivot table data as **CSV**, **TSV**, or copy to **clipboard** for
-pasting into Excel or Google Sheets.
+Export the pivot table data as **Excel** (.xlsx), **CSV**, **TSV**, or copy to
+**clipboard** for pasting into spreadsheets.
+
+Excel export produces a professionally styled workbook with merged column
+headers, bold totals/subtotals, number formatting, banded rows, and frozen
+panes — matching the quality you'd expect from BI tools like Sigma.
 
 **Try it:**
 - Use the top-right utility menu in the toolbar.
 - Click the **Download** icon (↓) to open the export popover.
-- Choose a **Format**: CSV, TSV, or Clipboard.
+- Choose a **Format**: Excel, CSV, TSV, or Clipboard.
 - Choose **Content**: Formatted (display values including currency, percentages)
   or Raw (unformatted aggregated numbers).
 - Click **Export** (downloads a file) or **Copy** (copies to clipboard as
@@ -828,7 +832,7 @@ pasting into Excel or Google Sheets.
 - Export is always available when the toolbar is visible (``interactive=True``).
 - Use ``export_filename`` to customize the downloaded file name. The date
   (``YYYY-MM-DD``) and file extension are appended automatically.
-  Defaults to ``"pivot-table"`` (e.g. ``pivot-table_2026-03-09.csv``).
+  Defaults to ``"pivot-table"`` (e.g. ``pivot-table_2026-03-09.xlsx``).
 - This demo sets `export_filename="sales-export-demo"` so you can see the custom
   filename behavior in the downloaded file.
 """

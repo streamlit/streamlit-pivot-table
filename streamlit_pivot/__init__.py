@@ -729,9 +729,9 @@ def st_pivot_table(
         drill-down panel below the pivot table showing the
         contributing source records. Set to False to disable.
     export_filename : str or None
-        Base filename (without extension) used when exporting data.
-        The date and file extension are appended automatically.
-        Defaults to ``"pivot-table"`` when not set.
+        Base filename (without extension) used when exporting data
+        (.xlsx, .csv, .tsv). The date and file extension are appended
+        automatically. Defaults to ``"pivot-table"`` when not set.
     execution_mode : str
         Performance execution mode. ``"auto"`` (default) keeps the client-side
         path unless the dataset is large enough to trigger the threshold_hybrid

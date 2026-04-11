@@ -133,6 +133,7 @@ def test_export_data_panel_opens(page_at_app: Page):
     panel = page.get_by_test_id("toolbar-export-data-panel")
     expect(panel).to_be_visible(timeout=5000)
 
+    expect(panel.get_by_test_id("export-format-xlsx")).to_be_visible()
     expect(panel.get_by_test_id("export-format-csv")).to_be_visible()
     expect(panel.get_by_test_id("export-format-tsv")).to_be_visible()
     expect(panel.get_by_test_id("export-content-formatted")).to_be_visible()
@@ -310,6 +311,33 @@ def test_csv_download_content(page_at_app: Page):
         "Region" in content
     ), f"CSV should contain 'Region' header, got: {content[:200]}"
     assert len(content.strip().splitlines()) > 1, "CSV should have data rows"
+
+
+def test_excel_download_content(page_at_app: Page):
+    """Downloading Excel produces a .xlsx file with the expected filename."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    container.get_by_test_id("toolbar-export-data").evaluate("el => el.click()")
+    panel = page.get_by_test_id("toolbar-export-data-panel")
+    expect(panel).to_be_visible(timeout=5000)
+
+    # Excel is the default format; just select raw content
+    panel.get_by_test_id("export-content-raw").click()
+
+    with page.expect_download() as dl_info:
+        panel.get_by_test_id("toolbar-export-data-action").click()
+
+    download = dl_info.value
+    suggested = download.suggested_filename
+    assert suggested.endswith(".xlsx"), f"Expected .xlsx extension, got: {suggested}"
+
+    path = download.path()
+    assert path is not None
+
+    file_size = Path(path).stat().st_size
+    assert file_size > 100, f"Excel file too small ({file_size} bytes), likely empty"
 
 
 def test_sticky_headers_during_scroll(page_at_app: Page):

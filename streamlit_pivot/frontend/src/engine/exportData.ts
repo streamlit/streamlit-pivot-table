@@ -16,7 +16,11 @@
  */
 
 import type { PivotData } from "./PivotData";
-import type { PivotConfigV1, ShowValuesAs } from "./types";
+import type {
+  PivotConfigV1,
+  ShowValuesAs,
+  ConditionalFormatRule,
+} from "./types";
 import {
   getRenderedValueFields,
   getRenderedValueLabel,
@@ -28,7 +32,7 @@ import {
 } from "./types";
 import { formatWithPattern, formatPercent } from "./formatters";
 
-export type ExportFormat = "csv" | "tsv" | "clipboard";
+export type ExportFormat = "csv" | "tsv" | "clipboard" | "xlsx";
 export type ExportContent = "formatted" | "raw";
 
 /** Strip floating-point noise (e.g. 24758.289999999997 → "24758.29"). */
@@ -41,9 +45,109 @@ export interface ExportOptions {
   content: ExportContent;
 }
 
+// ---------------------------------------------------------------------------
+// Shared intermediate representation
+// ---------------------------------------------------------------------------
+
+export type CellKind =
+  | "header"
+  | "data"
+  | "subtotal"
+  | "row-total"
+  | "col-total"
+  | "grand-total"
+  | "empty";
+
+export interface ExportCell {
+  /** Formatted display string (consumed by CSV/TSV). */
+  display: string;
+  /** Raw numeric value for Excel (null for label/empty cells). */
+  raw: number | null;
+  /** Semantic type driving Excel styling. */
+  kind: CellKind;
+  /** Merge rightward N additional cells (column headers). */
+  mergeRight?: number;
+  /** Merge downward N additional cells (row dimension labels when repeat_row_labels=false). */
+  mergeDown?: number;
+  /** Excel-compatible number format code (e.g. "#,##0.00", "0.0%"). */
+  numberFormat?: string;
+}
+
+/** Column range for a value field in the export grid (0-based). */
+export interface ValueFieldColumns {
+  field: string;
+  columns: number[];
+}
+
+export interface ExportGrid {
+  /** 2D grid of typed cells. */
+  cells: ExportCell[][];
+  /** Number of leading rows that are headers (for freeze panes). */
+  headerRowCount: number;
+  /** Number of leading columns that are row dimensions (for freeze panes). */
+  rowDimCount: number;
+  /** Mapping of value fields to their column indices (for conditional formatting). */
+  valueFieldColumns?: ValueFieldColumns[];
+  /** Conditional formatting rules from the pivot config. */
+  conditionalFormatting?: ConditionalFormatRule[];
+}
+
+// ---------------------------------------------------------------------------
+// Number-format pattern → Excel format code translation
+// ---------------------------------------------------------------------------
+
 /**
- * Format a single cell value for export, mirroring the display logic in TableRenderer.
+ * Translate internal format patterns (e.g. "$,.2f", ".1%") to Excel format
+ * codes (e.g. "$#,##0.00", "0.0%").
  */
+export function patternToExcelFormat(pattern: string): string | undefined {
+  let cursor = 0;
+  let prefix = "";
+
+  const firstChar = pattern[cursor];
+  const currencySymbols: Record<string, string> = {
+    $: "$",
+    "€": "€",
+    "£": "£",
+    "¥": "¥",
+  };
+  if (firstChar && firstChar in currencySymbols) {
+    prefix = currencySymbols[firstChar]!;
+    cursor++;
+    const codeMatch = pattern.slice(cursor).match(/^([A-Z]{3})/);
+    if (codeMatch) cursor += 3;
+  }
+
+  const useGrouping = pattern[cursor] === ",";
+  if (useGrouping) cursor++;
+
+  const rest = pattern.slice(cursor);
+  const match = rest.match(/^\.(\d+)([f%])$/);
+  if (!match) return undefined;
+
+  const decimals = parseInt(match[1], 10);
+  const isPercent = match[2] === "%";
+
+  if (isPercent) {
+    const decPart = decimals > 0 ? "." + "0".repeat(decimals) : "";
+    return `0${decPart}%`;
+  }
+
+  const intPart = useGrouping ? "#,##0" : "0";
+  const decPart = decimals > 0 ? "." + "0".repeat(decimals) : "";
+  return `${prefix}${intPart}${decPart}`;
+}
+
+// ---------------------------------------------------------------------------
+// Formatting helpers (produce display string + resolve Excel format code)
+// ---------------------------------------------------------------------------
+
+interface FormatResult {
+  display: string;
+  raw: number | null;
+  numberFormat?: string;
+}
+
 function formatExportValue(
   rawValue: number | null,
   valField: string,
@@ -52,11 +156,15 @@ function formatExportValue(
   rowKey: string[],
   colKey: string[],
   mode: ExportContent,
-): string {
-  if (rawValue === null)
-    return mode === "formatted" ? config.empty_cell_value : "";
+): FormatResult {
+  if (rawValue === null) {
+    return {
+      display: mode === "formatted" ? config.empty_cell_value : "",
+      raw: null,
+    };
+  }
 
-  if (mode === "raw") return cleanNumber(rawValue);
+  if (mode === "raw") return { display: cleanNumber(rawValue), raw: rawValue };
 
   const showAs: ShowValuesAs | undefined = isSyntheticMeasure(config, valField)
     ? undefined
@@ -71,26 +179,28 @@ function formatExportValue(
       denominator = pivotData.getColTotal(colKey, valField).value();
     }
     if (denominator != null && denominator !== 0) {
-      return formatPercent(rawValue / denominator);
+      const pct = rawValue / denominator;
+      return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
     }
-    return config.empty_cell_value;
+    return { display: config.empty_cell_value, raw: null };
   }
 
   const pattern =
     getSyntheticMeasureFormat(config, valField) ??
     config.number_format?.[valField] ??
     config.number_format?.["__all__"];
-  if (pattern) return formatWithPattern(rawValue, pattern);
+  if (pattern) {
+    return {
+      display: formatWithPattern(rawValue, pattern),
+      raw: rawValue,
+      numberFormat: patternToExcelFormat(pattern),
+    };
+  }
 
   const agg = pivotData.getAggregator(rowKey, colKey, valField);
-  return agg.format(config.empty_cell_value);
+  return { display: agg.format(config.empty_cell_value), raw: rawValue };
 }
 
-/**
- * Format a total cell value for export.
- * Receives the actual Aggregator so the fallback `.format()` call uses
- * the correct value (row total, col total, or grand total).
- */
 function formatExportTotalValue(
   rawValue: number | null,
   valField: string,
@@ -100,33 +210,48 @@ function formatExportTotalValue(
   isTotalOfShowAsAxis: "row" | "col" | "grand" | null,
   agg: { format: (empty: string) => string },
   showAsDenominators?: { row?: number | null; col?: number | null },
-): string {
-  if (rawValue === null)
-    return mode === "formatted" ? config.empty_cell_value : "";
-  if (mode === "raw") return cleanNumber(rawValue);
+): FormatResult {
+  if (rawValue === null) {
+    return {
+      display: mode === "formatted" ? config.empty_cell_value : "",
+      raw: null,
+    };
+  }
+  if (mode === "raw") return { display: cleanNumber(rawValue), raw: rawValue };
 
   const showAs = isSyntheticMeasure(config, valField)
     ? undefined
     : config.show_values_as?.[valField];
   if (showAs && showAs !== "raw") {
     if (isTotalOfShowAsAxis === "row" && showAs === "pct_of_row")
-      return formatPercent(1);
+      return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
     if (isTotalOfShowAsAxis === "col" && showAs === "pct_of_col")
-      return formatPercent(1);
-    if (isTotalOfShowAsAxis === "grand") return formatPercent(1);
+      return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
+    if (isTotalOfShowAsAxis === "grand")
+      return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
     if (showAs === "pct_of_total") {
       const grand = pivotData.getGrandTotal(valField).value();
-      return grand ? formatPercent(rawValue / grand) : config.empty_cell_value;
+      if (grand) {
+        const pct = rawValue / grand;
+        return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
+      }
+      return { display: config.empty_cell_value, raw: null };
     }
     if (showAs === "pct_of_row") {
       const denom = showAsDenominators?.row;
-      if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
-      return config.empty_cell_value;
+      if (denom != null && denom !== 0) {
+        const pct = rawValue / denom;
+        return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
+      }
+      return { display: config.empty_cell_value, raw: null };
     }
     if (showAs === "pct_of_col") {
       const denom = showAsDenominators?.col;
-      if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
-      return config.empty_cell_value;
+      if (denom != null && denom !== 0) {
+        const pct = rawValue / denom;
+        return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
+      }
+      return { display: config.empty_cell_value, raw: null };
     }
   }
 
@@ -134,24 +259,49 @@ function formatExportTotalValue(
     getSyntheticMeasureFormat(config, valField) ??
     config.number_format?.[valField] ??
     config.number_format?.["__all__"];
-  if (pattern) return formatWithPattern(rawValue, pattern);
+  if (pattern) {
+    return {
+      display: formatWithPattern(rawValue, pattern),
+      raw: rawValue,
+      numberFormat: patternToExcelFormat(pattern),
+    };
+  }
 
-  return agg.format(config.empty_cell_value);
+  return { display: agg.format(config.empty_cell_value), raw: rawValue };
+}
+
+// ---------------------------------------------------------------------------
+// Shared IR builder
+// ---------------------------------------------------------------------------
+
+function cell(
+  display: string,
+  kind: CellKind,
+  raw: number | null = null,
+  extra?: Partial<
+    Pick<ExportCell, "mergeRight" | "mergeDown" | "numberFormat">
+  >,
+): ExportCell {
+  const c: ExportCell = { display, raw, kind };
+  if (extra?.mergeRight) c.mergeRight = extra.mergeRight;
+  if (extra?.mergeDown) c.mergeDown = extra.mergeDown;
+  if (extra?.numberFormat) c.numberFormat = extra.numberFormat;
+  return c;
 }
 
 /**
- * Walk the PivotData structure and produce a 2D string array representing
- * the full pivot table (headers + data + totals).
+ * Walk the PivotData structure and produce a rich intermediate representation
+ * with typed cells, raw values, merge spans, and number format codes.
  *
- * Note: Export always uses the full (expanded) column and row keys, regardless
+ * Export always uses the full (expanded) column and row keys, regardless
  * of any collapsed_groups / collapsed_col_groups display state. This is
  * intentional — export provides complete data, not a visual screenshot.
  */
-export function buildExportGrid(
+export function buildExportIR(
   pivotData: PivotData,
   config: PivotConfigV1,
   mode: ExportContent,
-): string[][] {
+): ExportGrid {
   const rowKeys = pivotData.getRowKeys();
   const colKeys = pivotData.getColKeys();
   const values = getRenderedValueFields(config);
@@ -161,74 +311,94 @@ export function buildExportGrid(
   const rowDims = config.rows;
   const colDims = config.columns;
   const numRowDimCols = Math.max(rowDims.length, 1);
+  const colsPerKey = hasMultipleValues ? values.length : 1;
 
-  const grid: string[][] = [];
+  const grid: ExportCell[][] = [];
+  let headerRowCount = 0;
 
   // --- Column header rows ---
-  // One row per column dimension level, plus a value-label row when multiple values
   for (let level = 0; level < colDims.length; level++) {
-    const row: string[] = new Array(numRowDimCols).fill("");
-    // Label the first cell of the first header row with dimension names
+    const row: ExportCell[] = [];
     if (level === 0) {
       for (let d = 0; d < rowDims.length; d++) {
-        row[d] = rowDims[d];
+        row.push(cell(rowDims[d], "header"));
+      }
+      if (rowDims.length === 0) row.push(cell("", "header"));
+    } else {
+      for (let d = 0; d < numRowDimCols; d++) {
+        row.push(cell("", "header"));
       }
     }
 
     for (const colKey of colKeys) {
+      const label = colKey[level] ?? "";
       if (hasMultipleValues) {
-        for (let v = 0; v < values.length; v++) {
-          row.push(colKey[level] ?? "");
+        row.push(cell(label, "header", null, { mergeRight: colsPerKey - 1 }));
+        for (let v = 1; v < colsPerKey; v++) {
+          row.push(cell(label, "header"));
         }
       } else {
-        row.push(colKey[level] ?? "");
+        row.push(cell(label, "header"));
       }
     }
     if (includeRowTotals) {
+      const label = level === 0 ? "Total" : "";
       if (hasMultipleValues) {
-        for (let v = 0; v < values.length; v++) {
-          row.push(level === 0 ? "Total" : "");
+        row.push(cell(label, "header", null, { mergeRight: colsPerKey - 1 }));
+        for (let v = 1; v < colsPerKey; v++) {
+          row.push(cell(label, "header"));
         }
       } else {
-        row.push(level === 0 ? "Total" : "");
+        row.push(cell(label, "header"));
       }
     }
     grid.push(row);
+    headerRowCount++;
   }
 
-  // Value-label header row (only when multiple values)
+  // Value-label header row
   if (hasMultipleValues) {
-    const row: string[] = new Array(numRowDimCols).fill("");
+    const row: ExportCell[] = [];
+    for (let d = 0; d < numRowDimCols; d++) {
+      row.push(cell("", "header"));
+    }
     for (const _colKey of colKeys) {
       for (const val of values) {
-        row.push(getRenderedValueLabel(config, val));
+        row.push(cell(getRenderedValueLabel(config, val), "header"));
       }
     }
     if (includeRowTotals) {
       for (const val of values) {
-        row.push(getRenderedValueLabel(config, val));
+        row.push(cell(getRenderedValueLabel(config, val), "header"));
       }
     }
     grid.push(row);
+    headerRowCount++;
   }
 
-  // If no column dimensions, add a single header row with row dim names + value names
+  // No column dimensions: single header row
   if (colDims.length === 0) {
-    const row: string[] = [];
+    const row: ExportCell[] = [];
     for (let d = 0; d < rowDims.length; d++) {
-      row.push(rowDims[d]);
+      row.push(cell(rowDims[d], "header"));
     }
     if (hasMultipleValues) {
       for (const val of values) {
-        row.push(getRenderedValueLabel(config, val));
+        row.push(cell(getRenderedValueLabel(config, val), "header"));
       }
     } else {
-      row.push(getRenderedValueLabel(config, values[0] ?? "") || "Value");
+      row.push(
+        cell(
+          getRenderedValueLabel(config, values[0] ?? "") || "Value",
+          "header",
+        ),
+      );
     }
     if (includeRowTotals) {
-      row.push("Total");
+      row.push(cell("Total", "header"));
     }
     grid.push(row);
+    headerRowCount++;
   }
 
   // --- Data rows ---
@@ -237,16 +407,16 @@ export function buildExportGrid(
     : rowKeys.map((key) => ({ type: "data" as const, key, level: 0 }));
 
   for (const groupedRow of groupedRows) {
-    const row: string[] = [];
+    const row: ExportCell[] = [];
 
     if (groupedRow.type === "subtotal") {
       for (let d = 0; d < numRowDimCols; d++) {
         if (d < groupedRow.key.length) {
-          row.push(groupedRow.key[d]);
+          row.push(cell(groupedRow.key[d], "subtotal"));
         } else if (d === groupedRow.key.length) {
-          row.push("Subtotal");
+          row.push(cell("Subtotal", "subtotal"));
         } else {
-          row.push("");
+          row.push(cell("", "subtotal"));
         }
       }
       for (const colKey of colKeys) {
@@ -257,29 +427,32 @@ export function buildExportGrid(
             valField,
           );
           const rawValue = agg.value();
+          const fmt = formatExportTotalValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            mode,
+            null,
+            agg,
+            {
+              row: pivotData
+                .getSubtotalAggregator(groupedRow.key, [], valField)
+                .value(),
+              col: pivotData.getColTotal(colKey, valField).value(),
+            },
+          );
           row.push(
-            formatExportTotalValue(
-              rawValue,
-              valField,
-              config,
-              pivotData,
-              mode,
-              null,
-              agg,
-              {
-                row: pivotData
-                  .getSubtotalAggregator(groupedRow.key, [], valField)
-                  .value(),
-                col: pivotData.getColTotal(colKey, valField).value(),
-              },
-            ),
+            cell(fmt.display, "subtotal", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
           );
         }
       }
       if (includeRowTotals) {
         for (const valField of values) {
           if (!showTotalForMeasure(config, valField, "row")) {
-            row.push("");
+            row.push(cell("", "subtotal"));
           } else {
             const agg = pivotData.getSubtotalAggregator(
               groupedRow.key,
@@ -287,60 +460,68 @@ export function buildExportGrid(
               valField,
             );
             const rawValue = agg.value();
+            const fmt = formatExportTotalValue(
+              rawValue,
+              valField,
+              config,
+              pivotData,
+              mode,
+              "row",
+              agg,
+            );
             row.push(
-              formatExportTotalValue(
-                rawValue,
-                valField,
-                config,
-                pivotData,
-                mode,
-                "row",
-                agg,
-              ),
+              cell(fmt.display, "subtotal", fmt.raw, {
+                numberFormat: fmt.numberFormat,
+              }),
             );
           }
         }
       }
     } else {
-      // Data row
       const rowKey = groupedRow.key;
       for (let d = 0; d < numRowDimCols; d++) {
-        row.push(rowKey[d] ?? "");
+        row.push(cell(rowKey[d] ?? "", "data"));
       }
       for (const colKey of colKeys) {
         for (const valField of values) {
           const agg = pivotData.getAggregator(rowKey, colKey, valField);
           const rawValue = agg.value();
+          const fmt = formatExportValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            rowKey,
+            colKey,
+            mode,
+          );
           row.push(
-            formatExportValue(
-              rawValue,
-              valField,
-              config,
-              pivotData,
-              rowKey,
-              colKey,
-              mode,
-            ),
+            cell(fmt.display, "data", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
           );
         }
       }
       if (includeRowTotals) {
         for (const valField of values) {
           if (!showTotalForMeasure(config, valField, "row")) {
-            row.push("");
+            row.push(cell("", "data"));
           } else {
             const agg = pivotData.getRowTotal(rowKey, valField);
             const rawValue = agg.value();
+            const fmt = formatExportTotalValue(
+              rawValue,
+              valField,
+              config,
+              pivotData,
+              mode,
+              "row",
+              agg,
+            );
             row.push(
-              formatExportTotalValue(
-                rawValue,
-                valField,
-                config,
-                pivotData,
-                mode,
-                "row",
-                agg,
-              ),
+              cell(fmt.display, "row-total", fmt.raw, {
+                numberFormat: fmt.numberFormat,
+              }),
             );
           }
         }
@@ -351,28 +532,31 @@ export function buildExportGrid(
 
   // --- Column totals row ---
   if (includeColTotals) {
-    const row: string[] = [];
-    row.push("Total");
+    const row: ExportCell[] = [];
+    row.push(cell("Total", "col-total"));
     for (let d = 1; d < numRowDimCols; d++) {
-      row.push("");
+      row.push(cell("", "col-total"));
     }
     for (const colKey of colKeys) {
       for (const valField of values) {
         if (!showTotalForMeasure(config, valField, "col")) {
-          row.push("");
+          row.push(cell("", "col-total"));
         } else {
           const agg = pivotData.getColTotal(colKey, valField);
           const rawValue = agg.value();
+          const fmt = formatExportTotalValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            mode,
+            "col",
+            agg,
+          );
           row.push(
-            formatExportTotalValue(
-              rawValue,
-              valField,
-              config,
-              pivotData,
-              mode,
-              "col",
-              agg,
-            ),
+            cell(fmt.display, "col-total", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
           );
         }
       }
@@ -380,20 +564,23 @@ export function buildExportGrid(
     if (includeRowTotals) {
       for (const valField of values) {
         if (!showTotalForMeasure(config, valField, "grand")) {
-          row.push("");
+          row.push(cell("", "grand-total"));
         } else {
           const agg = pivotData.getGrandTotal(valField);
           const rawValue = agg.value();
+          const fmt = formatExportTotalValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            mode,
+            "grand",
+            agg,
+          );
           row.push(
-            formatExportTotalValue(
-              rawValue,
-              valField,
-              config,
-              pivotData,
-              mode,
-              "grand",
-              agg,
-            ),
+            cell(fmt.display, "grand-total", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
           );
         }
       }
@@ -401,7 +588,70 @@ export function buildExportGrid(
     grid.push(row);
   }
 
-  return grid;
+  // --- Row dimension merging (mergeDown) ---
+  if (!config.repeat_row_labels && rowDims.length > 0) {
+    const dataStartRow = headerRowCount;
+    for (let d = 0; d < rowDims.length; d++) {
+      let spanStart = dataStartRow;
+      for (let r = dataStartRow + 1; r <= grid.length; r++) {
+        const atEnd = r === grid.length;
+        const curVal = atEnd ? null : grid[r][d]?.display;
+        const startVal = grid[spanStart][d]?.display;
+        const curKind = atEnd ? null : grid[r][d]?.kind;
+        const startKind = grid[spanStart][d]?.kind;
+        if (
+          atEnd ||
+          curVal !== startVal ||
+          curKind !== startKind ||
+          curKind === "subtotal" ||
+          curKind === "col-total"
+        ) {
+          const spanLen = r - spanStart;
+          if (spanLen > 1 && startKind === "data") {
+            grid[spanStart][d].mergeDown = spanLen - 1;
+          }
+          spanStart = r;
+        }
+      }
+    }
+  }
+
+  // Build value field → column index mapping for conditional formatting
+  const valueFieldCols: ValueFieldColumns[] = values.map((field, vIdx) => {
+    const cols: number[] = [];
+    for (let ck = 0; ck < colKeys.length; ck++) {
+      cols.push(numRowDimCols + ck * colsPerKey + vIdx);
+    }
+    return { field, columns: cols };
+  });
+
+  const result: ExportGrid = {
+    cells: grid,
+    headerRowCount,
+    rowDimCount: numRowDimCols,
+    valueFieldColumns: valueFieldCols,
+  };
+
+  if (
+    config.conditional_formatting &&
+    config.conditional_formatting.length > 0
+  ) {
+    result.conditionalFormatting = config.conditional_formatting;
+  }
+
+  return result;
+}
+
+/**
+ * Backward-compatible wrapper: builds the IR then extracts display strings.
+ */
+export function buildExportGrid(
+  pivotData: PivotData,
+  config: PivotConfigV1,
+  mode: ExportContent,
+): string[][] {
+  const ir = buildExportIR(pivotData, config, mode);
+  return ir.cells.map((row) => row.map((c) => c.display));
 }
 
 // ---------------------------------------------------------------------------
@@ -483,10 +733,17 @@ export async function exportPivotData(
   options: ExportOptions,
   baseFilename?: string,
 ): Promise<boolean> {
-  const grid = buildExportGrid(pivotData, config, options.content);
   const now = new Date();
   const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const name = `${baseFilename || "pivot-table"}_${ts}`;
+
+  if (options.format === "xlsx") {
+    const ir = buildExportIR(pivotData, config, options.content);
+    const { exportExcel } = await import("./exportExcel");
+    return exportExcel(ir, name);
+  }
+
+  const grid = buildExportGrid(pivotData, config, options.content);
 
   switch (options.format) {
     case "csv": {

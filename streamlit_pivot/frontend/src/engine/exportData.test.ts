@@ -23,7 +23,15 @@ import {
   type AggregationType,
   type PivotConfigV1,
 } from "./types";
-import { buildExportGrid, gridToCSV, gridToTSV } from "./exportData";
+import {
+  buildExportGrid,
+  buildExportIR,
+  gridToCSV,
+  gridToTSV,
+  patternToExcelFormat,
+  type ExportGrid,
+  type CellKind,
+} from "./exportData";
 
 type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
   aggregation?: AggregationType | AggregationConfig;
@@ -500,5 +508,369 @@ describe("gridToTSV", () => {
   it("escapes tabs in fields", () => {
     const grid = [["hello\tworld", "ok"]];
     expect(gridToTSV(grid)).toBe('"hello\tworld"\tok');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared IR (buildExportIR)
+// ---------------------------------------------------------------------------
+
+describe("buildExportIR", () => {
+  it("returns correct headerRowCount and rowDimCount for basic pivot", () => {
+    const config = makeConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.headerRowCount).toBe(1);
+    expect(ir.rowDimCount).toBe(1);
+  });
+
+  it("returns correct headerRowCount with multiple column dims", () => {
+    const data: DataRecord[] = [
+      { a: "x", b: "p", c: "1", val: 10 },
+      { a: "x", b: "q", c: "2", val: 20 },
+    ];
+    const config = makeConfig({
+      rows: ["a"],
+      columns: ["b", "c"],
+      values: ["val"],
+    });
+    const pd = new PivotData(data, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.headerRowCount).toBe(2);
+    expect(ir.rowDimCount).toBe(1);
+  });
+
+  it("returns correct headerRowCount with no columns and single value", () => {
+    const config = makeConfig({
+      columns: [],
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.headerRowCount).toBe(1);
+    expect(ir.rowDimCount).toBe(1);
+  });
+
+  it("tags header cells with kind='header'", () => {
+    const config = makeConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    for (const c of ir.cells[0]) {
+      expect(c.kind).toBe("header");
+    }
+  });
+
+  it("tags data cells correctly", () => {
+    const config = makeConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.cells[1][0].kind).toBe("data");
+    expect(ir.cells[1][1].kind).toBe("data");
+  });
+
+  it("tags column total row cells as col-total", () => {
+    const config = makeConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const lastRow = ir.cells[ir.cells.length - 1];
+    expect(lastRow[0].kind).toBe("col-total");
+    expect(lastRow[0].display).toBe("Total");
+  });
+
+  it("tags grand total cell as grand-total", () => {
+    const config = makeConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const lastRow = ir.cells[ir.cells.length - 1];
+    const lastCell = lastRow[lastRow.length - 1];
+    expect(lastCell.kind).toBe("grand-total");
+  });
+
+  it("tags row total cells as row-total", () => {
+    const config = makeConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const dataRow = ir.cells[1];
+    const lastCell = dataRow[dataRow.length - 1];
+    expect(lastCell.kind).toBe("row-total");
+  });
+
+  it("tags subtotal rows correctly", () => {
+    const data: DataRecord[] = [
+      { a: "X", b: "1", val: 10 },
+      { a: "X", b: "2", val: 20 },
+      { a: "Y", b: "3", val: 30 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b"],
+      columns: [],
+      values: ["val"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(data, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const subtotalRows = ir.cells.filter((row) =>
+      row.some((c) => c.kind === "subtotal"),
+    );
+    expect(subtotalRows.length).toBeGreaterThan(0);
+    for (const row of subtotalRows) {
+      for (const c of row) {
+        expect(c.kind).toBe("subtotal");
+      }
+    }
+  });
+
+  it("provides raw numeric values on data cells", () => {
+    const config = makeConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const euRow = ir.cells[1];
+    expect(euRow[1].raw).toBe(200);
+    expect(euRow[2].raw).toBe(250);
+  });
+
+  it("provides raw numeric values on formatted cells", () => {
+    const config = makeConfig({ number_format: { revenue: "$,.0f" } });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "formatted");
+
+    const euRow = ir.cells[1];
+    expect(euRow[1].raw).toBe(200);
+    expect(euRow[1].display).toMatch(/\$200/);
+  });
+
+  it("populates numberFormat from config.number_format", () => {
+    const config = makeConfig({ number_format: { revenue: "$,.2f" } });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "formatted");
+
+    const euRow = ir.cells[1];
+    expect(euRow[1].numberFormat).toBe("$#,##0.00");
+  });
+
+  it("populates numberFormat for show_values_as percentages", () => {
+    const config = makeConfig({
+      show_values_as: { revenue: "pct_of_total" },
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "formatted");
+
+    const euRow = ir.cells[1];
+    expect(euRow[1].numberFormat).toBe("0.0%");
+  });
+
+  it("sets mergeRight on multi-value column headers", () => {
+    const config = makeConfig({ values: ["revenue", "profit"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const headerRow = ir.cells[0];
+    const firstDataHeader = headerRow[1];
+    expect(firstDataHeader.mergeRight).toBe(1);
+  });
+
+  it("sets mergeDown for row dimension labels when repeat_row_labels is false", () => {
+    const data: DataRecord[] = [
+      { a: "X", b: "1", val: 10 },
+      { a: "X", b: "2", val: 20 },
+      { a: "Y", b: "3", val: 30 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b"],
+      columns: [],
+      values: ["val"],
+      repeat_row_labels: false,
+    });
+    const pd = new PivotData(data, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const xRow = ir.cells.find(
+      (row) => row[0].display === "X" && row[0].kind === "data",
+    );
+    expect(xRow).toBeDefined();
+    expect(xRow![0].mergeDown).toBe(1);
+  });
+
+  it("does not set mergeDown when repeat_row_labels is true", () => {
+    const data: DataRecord[] = [
+      { a: "X", b: "1", val: 10 },
+      { a: "X", b: "2", val: 20 },
+      { a: "Y", b: "3", val: 30 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b"],
+      columns: [],
+      values: ["val"],
+      repeat_row_labels: true,
+    });
+    const pd = new PivotData(data, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    for (const row of ir.cells) {
+      for (const c of row) {
+        expect(c.mergeDown).toBeUndefined();
+      }
+    }
+  });
+
+  it("IR display values match buildExportGrid output", () => {
+    const config = makeConfig({ number_format: { revenue: "$,.0f" } });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const stringGrid = buildExportGrid(pd, config, "formatted");
+    const ir = buildExportIR(pd, config, "formatted");
+
+    for (let r = 0; r < stringGrid.length; r++) {
+      for (let c = 0; c < stringGrid[r].length; c++) {
+        expect(ir.cells[r][c].display).toBe(stringGrid[r][c]);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildExportIR: valueFieldColumns and conditionalFormatting
+// ---------------------------------------------------------------------------
+
+describe("buildExportIR valueFieldColumns", () => {
+  it("maps single value field to correct column indices", () => {
+    const config = makeConfig({ values: ["revenue"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.valueFieldColumns).toBeDefined();
+    expect(ir.valueFieldColumns!.length).toBe(1);
+    expect(ir.valueFieldColumns![0].field).toBe("revenue");
+    for (const col of ir.valueFieldColumns![0].columns) {
+      expect(col).toBeGreaterThanOrEqual(ir.rowDimCount);
+    }
+  });
+
+  it("maps multiple value fields with correct per-field indices", () => {
+    const config = makeConfig({ values: ["revenue", "profit"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.valueFieldColumns!.length).toBe(2);
+    expect(ir.valueFieldColumns![0].field).toBe("revenue");
+    expect(ir.valueFieldColumns![1].field).toBe("profit");
+
+    const revCols = ir.valueFieldColumns![0].columns;
+    const profCols = ir.valueFieldColumns![1].columns;
+    expect(revCols.length).toBe(profCols.length);
+    for (let i = 0; i < revCols.length; i++) {
+      expect(profCols[i]).toBe(revCols[i] + 1);
+    }
+  });
+
+  it("handles no column dimensions (single column group)", () => {
+    const config = makeConfig({ columns: [], values: ["revenue"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.valueFieldColumns!.length).toBe(1);
+    expect(ir.valueFieldColumns![0].columns).toEqual([ir.rowDimCount]);
+  });
+
+  it("column indices don't overlap between different value fields", () => {
+    const config = makeConfig({ values: ["revenue", "profit"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    const allCols = ir.valueFieldColumns!.flatMap((vf) => vf.columns);
+    const unique = new Set(allCols);
+    expect(unique.size).toBe(allCols.length);
+  });
+
+  it("column count matches number of column keys (data columns only)", () => {
+    const config = makeConfig({ values: ["revenue"], show_totals: true });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    // 2 year columns from SAMPLE_DATA; total columns are separate
+    const cols = ir.valueFieldColumns![0].columns;
+    expect(cols.length).toBe(2);
+    expect(cols[0]).toBe(ir.rowDimCount);
+    expect(cols[1]).toBe(ir.rowDimCount + 1);
+  });
+});
+
+describe("buildExportIR conditionalFormatting passthrough", () => {
+  it("passes conditional_formatting from config to IR", () => {
+    const config = makeConfig({ values: ["revenue"] });
+    (config as unknown as Record<string, unknown>).conditional_formatting = [
+      {
+        type: "data_bars",
+        apply_to: ["revenue"],
+        color: "#123",
+        fill: "solid",
+      },
+    ];
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.conditionalFormatting).toBeDefined();
+    expect(ir.conditionalFormatting!.length).toBe(1);
+    expect(ir.conditionalFormatting![0].type).toBe("data_bars");
+  });
+
+  it("does not set conditionalFormatting when config has none", () => {
+    const config = makeConfig({ values: ["revenue"] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.conditionalFormatting).toBeUndefined();
+  });
+
+  it("does not set conditionalFormatting when config has empty array", () => {
+    const config = makeConfig({ values: ["revenue"] });
+    (config as unknown as Record<string, unknown>).conditional_formatting = [];
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.conditionalFormatting).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// patternToExcelFormat
+// ---------------------------------------------------------------------------
+
+describe("patternToExcelFormat", () => {
+  it("converts grouped currency", () => {
+    expect(patternToExcelFormat("$,.0f")).toBe("$#,##0");
+    expect(patternToExcelFormat("$,.2f")).toBe("$#,##0.00");
+  });
+
+  it("converts grouped decimal", () => {
+    expect(patternToExcelFormat(",.2f")).toBe("#,##0.00");
+    expect(patternToExcelFormat(",.0f")).toBe("#,##0");
+  });
+
+  it("converts percent", () => {
+    expect(patternToExcelFormat(".1%")).toBe("0.0%");
+    expect(patternToExcelFormat(".2%")).toBe("0.00%");
+    expect(patternToExcelFormat(".0%")).toBe("0%");
+  });
+
+  it("converts euro currency", () => {
+    expect(patternToExcelFormat("€,.2f")).toBe("€#,##0.00");
+  });
+
+  it("converts pound currency", () => {
+    expect(patternToExcelFormat("£,.0f")).toBe("£#,##0");
+  });
+
+  it("returns undefined for unrecognized patterns", () => {
+    expect(patternToExcelFormat("garbage")).toBeUndefined();
+    expect(patternToExcelFormat("")).toBeUndefined();
   });
 });

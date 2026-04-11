@@ -102,7 +102,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config interactively, including toolbar and header-menu actions. |
 | `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
 | `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, viewer-safe actions like data export and group expand/collapse remain available, and header-menu sorting/filtering/`Show Values As` plus drill-down still work. |
-| `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
+| `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files (.xlsx, .csv, .tsv). Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
 > **Frontend-only interactions:** Column resize (drag header edges) and fullscreen mode (toolbar expand icon) are available automatically when `interactive=True`. No additional Python parameters are needed.
 
@@ -431,11 +431,13 @@ Hover over a parent column header to reveal the collapse toggle.
 
 ### Data Export
 
-Export the pivot table as CSV, TSV, or copy to clipboard. Available via the toolbar utility menu (download icon) whenever the interactive toolbar is shown, including locked viewer mode.
+Export the pivot table as Excel, CSV, TSV, or copy to clipboard. Available via the toolbar utility menu (download icon) whenever the interactive toolbar is shown, including locked viewer mode.
 
-- **Format**: CSV, TSV, or Clipboard (tab-separated for pasting into spreadsheets)
+- **Format**: Excel (.xlsx), CSV, TSV, or Clipboard (tab-separated for pasting into spreadsheets)
 - **Content**: Formatted (display values with currency, percentages, etc.) or Raw (unformatted numbers)
-- **Filename**: Customizable via `export_filename`. The date (`YYYY-MM-DD`) and file extension are appended automatically. Defaults to `"pivot-table"` (e.g. `pivot-table_2026-03-09.csv`).
+- **Filename**: Customizable via `export_filename`. The date (`YYYY-MM-DD`) and file extension are appended automatically. Defaults to `"pivot-table"` (e.g. `pivot-table_2026-03-09.xlsx`).
+
+Excel export produces a professionally styled workbook with merged column headers, bold totals/subtotals, number formatting, banded rows, frozen panes (headers stay visible when scrolling), and row dimension merging that matches the rendered table layout. Sort order, active filters, and show-values-as percentages are all preserved.
 
 Export always outputs the full expanded table regardless of any collapsed row/column groups.
 
@@ -513,7 +515,7 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Swap** | Transposes row and column dimensions |
 | **Copy Config** | Copies the current config as JSON to clipboard |
 | **Import Config** | Paste a JSON config to apply |
-| **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
+| **Export Data** | Open the export popover (Excel / CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
 | **Fullscreen** (expand icon) | Toggles fullscreen mode — the table fills the entire viewport. Press Escape or click the collapse icon to exit. |
 | **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
 

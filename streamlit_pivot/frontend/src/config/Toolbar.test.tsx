@@ -1276,7 +1276,7 @@ describe("Toolbar - Export Data Controls", () => {
     expect(screen.getByTestId("toolbar-export-data-panel")).toBeInTheDocument();
   });
 
-  it("renders format and content toggle buttons", () => {
+  it("renders format and content toggle buttons including Excel", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -1287,11 +1287,31 @@ describe("Toolbar - Export Data Controls", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-export-data"));
+    expect(screen.getByTestId("export-format-xlsx")).toBeInTheDocument();
     expect(screen.getByTestId("export-format-csv")).toBeInTheDocument();
     expect(screen.getByTestId("export-format-tsv")).toBeInTheDocument();
     expect(screen.getByTestId("export-format-clipboard")).toBeInTheDocument();
     expect(screen.getByTestId("export-content-formatted")).toBeInTheDocument();
     expect(screen.getByTestId("export-content-raw")).toBeInTheDocument();
+  });
+
+  it("defaults to Excel format with Export Excel label", () => {
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        pivotData={makePivotData()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-export-data"));
+    expect(screen.getByTestId("toolbar-export-data-action")).toHaveTextContent(
+      "Export Excel",
+    );
+    expect(
+      screen.getByTestId("export-format-xlsx").getAttribute("aria-checked"),
+    ).toBe("true");
   });
 
   it("switches format selection on toggle click", () => {
