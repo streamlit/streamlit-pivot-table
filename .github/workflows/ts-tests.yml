@@ -47,10 +47,29 @@ jobs:
         run: |
           cd streamlit_pivot/frontend
           npm test -- --coverage
+
+      - name: Restore TS benchmark baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: streamlit_pivot/frontend/bench-baseline.json
+          key: perf-baseline-ts-v2-${{ runner.os }}
+
       - name: Run frontend bench regression check
         run: |
           cd streamlit_pivot/frontend
           npm run bench:check
+
+      - name: Save TS benchmark baseline
+        if: github.ref == 'refs/heads/main' && success()
+        run: cp streamlit_pivot/frontend/bench-results.json streamlit_pivot/frontend/bench-baseline.json
+
+      - name: Cache TS benchmark baseline
+        if: github.ref == 'refs/heads/main' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: streamlit_pivot/frontend/bench-baseline.json
+          key: perf-baseline-ts-v2-${{ runner.os }}
+
       - name: Audit frontend licenses
         run: python scripts/audit_frontend_licenses.py
       - name: Validate NOTICES

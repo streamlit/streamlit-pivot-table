@@ -27,7 +27,7 @@
  *   npm run bench:save-baseline         # save current as baseline
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, appendFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +36,9 @@ const root = resolve(__dirname, "..");
 
 const REGRESSION_THRESHOLD = 0.20; // 20%
 
-const baselinePath = resolve(root, "bench-baseline.json");
+const baselinePath = process.env.BENCH_BASELINE_PATH
+  ? resolve(process.env.BENCH_BASELINE_PATH)
+  : resolve(root, "bench-baseline.json");
 const resultsPath = resolve(root, "bench-results.json");
 
 if (!existsSync(baselinePath)) {
@@ -83,6 +85,7 @@ if (baseMap.size === 0) {
 
 let failures = 0;
 let checked = 0;
+const rows = [];
 
 for (const [name, baselineMedian] of baseMap) {
   const currentMedian = resultMap.get(name);
@@ -106,12 +109,27 @@ for (const [name, baselineMedian] of baseMap) {
     `  ${symbol} ${name}: ${baselineMedian.toFixed(2)}ms → ${currentMedian.toFixed(2)}ms (${pctChange > 0 ? "+" : ""}${pctChange}%) [${status}]`,
   );
 
+  rows.push({ name, baselineMedian, currentMedian, pctChange, status, symbol });
+
   if (status === "FAIL") {
     failures++;
   }
 }
 
 console.log(`\nChecked ${checked} benchmarks, ${failures} regression(s).`);
+
+const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+if (summaryPath && rows.length > 0) {
+  const header = `### Frontend Benchmark Results\n\n` +
+    `| Benchmark | Baseline | Current | Change | Status |\n` +
+    `|-----------|----------|---------|--------|--------|\n`;
+  const body = rows.map((r) => {
+    const pct = `${r.pctChange > 0 ? "+" : ""}${r.pctChange}%`;
+    return `| ${r.name} | ${r.baselineMedian.toFixed(2)} ms | ${r.currentMedian.toFixed(2)} ms | ${pct} | ${r.symbol} ${r.status} |`;
+  }).join("\n");
+  const footer = `\n\n> Threshold: ${REGRESSION_THRESHOLD * 100}% · ${checked} benchmarks checked · ${failures} regression(s)\n`;
+  appendFileSync(summaryPath, header + body + footer);
+}
 
 if (failures > 0) {
   console.error(

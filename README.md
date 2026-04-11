@@ -114,6 +114,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone. |
 | `sorters` | `dict[str, list[str]] \| None` | `None` | Custom sort orderings per dimension. Maps column name to ordered list of values. |
 | `menu_limit` | `int \| None` | `None` | Max items in the header-menu filter checklist. Defaults to 50. |
+| `execution_mode` | `str` | `"auto"` | Performance execution mode. See [Execution Mode](#execution-mode). |
 
 ---
 
@@ -455,6 +456,35 @@ result = st_pivot_table(
 - The panel displays up to 500 matching records.
 - Close with the **&times;** button or by pressing **Escape**.
 - Set `enable_drilldown=False` to disable (the `on_cell_click` callback still fires).
+
+### Execution Mode
+
+Controls how pivot aggregation is performed for large datasets. By default (`"auto"`), the component computes everything client-side unless the dataset is large enough to benefit from server-side pre-aggregation.
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| Auto | `"auto"` | Client-side unless the dataset exceeds row/cardinality thresholds (default) |
+| Client Only | `"client_only"` | Always send raw rows to the frontend |
+| Threshold Hybrid | `"threshold_hybrid"` | Force server-side pre-aggregation when the config is compatible |
+
+```python
+st_pivot_table(
+    df,
+    key="large_dataset_example",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue"],
+    execution_mode="auto",
+)
+```
+
+**Auto thresholds:** In `"auto"` mode, server-side pre-aggregation activates when the dataset has at least 100K rows (high-cardinality layouts) or 250K rows (moderate layouts) and the estimated pivot shape exceeds the client-side comfort budget.
+
+**Supported aggregations:** `sum`, `count`, `min`, `max`, and `avg`. Configs using other aggregations (e.g. `median`, `count_distinct`) fall back to client-side computation automatically.
+
+**Limitations:**
+- Drill-down is disabled in hybrid mode because values are pre-aggregated on the server rather than built from raw rows.
+- Synthetic measures are not supported in hybrid mode (falls back to client-side).
 
 ### Locked Mode
 

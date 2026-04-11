@@ -30,41 +30,64 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import time
 from pathlib import Path
 
+import random
+
 import pandas as pd
 
-GOLDEN_DIR = Path(__file__).parent / "golden_data"
-BASELINE_PATH = Path(__file__).parent / "perf_baseline.json"
+DEFAULT_BASELINE_PATH = Path(__file__).parent / "perf_baseline.json"
 
-DATASETS = {
-    "small": GOLDEN_DIR / "small.csv",
-    "medium": GOLDEN_DIR / "medium.csv",
-    "large": GOLDEN_DIR / "large.csv",
-}
-
-PIVOT_CONFIGS = {
+BENCHMARK_CONFIGS = {
     "small": {
+        "n_rows": 1_000,
         "rows": ["Region"],
         "columns": ["Year"],
         "values": ["Revenue", "Profit"],
         "agg": "sum",
     },
     "medium": {
+        "n_rows": 50_000,
         "rows": ["Region", "Country"],
         "columns": ["Year", "Quarter"],
         "values": ["Revenue", "Profit", "Units"],
         "agg": "sum",
     },
     "large": {
+        "n_rows": 200_000,
         "rows": ["Region", "Country", "City"],
         "columns": ["Year", "Quarter"],
         "values": ["Revenue", "Profit"],
         "agg": "sum",
     },
 }
+
+
+def _generate_dataframe(config: dict) -> pd.DataFrame:
+    """Generate a synthetic DataFrame at the specified size."""
+    n = config["n_rows"]
+    rng = random.Random(42)
+    data: dict = {}
+
+    dim_pools = {
+        "Region": [f"Region_{i}" for i in range(10)],
+        "Country": [f"Country_{i}" for i in range(50)],
+        "City": [f"City_{i}" for i in range(200)],
+        "Year": [str(y) for y in range(2000, 2020)],
+        "Quarter": ["Q1", "Q2", "Q3", "Q4"],
+    }
+    for col in config["rows"] + config["columns"]:
+        pool = dim_pools[col]
+        data[col] = [rng.choice(pool) for _ in range(n)]
+
+    for val_col in config["values"]:
+        data[val_col] = [round(rng.uniform(0, 10_000), 2) for _ in range(n)]
+
+    return pd.DataFrame(data)
+
 
 N_RUNS = 5
 REGRESSION_THRESHOLD = 0.20  # 20%
@@ -88,12 +111,8 @@ def run_pivot(df: pd.DataFrame, config: dict) -> float:
 
 def benchmark_dataset(name: str) -> dict:
     """Run N_RUNS benchmarks and return median timing + metadata."""
-    path = DATASETS[name]
-    if not path.exists():
-        return {"skipped": True, "reason": f"{path} not found"}
-
-    df = pd.read_csv(path)
-    config = PIVOT_CONFIGS[name]
+    config = BENCHMARK_CONFIGS[name]
+    df = _generate_dataframe(config)
 
     timings = []
     for _ in range(N_RUNS):
@@ -113,19 +132,20 @@ def benchmark_dataset(name: str) -> dict:
     }
 
 
-def load_baseline() -> dict | None:
-    if BASELINE_PATH.exists():
-        return json.loads(BASELINE_PATH.read_text())
+def load_baseline(path: Path) -> dict | None:
+    if path.exists():
+        return json.loads(path.read_text())
     return None
 
 
-def save_baseline(results: dict) -> None:
-    BASELINE_PATH.write_text(json.dumps(results, indent=2) + "\n")
+def save_baseline(results: dict, path: Path) -> None:
+    path.write_text(json.dumps(results, indent=2) + "\n")
 
 
-def check_regression(results: dict, baseline: dict) -> list[str]:
-    """Compare results against baseline, return list of failures."""
+def check_regression(results: dict, baseline: dict) -> tuple[list[str], list[dict]]:
+    """Compare results against baseline, return (failures, row_details)."""
     failures = []
+    rows = []
     for name in results:
         if "skipped" in results[name]:
             continue
@@ -136,14 +156,28 @@ def check_regression(results: dict, baseline: dict) -> list[str]:
         base = baseline[name]["median_ms"]
 
         if base > 0:
-            regression_pct = (current - base) / base
-            if regression_pct > REGRESSION_THRESHOLD:
+            pct = (current - base) / base
+            if pct > REGRESSION_THRESHOLD:
+                status = "FAIL"
                 failures.append(
                     f"{name}: {current:.1f}ms vs baseline {base:.1f}ms "
-                    f"({regression_pct:+.0%} regression, threshold {REGRESSION_THRESHOLD:.0%})"
+                    f"({pct:+.0%} regression, threshold {REGRESSION_THRESHOLD:.0%})"
                 )
+            elif pct < -REGRESSION_THRESHOLD:
+                status = "FASTER"
+            else:
+                status = "OK"
+            rows.append(
+                {
+                    "name": name,
+                    "base": base,
+                    "current": current,
+                    "pct": pct,
+                    "status": status,
+                }
+            )
 
-    return failures
+    return failures, rows
 
 
 def main():
@@ -153,13 +187,20 @@ def main():
         action="store_true",
         help="Save current results as the new baseline",
     )
+    parser.add_argument(
+        "--baseline-path",
+        type=Path,
+        default=DEFAULT_BASELINE_PATH,
+        help="Path to the baseline JSON file (default: tests/perf_baseline.json)",
+    )
     args = parser.parse_args()
+    baseline_path: Path = args.baseline_path
 
     print("Running performance benchmarks...")
     print(f"  N_RUNS={N_RUNS}, REGRESSION_THRESHOLD={REGRESSION_THRESHOLD:.0%}\n")
 
     results = {}
-    for name in DATASETS:
+    for name in BENCHMARK_CONFIGS:
         print(f"  {name}...", end=" ", flush=True)
         result = benchmark_dataset(name)
         results[name] = result
@@ -171,18 +212,28 @@ def main():
             )
 
     if args.update_baseline:
-        save_baseline(results)
-        print(f"\nBaseline updated: {BASELINE_PATH}")
+        save_baseline(results, baseline_path)
+        print(f"\nBaseline updated: {baseline_path}")
         return
 
-    baseline = load_baseline()
+    baseline = load_baseline(baseline_path)
     if baseline is None:
         print("\nNo baseline found. Run with --update-baseline to create one.")
-        save_baseline(results)
-        print(f"Created initial baseline: {BASELINE_PATH}")
+        save_baseline(results, baseline_path)
+        print(f"Created initial baseline: {baseline_path}")
         return
 
-    failures = check_regression(results, baseline)
+    failures, rows = check_regression(results, baseline)
+
+    for r in rows:
+        symbol = {"FAIL": "✗", "FASTER": "↑", "OK": "✓"}[r["status"]]
+        pct_str = f"{r['pct']:+.1%}"
+        print(
+            f"  {symbol} {r['name']}: {r['base']:.1f}ms → {r['current']:.1f}ms ({pct_str}) [{r['status']}]"
+        )
+
+    _write_step_summary(rows, failures)
+
     if failures:
         print(f"\nREGRESSION DETECTED ({len(failures)} failures):")
         for f in failures:
@@ -190,6 +241,29 @@ def main():
         raise SystemExit(1)
     else:
         print("\nAll benchmarks within threshold. No regressions detected.")
+
+
+def _write_step_summary(rows: list[dict], failures: list[str]) -> None:
+    """Append a markdown table to $GITHUB_STEP_SUMMARY when running in CI."""
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path or not rows:
+        return
+    lines = [
+        "### Python Benchmark Results\n",
+        "| Dataset | Baseline | Current | Change | Status |",
+        "|---------|----------|---------|--------|--------|",
+    ]
+    symbols = {"FAIL": "✗", "FASTER": "↑", "OK": "✓"}
+    for r in rows:
+        pct = f"{r['pct']:+.1%}"
+        lines.append(
+            f"| {r['name']} | {r['base']:.2f} ms | {r['current']:.2f} ms | {pct} | {symbols[r['status']]} {r['status']} |"
+        )
+    lines.append(
+        f"\n> Threshold: {REGRESSION_THRESHOLD:.0%} · {len(rows)} benchmarks checked · {len(failures)} regression(s)\n"
+    )
+    with open(summary_path, "a") as f:
+        f.write("\n".join(lines))
 
 
 if __name__ == "__main__":

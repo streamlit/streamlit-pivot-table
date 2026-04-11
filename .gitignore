@@ -55,3 +55,8 @@ coverage/
 # uv lockfiles (regenerated locally)
 uv.lock
 htmlcov/
+
+# Benchmark baselines & results (environment-specific, managed by CI cache)
+bench-baseline.json
+bench-results.json
+perf_baseline.json

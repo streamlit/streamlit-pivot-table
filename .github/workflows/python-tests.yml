@@ -48,5 +48,22 @@ jobs:
         run: |
           python -m pytest tests/ --cov=streamlit_pivot --cov-report=term-missing --cov-report=html
 
+      - name: Restore Python benchmark baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: tests/perf_baseline.json
+          key: perf-baseline-python-v2-${{ runner.os }}
+
       - name: Run Python performance harness
-        run: python tests/perf_benchmark.py
+        run: python tests/perf_benchmark.py --baseline-path tests/perf_baseline.json
+
+      - name: Save Python benchmark baseline
+        if: github.ref == 'refs/heads/main' && success()
+        run: python tests/perf_benchmark.py --update-baseline --baseline-path tests/perf_baseline.json
+
+      - name: Cache Python benchmark baseline
+        if: github.ref == 'refs/heads/main' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: tests/perf_baseline.json
+          key: perf-baseline-python-v2-${{ runner.os }}

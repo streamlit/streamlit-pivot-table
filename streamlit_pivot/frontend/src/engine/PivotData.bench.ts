@@ -105,10 +105,10 @@ describe("PivotData computation benchmarks", () => {
     new PivotData(multiVal.records, multiVal.config);
   });
 
-  // Stress: 200,000 rows, 500 regions, 20 years -> 10,000 unique cells
-  const stress = generateRecords(200000, 500, 20);
-  bench("stress dataset (200K rows, 500x20 grid)", () => {
-    new PivotData(stress.records, stress.config);
+  // Large: 200,000 rows, 500 regions, 20 years -> 10,000 unique cells
+  const large = generateRecords(200000, 500, 20);
+  bench("large dataset (200K rows, 500x20 grid)", () => {
+    new PivotData(large.records, large.config);
   });
 
   // Wide columns: 50,000 rows, 20 regions, 1,000 years -> 20,000 unique cells
