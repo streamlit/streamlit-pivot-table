@@ -31,6 +31,9 @@ export interface VirtualScrollProps {
   totalColumns: number;
   rowHeight: number;
   columnWidth: number;
+  /** Per-column widths for variable-width mode. When provided, overrides
+   *  the uniform `columnWidth` for positioning calculations. */
+  columnWidths?: number[];
   containerHeight: number;
   overscanRows?: number;
   overscanColumns?: number;
@@ -48,11 +51,24 @@ export interface VirtualScrollProps {
  * Renders only the visible subset of the grid plus an overscan buffer.
  * Measures its own container width to determine the column viewport.
  */
+/** Binary search: find the first offset index where offsets[i] > target. */
+function upperBound(offsets: number[], target: number): number {
+  let lo = 0;
+  let hi = offsets.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (offsets[mid] <= target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 const VirtualScroll: FC<VirtualScrollProps> = ({
   totalRows,
   totalColumns,
   rowHeight,
   columnWidth,
+  columnWidths,
   containerHeight,
   overscanRows = 5,
   overscanColumns = 3,
@@ -96,7 +112,20 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
 
   const bodyHeight = containerHeight - headerHeight;
   const totalContentHeight = totalRows * rowHeight;
-  const totalContentWidth = totalColumns * columnWidth;
+
+  const colOffsets = useMemo(() => {
+    if (!columnWidths || columnWidths.length === 0) return null;
+    const offsets = new Array(columnWidths.length + 1);
+    offsets[0] = 0;
+    for (let i = 0; i < columnWidths.length; i++) {
+      offsets[i + 1] = offsets[i] + columnWidths[i];
+    }
+    return offsets as number[];
+  }, [columnWidths]);
+
+  const totalContentWidth = colOffsets
+    ? (colOffsets[totalColumns] ?? 0)
+    : totalColumns * columnWidth;
   const viewportWidth = measuredWidth || totalContentWidth;
 
   const effectiveOverscanColumns = useMemo(
@@ -115,6 +144,13 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   }, [scrollTop, rowHeight, bodyHeight, totalRows, overscanRows]);
 
   const { startCol, endCol } = useMemo(() => {
+    if (colOffsets) {
+      const rawStart = Math.max(0, upperBound(colOffsets, scrollLeft) - 1);
+      const start = Math.max(0, rawStart - effectiveOverscanColumns);
+      const rawEnd = upperBound(colOffsets, scrollLeft + viewportWidth);
+      const end = Math.min(totalColumns, rawEnd + effectiveOverscanColumns);
+      return { startCol: start, endCol: end };
+    }
     const start = Math.max(
       0,
       Math.floor(scrollLeft / columnWidth) - effectiveOverscanColumns,
@@ -128,6 +164,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   }, [
     scrollLeft,
     columnWidth,
+    colOffsets,
     viewportWidth,
     totalColumns,
     effectiveOverscanColumns,

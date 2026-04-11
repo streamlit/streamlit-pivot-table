@@ -75,6 +75,10 @@ export interface ToolbarProps {
   exportFilename?: string;
   /** Viewer-safe collapse updates, enabled whenever interactive is true. */
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
+  /** Whether the table is currently in fullscreen mode. */
+  isFullscreen?: boolean;
+  /** Toggle fullscreen mode on/off. */
+  onToggleFullscreen?: () => void;
 }
 
 function configsEqual(a: PivotConfigV1, b: PivotConfigV1): boolean {
@@ -148,6 +152,8 @@ const Toolbar: FC<ToolbarProps> = ({
   pivotData,
   exportFilename,
   onCollapseChange,
+  isFullscreen,
+  onToggleFullscreen,
 }): ReactElement => {
   const syncAggregation = useCallback(
     (values: string[], aggregation: AggregationConfig = config.aggregation) =>
@@ -498,6 +504,23 @@ const Toolbar: FC<ToolbarProps> = ({
             config={config}
             exportFilename={exportFilename}
           />
+        )}
+        {onToggleFullscreen && (
+          <span
+            className={styles.tooltipWrap}
+            data-tooltip={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+          >
+            <button
+              data-testid="toolbar-fullscreen"
+              data-toolbar-btn
+              tabIndex={-1}
+              className={`${styles.utilButton} ${styles.iconButton}`}
+              onClick={onToggleFullscreen}
+              aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            >
+              {isFullscreen ? <CollapseIcon /> : <ExpandIcon />}
+            </button>
+          </span>
         )}
         <SettingsPopover
           config={config}
@@ -1261,6 +1284,42 @@ const ResetIcon: FC = () => (
   >
     <polyline points="1 4 1 10 7 10" />
     <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+  </svg>
+);
+
+const ExpandIcon: FC = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" y1="3" x2="14" y2="10" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
+
+const CollapseIcon: FC = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="4 14 10 14 10 20" />
+    <polyline points="20 10 14 10 14 4" />
+    <line x1="14" y1="10" x2="21" y2="3" />
+    <line x1="3" y1="21" x2="10" y2="14" />
   </svg>
 );
 

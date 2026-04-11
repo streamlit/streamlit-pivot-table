@@ -1348,3 +1348,64 @@ describe("Toolbar - Export Data Controls", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("Toolbar - fullscreen toggle", () => {
+  it("renders fullscreen button when onToggleFullscreen is provided", () => {
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        isFullscreen={false}
+        onToggleFullscreen={vi.fn()}
+      />,
+    );
+    const btn = screen.getByTestId("toolbar-fullscreen");
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveAttribute("aria-label", "Enter fullscreen");
+  });
+
+  it("does not render fullscreen button when onToggleFullscreen is absent", () => {
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("toolbar-fullscreen")).not.toBeInTheDocument();
+  });
+
+  it("fires onToggleFullscreen callback when clicked", () => {
+    const handleToggle = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        isFullscreen={false}
+        onToggleFullscreen={handleToggle}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-fullscreen"));
+    expect(handleToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows exit label when isFullscreen is true", () => {
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        isFullscreen={true}
+        onToggleFullscreen={vi.fn()}
+      />,
+    );
+    const btn = screen.getByTestId("toolbar-fullscreen");
+    expect(btn).toHaveAttribute("aria-label", "Exit fullscreen");
+  });
+});

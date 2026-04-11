@@ -16,7 +16,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import TableRenderer, {
   computeRowHeaderSpans,
   computeColSlots,
@@ -1415,6 +1415,55 @@ describe("empty data cells non-interactive", () => {
     expect(nullSubtotal).toBeDefined();
     expect(nullSubtotal).not.toHaveAttribute("tabindex");
     expect(nullSubtotal).not.toHaveAttribute("role");
+  });
+});
+
+describe("Column resize handles", () => {
+  it("renders resize handles on deepest-level column headers", () => {
+    const pd = createPivotData();
+    render(<TableRenderer pivotData={pd} config={makeConfig()} />);
+
+    const handles = screen.getAllByTestId(/^resize-handle-\d+$/);
+    expect(handles.length).toBeGreaterThanOrEqual(1);
+    handles.forEach((h) => {
+      expect(h).toBeInTheDocument();
+      expect(h.tagName.toLowerCase()).toBe("div");
+    });
+  });
+
+  it("renders resize handles on last value label per slot when multi-value", () => {
+    const config = makeConfig({ values: ["revenue", "profit"] });
+    const pd = createPivotData(SAMPLE_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    const valHandles = screen.getAllByTestId(/^resize-handle-val-\d+$/);
+    expect(valHandles.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not render resize handles when no values are provided", () => {
+    const config = makeConfig({ values: ["revenue"] });
+    const pd = createPivotData(SAMPLE_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    const valHandles = screen.queryAllByTestId(/^resize-handle-val-\d+$/);
+    expect(valHandles.length).toBe(0);
+  });
+
+  it("applies min-width and max-width to resized column header", () => {
+    const pd = createPivotData();
+    render(<TableRenderer pivotData={pd} config={makeConfig()} />);
+
+    const handle = screen.getAllByTestId(/^resize-handle-\d+$/)[0];
+    act(() => {
+      fireEvent.mouseDown(handle, { clientX: 100 });
+      fireEvent.mouseMove(document, { clientX: 150 });
+      fireEvent.mouseUp(document);
+    });
+
+    const th = screen.getAllByTestId("pivot-header-cell")[0];
+    expect(th.style.minWidth).toBeTruthy();
+    expect(th.style.maxWidth).toBeTruthy();
+    expect(th.style.minWidth).toBe(th.style.maxWidth);
   });
 });
 

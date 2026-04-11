@@ -72,6 +72,7 @@ export interface VirtualizedTableRendererProps {
 const DEFAULT_ROW_HEIGHT = 36;
 const DEFAULT_COL_WIDTH = 120;
 const DEFAULT_HEADER_HEIGHT = 72;
+const MIN_COL_WIDTH = 40;
 
 const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   pivotData,
@@ -92,6 +93,54 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
 }): ReactElement => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [measuredHeight, setMeasuredHeight] = useState(containerHeight);
+
+  const [columnWidthMap, setColumnWidthMap] = useState<Map<number, number>>(
+    () => new Map(),
+  );
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeDragRef = useRef<{
+    slotIndex: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const handleResizeMouseDown = useCallback(
+    (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = (e.target as HTMLElement).closest("th");
+      const startWidth = el ? el.offsetWidth : columnWidth;
+      resizeDragRef.current = { slotIndex, startX: e.clientX, startWidth };
+      setIsResizing(true);
+
+      const onMouseMove = (ev: globalThis.MouseEvent) => {
+        const drag = resizeDragRef.current;
+        if (!drag) return;
+        ev.preventDefault();
+        const delta = ev.clientX - drag.startX;
+        const newWidth = Math.max(MIN_COL_WIDTH, drag.startWidth + delta);
+        const idx = drag.slotIndex;
+        setColumnWidthMap((prev) => {
+          const next = new Map(prev);
+          next.set(idx, newWidth);
+          return next;
+        });
+      };
+
+      const cleanup = () => {
+        resizeDragRef.current = null;
+        setIsResizing(false);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", cleanup);
+        window.removeEventListener("mouseleave", cleanup);
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", cleanup);
+      window.addEventListener("mouseleave", cleanup);
+    },
+    [columnWidth],
+  );
 
   useEffect(() => {
     if (!scrollable || !wrapperRef.current) {
@@ -353,6 +402,8 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         numColDims >= 2 && onCollapseChange ? handleToggleColGroup : undefined,
         pivotData,
         onCollapseChange,
+        handleResizeMouseDown,
+        columnWidthMap,
       );
     },
     [
@@ -367,6 +418,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       onCollapseChange,
       handleToggleColGroup,
       pivotData,
+      handleResizeMouseDown,
     ],
   );
 
@@ -399,57 +451,83 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     ? columnWidth * renderedValueFields.length
     : columnWidth;
 
-  return (
-    <div
-      ref={wrapperRef}
-      style={scrollable ? { flex: "1 1 0", minHeight: 0 } : undefined}
-    >
-      <VirtualScroll
-        totalRows={totalVirtualRows}
-        totalColumns={totalDataColumns}
-        rowHeight={rowHeight}
-        columnWidth={dataColWidth}
-        containerHeight={measuredHeight}
-        renderRow={renderRow}
-        renderHeader={renderHeader}
-        renderTotalsRow={renderTotals}
-        headerHeight={effectiveHeaderHeight}
-      />
+  const variableColumnWidths = useMemo(() => {
+    if (columnWidthMap.size === 0) return undefined;
+    return Array.from(
+      { length: totalDataColumns },
+      (_, i) => columnWidthMap.get(i) ?? dataColWidth,
+    );
+  }, [columnWidthMap, totalDataColumns, dataColWidth]);
 
-      {menuTarget && menuPosition && (
+  return (
+    <>
+      {isResizing && (
         <div
-          className={tableStyles.headerMenuOverlay}
-          style={{ top: menuPosition.top, left: menuPosition.left }}
-        >
-          <HeaderMenu
-            dimension={menuTarget.dimension}
-            axis={menuTarget.axis === "value" ? "col" : menuTarget.axis}
-            sortConfig={menuSortConfig}
-            onSortChange={handleMenuSortChange}
-            filter={config.filters?.[menuTarget.dimension]}
-            uniqueValues={menuUniqueValues}
-            onFilterChange={handleMenuFilterChange}
-            valueFields={renderedValueFields}
-            colKeys={
-              menuTarget.axis === "row" ? pivotData.getColKeys() : undefined
-            }
-            menuLimit={menuLimit}
-            showFilter={menuShowFilter}
-            showValuesAs={menuShowValuesAs}
-            onShowValuesAsChange={
-              menuTarget?.axis === "value" &&
-              isSyntheticMeasure(config, menuTarget.dimension)
-                ? undefined
-                : menuOnShowValuesAsChange
-            }
-            config={menuConfig}
-            onSubtotalToggle={menuOnSubtotalToggle}
-            onTotalToggle={menuOnTotalToggle}
-            onClose={handleCloseMenu}
-          />
-        </div>
+          data-testid="resize-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            cursor: "col-resize",
+            opacity: 0,
+          }}
+        />
       )}
-    </div>
+      <div
+        ref={wrapperRef}
+        style={{
+          ...(scrollable ? { flex: "1 1 0", minHeight: 0 } : undefined),
+          ...(isResizing ? { userSelect: "none" } : undefined),
+        }}
+      >
+        <VirtualScroll
+          totalRows={totalVirtualRows}
+          totalColumns={totalDataColumns}
+          rowHeight={rowHeight}
+          columnWidth={dataColWidth}
+          columnWidths={variableColumnWidths}
+          containerHeight={measuredHeight}
+          renderRow={renderRow}
+          renderHeader={renderHeader}
+          renderTotalsRow={renderTotals}
+          headerHeight={effectiveHeaderHeight}
+        />
+
+        {menuTarget && menuPosition && (
+          <div
+            className={tableStyles.headerMenuOverlay}
+            style={{ top: menuPosition.top, left: menuPosition.left }}
+          >
+            <HeaderMenu
+              dimension={menuTarget.dimension}
+              axis={menuTarget.axis === "value" ? "col" : menuTarget.axis}
+              sortConfig={menuSortConfig}
+              onSortChange={handleMenuSortChange}
+              filter={config.filters?.[menuTarget.dimension]}
+              uniqueValues={menuUniqueValues}
+              onFilterChange={handleMenuFilterChange}
+              valueFields={renderedValueFields}
+              colKeys={
+                menuTarget.axis === "row" ? pivotData.getColKeys() : undefined
+              }
+              menuLimit={menuLimit}
+              showFilter={menuShowFilter}
+              showValuesAs={menuShowValuesAs}
+              onShowValuesAsChange={
+                menuTarget?.axis === "value" &&
+                isSyntheticMeasure(config, menuTarget.dimension)
+                  ? undefined
+                  : menuOnShowValuesAsChange
+              }
+              config={menuConfig}
+              onSubtotalToggle={menuOnSubtotalToggle}
+              onTotalToggle={menuOnTotalToggle}
+              onClose={handleCloseMenu}
+            />
+          </div>
+        )}
+      </div>
+    </>
   );
 };
 

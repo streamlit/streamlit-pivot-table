@@ -183,3 +183,57 @@ describe("VirtualScroll - column windowing", () => {
     expect(headers.length).toBe(3);
   });
 });
+
+describe("VirtualScroll - variable column widths (prefix-sum)", () => {
+  it("uses columnWidths to calculate visible range", () => {
+    const { props, headerCalls } = makeProps(20, 120);
+    const columnWidths = Array.from({ length: 20 }, (_, i) =>
+      i < 5 ? 200 : 80,
+    );
+
+    render(<VirtualScroll {...props} columnWidths={columnWidths} />);
+
+    const lastCall = headerCalls[headerCalls.length - 1];
+    expect(lastCall[0]).toBe(0);
+    expect(lastCall[1]).toBeGreaterThan(0);
+    expect(lastCall[1]).toBeLessThanOrEqual(20);
+  });
+
+  it("adjusts visible range when scrolled with variable widths", () => {
+    const { props, headerCalls } = makeProps(50, 120);
+    const columnWidths = Array.from({ length: 50 }, () => 100);
+
+    render(<VirtualScroll {...props} columnWidths={columnWidths} />);
+    const scrollContainer = screen.getByTestId("virtual-scroll-container");
+
+    headerCalls.length = 0;
+
+    Object.defineProperty(scrollContainer, "scrollLeft", {
+      value: 2000,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(scrollContainer, "scrollTop", {
+      value: 0,
+      writable: true,
+      configurable: true,
+    });
+
+    act(() => {
+      fireEvent.scroll(scrollContainer);
+    });
+
+    const lastCall = headerCalls[headerCalls.length - 1];
+    expect(lastCall[0]).toBeGreaterThan(0);
+  });
+
+  it("falls back to uniform columnWidth when columnWidths is undefined", () => {
+    const { props, headerCalls } = makeProps(50, 120);
+
+    render(<VirtualScroll {...props} columnWidths={undefined} />);
+
+    const lastCall = headerCalls[headerCalls.length - 1];
+    expect(lastCall[0]).toBe(0);
+    expect(lastCall[1]).toBeGreaterThan(0);
+  });
+});

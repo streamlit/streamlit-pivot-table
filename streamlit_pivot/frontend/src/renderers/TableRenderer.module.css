@@ -462,3 +462,32 @@
   position: fixed;
   z-index: 30;
 }
+
+/* --- Column resize handle --- */
+
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -5px;
+  width: 11px;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 5;
+}
+
+.resizeHandle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 1.5px;
+  transition: background 0.15s;
+}
+
+.resizeHandle:hover::after {
+  background: color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+}

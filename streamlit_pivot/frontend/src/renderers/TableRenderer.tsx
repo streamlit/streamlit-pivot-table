@@ -22,6 +22,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   KeyboardEvent,
   MouseEvent,
 } from "react";
@@ -74,6 +75,7 @@ export interface ColSlot {
  * Used to compute `top` offsets for multi-row sticky headers.
  */
 export const HEADER_ROW_HEIGHT = 37;
+const MIN_COL_WIDTH = 40;
 
 /** Slugify a dimension name for use in data-testid attributes. */
 function slugify(name: string): string {
@@ -472,14 +474,29 @@ export function renderColumnHeaders(
   onToggleColGroup?: (groupKey: string) => void,
   pivotData?: PivotData,
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void,
+  onResizeMouseDown?: (
+    colSlotIndex: number,
+    e: React.MouseEvent<HTMLDivElement>,
+  ) => void,
+  columnWidthMap?: Map<number, number>,
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
     : colSlots;
+  const slotOffset = colRange?.[0] ?? 0;
   const rows: ReactElement[] = [];
   const numColLevels = Math.max(config.columns.length, 1);
   const hasMenu = !!onOpenMenu;
+
+  const elevateCell = (e: React.MouseEvent<HTMLDivElement>) => {
+    const th = (e.target as HTMLElement).closest("th");
+    if (th) th.style.zIndex = "10";
+  };
+  const resetCell = (e: React.MouseEvent<HTMLDivElement>) => {
+    const th = (e.target as HTMLElement).closest("th");
+    if (th) th.style.zIndex = "";
+  };
 
   const handleDimToggle = (axis: "row" | "col", level: number) => {
     if (!onCollapseChange || !pivotData) return;
@@ -623,12 +640,25 @@ export function renderColumnHeaders(
           const dimToggleEnabled = canToggleThisDim && !parentCollapsed;
           const isGroupingDimHeader =
             !!config.show_subtotals && config.rows.length >= 2 && !isInnermost;
+
+          const rowDimResizeIdx = -(dimIdx + 1);
+          const rowDimResizeWidth = columnWidthMap?.get(rowDimResizeIdx);
+          const rowDimCellStyle: React.CSSProperties | undefined =
+            rowDimResizeWidth != null
+              ? {
+                  ...stickyTop,
+                  width: rowDimResizeWidth,
+                  minWidth: rowDimResizeWidth,
+                  maxWidth: rowDimResizeWidth,
+                }
+              : stickyTop;
+
           cells.push(
             <th
               key={`row-dim-${dimIdx}`}
               className={`${styles.headerCell} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
               rowSpan={dimCellRowSpan}
-              style={stickyTop}
+              style={rowDimCellStyle}
               data-testid={
                 canToggleThisDim
                   ? `pivot-dim-toggle-row-${dimIdx}-${slugify(dim)}`
@@ -687,6 +717,18 @@ export function renderColumnHeaders(
                   />
                 )}
               </div>
+              {onResizeMouseDown && (
+                <div
+                  className={styles.resizeHandle}
+                  data-testid={`resize-handle-row-dim-${dimIdx}`}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    onResizeMouseDown(rowDimResizeIdx, e);
+                  }}
+                  onMouseEnter={elevateCell}
+                  onMouseLeave={resetCell}
+                />
+              )}
             </th>,
           );
         });
@@ -711,6 +753,7 @@ export function renderColumnHeaders(
           : undefined;
       let i = 0;
       while (i < visibleSlots.length) {
+        const slotIdx = slotOffset + i;
         const slot = visibleSlots[i];
         const isCollapsedSlot = slot.collapsedLevel !== undefined;
         const collapsedAtOrAbove =
@@ -762,6 +805,20 @@ export function renderColumnHeaders(
             onToggleColGroup);
         const groupKeyStr = makeKeyString(slot.key.slice(0, level + 1));
 
+        const resizeWidth =
+          columnWidthMap && (level === numColLevels - 1 || isCollapseLevel)
+            ? columnWidthMap.get(slotIdx)
+            : undefined;
+        const cellStyle: React.CSSProperties | undefined =
+          resizeWidth != null
+            ? {
+                ...stickyTop,
+                width: resizeWidth,
+                minWidth: resizeWidth,
+                maxWidth: resizeWidth,
+              }
+            : stickyTop;
+
         cells.push(
           <th
             key={`col-${level}-${i}`}
@@ -769,7 +826,7 @@ export function renderColumnHeaders(
             className={`${styles.headerCell} ${isCollapseLevel ? styles.totalsCol : ""} ${showColSortIndicator ? styles.headerSorted : ""} ${canToggle ? styles.groupToggleCell : ""}`}
             colSpan={colSpanVal > 1 ? colSpanVal : undefined}
             rowSpan={rowSpanVal}
-            style={stickyTop}
+            style={cellStyle}
             data-testid={
               canToggle && onToggleColGroup
                 ? `pivot-col-group-toggle-${groupKeyStr}`
@@ -845,6 +902,19 @@ export function renderColumnHeaders(
                 />
               )}
             </div>
+            {onResizeMouseDown &&
+              (level === numColLevels - 1 || isCollapseLevel) && (
+                <div
+                  className={styles.resizeHandle}
+                  data-testid={`resize-handle-${slotIdx}`}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    onResizeMouseDown(slotIdx, e);
+                  }}
+                  onMouseEnter={elevateCell}
+                  onMouseLeave={resetCell}
+                />
+              )}
           </th>,
         );
         i += span;
@@ -891,9 +961,12 @@ export function renderColumnHeaders(
   if (hasMultipleValues) {
     const valueLabelTop = numColLevels * HEADER_ROW_HEIGHT;
     const valueCells: ReactElement[] = [];
-    for (const slot of visibleSlots) {
+    for (let si = 0; si < visibleSlots.length; si++) {
+      const slot = visibleSlots[si];
       if (slot.collapsedLevel !== undefined) continue;
-      for (const valField of renderedValueFields) {
+      for (let vfi = 0; vfi < renderedValueFields.length; vfi++) {
+        const valField = renderedValueFields[vfi];
+        const isLastVal = vfi === renderedValueFields.length - 1;
         valueCells.push(
           <th
             key={`val-${slot.key.join("\x00")}-${valField}`}
@@ -912,6 +985,18 @@ export function renderColumnHeaders(
                 />
               )}
             </div>
+            {onResizeMouseDown && isLastVal && (
+              <div
+                className={styles.resizeHandle}
+                data-testid={`resize-handle-val-${slotOffset + si}`}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  onResizeMouseDown(slotOffset + si, e);
+                }}
+                onMouseEnter={elevateCell}
+                onMouseLeave={resetCell}
+              />
+            )}
           </th>,
         );
       }
@@ -1783,6 +1868,54 @@ const TableRenderer: FC<TableRendererProps> = ({
     return () => observer.disconnect();
   }, [onOverflowChange]);
 
+  const [columnWidthMap, setColumnWidthMap] = useState<Map<number, number>>(
+    () => new Map(),
+  );
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeDragRef = useRef<{
+    slotIndex: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const handleResizeMouseDown = useCallback(
+    (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = (e.target as HTMLElement).closest("th");
+      const startWidth = el ? el.offsetWidth : MIN_COL_WIDTH;
+      resizeDragRef.current = { slotIndex, startX: e.clientX, startWidth };
+      setIsResizing(true);
+
+      const onMouseMove = (ev: globalThis.MouseEvent) => {
+        const drag = resizeDragRef.current;
+        if (!drag) return;
+        ev.preventDefault();
+        const delta = ev.clientX - drag.startX;
+        const newWidth = Math.max(MIN_COL_WIDTH, drag.startWidth + delta);
+        const idx = drag.slotIndex;
+        setColumnWidthMap((prev) => {
+          const next = new Map(prev);
+          next.set(idx, newWidth);
+          return next;
+        });
+      };
+
+      const cleanup = () => {
+        resizeDragRef.current = null;
+        setIsResizing(false);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", cleanup);
+        window.removeEventListener("mouseleave", cleanup);
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", cleanup);
+      window.addEventListener("mouseleave", cleanup);
+    },
+    [],
+  );
+
   const allRowKeys = pivotData.getRowKeys();
   const allColKeys = pivotData.getColKeys();
   const colKeys =
@@ -2041,16 +2174,29 @@ const TableRenderer: FC<TableRendererProps> = ({
 
   return (
     <>
+      {isResizing && (
+        <div
+          data-testid="resize-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            cursor: "col-resize",
+            opacity: 0,
+          }}
+        />
+      )}
       <div
         ref={wrapperRef}
         className={styles.tableWrapper}
-        style={
-          scrollable
+        style={{
+          ...(scrollable
             ? { flex: "1 1 0", minHeight: 0 }
             : maxHeight != null
               ? { maxHeight }
-              : undefined
-        }
+              : undefined),
+          ...(isResizing ? { userSelect: "none" } : undefined),
+        }}
       >
         <table
           data-testid="pivot-table"
@@ -2071,6 +2217,8 @@ const TableRenderer: FC<TableRendererProps> = ({
                 : undefined,
               pivotData,
               onCollapseChange,
+              handleResizeMouseDown,
+              columnWidthMap,
             )}
           </thead>
           <tbody>

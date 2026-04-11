@@ -104,6 +104,8 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, viewer-safe actions like data export and group expand/collapse remain available, and header-menu sorting/filtering/`Show Values As` plus drill-down still work. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files. Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
+> **Frontend-only interactions:** Column resize (drag header edges) and fullscreen mode (toolbar expand icon) are available automatically when `interactive=True`. No additional Python parameters are needed.
+
 #### Data Control
 
 | Parameter | Type | Default | Description |
@@ -512,9 +514,27 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Copy Config** | Copies the current config as JSON to clipboard |
 | **Import Config** | Paste a JSON config to apply |
 | **Export Data** | Open the export popover (CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
+| **Fullscreen** (expand icon) | Toggles fullscreen mode — the table fills the entire viewport. Press Escape or click the collapse icon to exit. |
 | **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
 
 In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings gear remains visible, its popover shows read-only display status plus group expand/collapse actions, and header-menu sorting, filtering, and `Show Values As` stay enabled.
+
+### Column Resize
+
+Drag the **right edge of any column header** to resize that column. A thin resize handle appears on hover (cursor changes to `col-resize`). Minimum column width is 40 px.
+
+- Works in both virtualized and non-virtualized rendering modes.
+- Each column's width is tracked independently.
+- Widths reset when the pivot configuration changes (new rows, columns, or values).
+- No Python API parameter is required — column resize is a purely frontend interaction.
+
+### Fullscreen Mode
+
+Click the **expand icon** (⤢) in the toolbar utility menu to enter fullscreen mode. The pivot table fills the entire browser viewport as a fixed overlay. Press **Escape** or click the **collapse icon** (⤡) to exit.
+
+- The table automatically re-measures to fill the viewport, including virtual scroll height.
+- Works with both virtualized and non-virtualized rendering modes.
+- No Python API parameter is required — fullscreen is a purely frontend interaction.
 
 ### Non-Interactive Mode
 
@@ -601,7 +621,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains 13 sections covering the major features and usage patterns with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains 16 sections covering the major features and usage patterns with interactive examples and inline documentation.
 
 ### Building the frontend
 

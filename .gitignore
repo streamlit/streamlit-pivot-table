@@ -60,3 +60,6 @@ htmlcov/
 bench-baseline.json
 bench-results.json
 perf_baseline.json
+
+# Local analysis reports
+reports/

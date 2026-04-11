@@ -130,6 +130,10 @@ const PivotRoot: FC<PivotRootProps> = ({
   const [isTableScrollable, setIsTableScrollable] = useState(false);
   const [drilldownPayload, setDrilldownPayload] =
     useState<CellClickPayload | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [windowHeight, setWindowHeight] = useState(
+    typeof window !== "undefined" ? window.innerHeight : 800,
+  );
 
   const initialConfigRef = useRef<PivotConfigV1>(currentConfig);
   const initialConfig = initialConfigRef.current;
@@ -468,6 +472,27 @@ const PivotRoot: FC<PivotRootProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const handleToggleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => {
+      if (!prev) setWindowHeight(window.innerHeight);
+      return !prev;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onResize = () => setWindowHeight(window.innerHeight);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isFullscreen]);
+
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -499,13 +524,26 @@ const PivotRoot: FC<PivotRootProps> = ({
     fontSize: "var(--st-base-font-size)",
     color: "var(--st-text-color)",
     backgroundColor: "var(--st-background-color)",
-    ...(height != null
+    ...(isFullscreen
       ? {
-          height: `${height}px`,
+          position: "fixed" as const,
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 1000050,
           display: "flex",
           flexDirection: "column" as const,
+          overflow: "hidden",
+          padding: "2.875rem 1.5rem 1.5rem",
         }
-      : {}),
+      : height != null
+        ? {
+            height: `${height}px`,
+            display: "flex",
+            flexDirection: "column" as const,
+          }
+        : {}),
   };
 
   return (
@@ -533,13 +571,21 @@ const PivotRoot: FC<PivotRootProps> = ({
             onCollapseChange={
               currentConfig.interactive ? handleCollapseChange : undefined
             }
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={handleToggleFullscreen}
           />
         )}
 
         <div
           style={
-            height != null
-              ? { flex: 1, minHeight: 0, overflow: "hidden" }
+            isFullscreen || height != null
+              ? {
+                  flex: 1,
+                  minHeight: 0,
+                  display: "flex",
+                  flexDirection: "column" as const,
+                  overflow: "hidden",
+                }
               : undefined
           }
         >
@@ -554,7 +600,9 @@ const PivotRoot: FC<PivotRootProps> = ({
                     ? budget.truncatedColumnCount
                     : undefined
                 }
-                containerHeight={height ?? max_height ?? 500}
+                containerHeight={
+                  isFullscreen ? windowHeight : (height ?? max_height ?? 500)
+                }
                 onSortChange={
                   currentConfig.interactive ? handleSortChange : undefined
                 }
@@ -575,7 +623,7 @@ const PivotRoot: FC<PivotRootProps> = ({
                   currentConfig.interactive ? handleCollapseChange : undefined
                 }
                 menuLimit={menu_limit}
-                scrollable={height != null}
+                scrollable={isFullscreen || height != null}
               />
             ) : (
               <TableRenderer
@@ -608,8 +656,14 @@ const PivotRoot: FC<PivotRootProps> = ({
                   currentConfig.interactive ? handleCollapseChange : undefined
                 }
                 menuLimit={menu_limit}
-                scrollable={height != null}
-                maxHeight={height == null ? (max_height ?? 500) : undefined}
+                scrollable={isFullscreen || height != null}
+                maxHeight={
+                  isFullscreen
+                    ? undefined
+                    : height == null
+                      ? (max_height ?? 500)
+                      : undefined
+                }
                 onOverflowChange={setIsTableScrollable}
               />
             )

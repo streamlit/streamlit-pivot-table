@@ -1179,6 +1179,120 @@ st.caption(
 
 
 # ---------------------------------------------------------------------------
+# Section 15: Column Resize
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("15. Column Resize")
+
+st.markdown(
+    """
+Drag the **right edge of any column header** to resize that column.
+The resize handle appears as a thin highlight strip when you hover the
+column border. Minimum width is 40 px. Works in both virtualized and
+non-virtualized rendering modes.
+
+**Try it:**
+- Hover the right edge of a column header until the cursor changes to
+  a **col-resize** handle.
+- Drag left or right to change the column width.
+- Resize multiple columns — each column remembers its width independently.
+- Widths reset when the pivot config changes (new rows, columns, values, etc.).
+
+Column resize is a **purely frontend interaction** — no Python API parameter
+is required.
+"""
+)
+
+st_pivot_table(
+    df,
+    key="column_resize_demo",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+    show_totals=True,
+)
+
+with st.expander("View Code"):
+    st.code(
+        """
+st_pivot_table(
+    df,
+    key="column_resize_demo",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+    show_totals=True,
+)
+# Drag any column header edge to resize.
+""",
+        language="python",
+    )
+
+# ---------------------------------------------------------------------------
+# Section 16: Fullscreen Mode
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("16. Fullscreen Mode")
+
+st.markdown(
+    """
+Click the **expand icon** (⤢) in the toolbar utility menu to enter
+**fullscreen mode**. The pivot table fills the entire browser viewport
+as a fixed overlay. Press **Escape** or click the **collapse icon** (⤡)
+to exit.
+
+**Try it:**
+- Hover over the toolbar area to reveal the utility buttons.
+- Click the expand icon (rightmost group, before the gear icon).
+- The table expands to fill the full viewport — virtual scrolling
+  automatically adjusts to the new height.
+- Press **Escape** or click the collapse icon to return to normal view.
+
+Fullscreen mode is a **purely frontend interaction** — no Python API
+parameter is required. It works with both virtualized and non-virtualized
+tables.
+"""
+)
+
+st_pivot_table(
+    df,
+    key="fullscreen_demo",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+    show_totals=True,
+    show_subtotals=True,
+    height=350,
+)
+
+with st.expander("View Code"):
+    st.code(
+        """
+st_pivot_table(
+    df,
+    key="fullscreen_demo",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+    show_totals=True,
+    show_subtotals=True,
+    height=350,
+)
+# Click the expand icon in the toolbar to go fullscreen.
+# Press Escape to exit.
+""",
+        language="python",
+    )
+
+# ---------------------------------------------------------------------------
 # Footer: Raw Data
 # ---------------------------------------------------------------------------
 st.divider()
