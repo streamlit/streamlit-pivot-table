@@ -76,6 +76,7 @@ jobs:
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r e2e_playwright/test-requirements.txt
+          pip install --force-reinstall --no-deps dist/streamlit_pivot-0.1.0-py3-none-any.whl
           python -m playwright install --with-deps
       - name: Run playwright tests
         run: |
