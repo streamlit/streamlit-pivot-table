@@ -72,6 +72,21 @@ def test_invalid_show_values_as_raises(pivot_module, sample_df):
         )
 
 
+def test_period_comparison_requires_grouped_temporal_axis(pivot_module, sample_df):
+    with pytest.raises(
+        ValueError,
+        match="period comparison show_values_as modes require at least one date_grains entry",
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            show_values_as={"Revenue": "diff_from_prev"},
+        )
+
+
 def test_invalid_number_format_type_raises(pivot_module, sample_df):
     with pytest.raises(TypeError, match="number_format must be str, dict, or None"):
         pivot_module.st_pivot_table(

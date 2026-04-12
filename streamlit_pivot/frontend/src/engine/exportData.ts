@@ -23,6 +23,8 @@ import type {
   ConditionalFormatRule,
 } from "./types";
 import {
+  getDimensionLabel,
+  getPeriodComparisonMode,
   getRenderedValueFields,
   getRenderedValueLabel,
   getSyntheticMeasureFormat,
@@ -149,6 +151,36 @@ interface FormatResult {
   numberFormat?: string;
 }
 
+function formatComparisonResult(
+  comparisonValue: number | null,
+  valField: string,
+  config: PivotConfigV1,
+  mode: ShowValuesAs,
+): FormatResult {
+  if (comparisonValue === null) {
+    return { display: config.empty_cell_value, raw: null };
+  }
+  if (mode === "pct_diff_from_prev" || mode === "pct_diff_from_prev_year") {
+    return {
+      display: formatPercent(comparisonValue),
+      raw: comparisonValue,
+      numberFormat: "0.0%",
+    };
+  }
+  const pattern =
+    getSyntheticMeasureFormat(config, valField) ??
+    config.number_format?.[valField] ??
+    config.number_format?.["__all__"];
+  if (pattern) {
+    return {
+      display: formatWithPattern(comparisonValue, pattern),
+      raw: comparisonValue,
+      numberFormat: patternToExcelFormat(pattern),
+    };
+  }
+  return { display: cleanNumber(comparisonValue), raw: comparisonValue };
+}
+
 function formatExportValue(
   rawValue: number | null,
   valField: string,
@@ -170,6 +202,20 @@ function formatExportValue(
   const showAs: ShowValuesAs | undefined = isSyntheticMeasure(config, valField)
     ? undefined
     : config.show_values_as?.[valField];
+  const comparisonMode = getPeriodComparisonMode(config, valField);
+  if (comparisonMode) {
+    return formatComparisonResult(
+      pivotData.getCellComparisonValue(
+        rowKey,
+        colKey,
+        valField,
+        comparisonMode,
+      ),
+      valField,
+      config,
+      comparisonMode,
+    );
+  }
   if (showAs && showAs !== "raw") {
     let denominator: number | null = null;
     if (showAs === "pct_of_total") {
@@ -210,6 +256,7 @@ function formatExportTotalValue(
   mode: ExportContent,
   isTotalOfShowAsAxis: "row" | "col" | "grand" | null,
   agg: { format: (empty: string) => string },
+  comparisonValue?: number | null,
   showAsDenominators?: { row?: number | null; col?: number | null },
 ): FormatResult {
   if (rawValue === null) {
@@ -223,6 +270,15 @@ function formatExportTotalValue(
   const showAs = isSyntheticMeasure(config, valField)
     ? undefined
     : config.show_values_as?.[valField];
+  const comparisonMode = getPeriodComparisonMode(config, valField);
+  if (comparisonMode) {
+    return formatComparisonResult(
+      comparisonValue ?? null,
+      valField,
+      config,
+      comparisonMode,
+    );
+  }
   if (showAs && showAs !== "raw") {
     if (isTotalOfShowAsAxis === "row" && showAs === "pct_of_row")
       return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
@@ -337,7 +393,7 @@ export function buildExportIR(
     const row: ExportCell[] = [];
     if (level === 0) {
       for (let d = 0; d < rowDims.length; d++) {
-        row.push(cell(rowDims[d], "header"));
+        row.push(cell(getDimensionLabel(config, rowDims[d]!), "header"));
       }
       if (rowDims.length === 0) row.push(cell("", "header"));
     } else {
@@ -398,7 +454,7 @@ export function buildExportIR(
   if (colDims.length === 0) {
     const row: ExportCell[] = [];
     for (let d = 0; d < rowDims.length; d++) {
-      row.push(cell(rowDims[d], "header"));
+      row.push(cell(getDimensionLabel(config, rowDims[d]!), "header"));
     }
     if (hasMultipleValues) {
       for (const val of values) {
@@ -448,6 +504,7 @@ export function buildExportIR(
             valField,
           );
           const rawValue = agg.value();
+          const comparisonMode = getPeriodComparisonMode(config, valField);
           const fmt = formatExportTotalValue(
             rawValue,
             valField,
@@ -456,6 +513,14 @@ export function buildExportIR(
             mode,
             null,
             agg,
+            comparisonMode
+              ? pivotData.getSubtotalComparisonValue(
+                  groupedRow.key,
+                  colKey,
+                  valField,
+                  comparisonMode,
+                )
+              : undefined,
             {
               row: pivotData
                 .getSubtotalAggregator(groupedRow.key, [], valField)
@@ -481,6 +546,7 @@ export function buildExportIR(
               valField,
             );
             const rawValue = agg.value();
+            const comparisonMode = getPeriodComparisonMode(config, valField);
             const fmt = formatExportTotalValue(
               rawValue,
               valField,
@@ -489,6 +555,14 @@ export function buildExportIR(
               mode,
               "row",
               agg,
+              comparisonMode
+                ? pivotData.getSubtotalComparisonValue(
+                    groupedRow.key,
+                    [],
+                    valField,
+                    comparisonMode,
+                  )
+                : undefined,
             );
             row.push(
               cell(fmt.display, "subtotal", fmt.raw, {
@@ -506,8 +580,10 @@ export function buildExportIR(
         const display = dimKey ? pivotData.formatDimLabel(dimName, dimKey) : "";
         const colType = columnTypes?.get(dimName);
         if (colType === "datetime" || colType === "date") {
+          const grain = config.date_grains?.[dimName];
           const rawVal = pivotData.getRawDimValue(dimName, dimKey);
-          const exportDate = rawVal !== undefined ? toExportDate(rawVal) : null;
+          const exportDate =
+            !grain && rawVal !== undefined ? toExportDate(rawVal) : null;
           row.push(
             cell(
               display,
@@ -552,6 +628,7 @@ export function buildExportIR(
           } else {
             const agg = pivotData.getRowTotal(rowKey, valField);
             const rawValue = agg.value();
+            const comparisonMode = getPeriodComparisonMode(config, valField);
             const fmt = formatExportTotalValue(
               rawValue,
               valField,
@@ -560,6 +637,13 @@ export function buildExportIR(
               mode,
               "row",
               agg,
+              comparisonMode
+                ? pivotData.getRowTotalComparisonValue(
+                    rowKey,
+                    valField,
+                    comparisonMode,
+                  )
+                : undefined,
             );
             row.push(
               cell(fmt.display, "row-total", fmt.raw, {
@@ -587,6 +671,7 @@ export function buildExportIR(
         } else {
           const agg = pivotData.getColTotal(colKey, valField);
           const rawValue = agg.value();
+          const comparisonMode = getPeriodComparisonMode(config, valField);
           const fmt = formatExportTotalValue(
             rawValue,
             valField,
@@ -595,6 +680,13 @@ export function buildExportIR(
             mode,
             "col",
             agg,
+            comparisonMode
+              ? pivotData.getColTotalComparisonValue(
+                  colKey,
+                  valField,
+                  comparisonMode,
+                )
+              : undefined,
           );
           row.push(
             cell(fmt.display, "col-total", fmt.raw, {
@@ -619,6 +711,7 @@ export function buildExportIR(
             mode,
             "grand",
             agg,
+            undefined,
           );
           row.push(
             cell(fmt.display, "grand-total", fmt.raw, {

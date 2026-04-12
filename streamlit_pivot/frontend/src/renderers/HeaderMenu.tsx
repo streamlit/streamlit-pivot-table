@@ -26,12 +26,15 @@ import {
   useState,
 } from "react";
 import type {
+  DateGrain,
   DimensionFilter,
   PivotConfigV1,
   ShowValuesAs,
   SortConfig,
 } from "../engine/types";
 import {
+  DATE_GRAIN_LABELS,
+  DATE_GRAINS,
   showSubtotalForDim,
   showTotalForMeasure,
   showRowTotals,
@@ -43,6 +46,8 @@ import styles from "./HeaderMenu.module.css";
 export interface HeaderMenuProps {
   /** The dimension name shown in the header (e.g. "Year", "Region"). */
   dimension: string;
+  /** Optional display title when the underlying field has extra state like date grain. */
+  title?: string;
   /** Which pivot axis this header belongs to. */
   axis: "row" | "col";
   /** Current sort config for this axis. */
@@ -74,6 +79,14 @@ export interface HeaderMenuProps {
   onTotalToggle?: (measure: string, axis: "row" | "col") => void;
   /** Format a canonical key into a display label (e.g. ISO date → "Jan 15, 2024"). */
   formatLabel?: (key: string) => string;
+  /** Active date grain for temporal dimensions. */
+  dateGrain?: DateGrain;
+  /** Callback to change date grain for temporal dimensions. */
+  onDateGrainChange?: (grain: DateGrain | undefined) => void;
+  /** Callback to drill the current grain up/down. */
+  onDateDrill?: (direction: "up" | "down") => void;
+  /** Whether period-comparison display modes should be shown. */
+  supportsPeriodComparison?: boolean;
   onClose: () => void;
 }
 
@@ -92,6 +105,7 @@ const DEFAULT_MENU_LIMIT = 50;
 
 const HeaderMenu: FC<HeaderMenuProps> = ({
   dimension,
+  title,
   axis,
   sortConfig,
   onSortChange,
@@ -108,6 +122,10 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
   onSubtotalToggle,
   onTotalToggle,
   formatLabel,
+  dateGrain,
+  onDateGrainChange,
+  onDateDrill,
+  supportsPeriodComparison = false,
   onClose,
 }): ReactElement => {
   const showSort = !!onSortChange;
@@ -316,6 +334,34 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
     [onClose],
   );
 
+  const displayOptions = useMemo(
+    () =>
+      [
+        { value: "raw", label: "Raw values" },
+        { value: "pct_of_total", label: "% of grand total" },
+        { value: "pct_of_row", label: "% of row total" },
+        { value: "pct_of_col", label: "% of column total" },
+        ...(supportsPeriodComparison
+          ? [
+              { value: "diff_from_prev", label: "Change vs previous period" },
+              {
+                value: "pct_diff_from_prev",
+                label: "% change vs previous period",
+              },
+              {
+                value: "diff_from_prev_year",
+                label: "Change vs prior year",
+              },
+              {
+                value: "pct_diff_from_prev_year",
+                label: "% change vs prior year",
+              },
+            ]
+          : []),
+      ] as { value: ShowValuesAs; label: string }[],
+    [supportsPeriodComparison],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -327,7 +373,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
     >
       {/* Dimension title */}
       <div className={styles.menuTitle} data-testid="header-menu-title">
-        {dimension}
+        {title ?? dimension}
       </div>
 
       {/* Sort section (hidden when locked / no onSortChange) */}
@@ -485,6 +531,68 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
         </>
       )}
 
+      {onDateGrainChange && (
+        <>
+          <div className={styles.divider} />
+          <div
+            className={styles.sortSection}
+            role="group"
+            aria-label={`Date grouping for ${dimension}`}
+          >
+            <label className={styles.sortValueLabel}>
+              <span>Group by:</span>
+              <select
+                className={styles.sortValueSelect}
+                data-menu-nav
+                tabIndex={-1}
+                value={dateGrain ?? ""}
+                onChange={(e) =>
+                  onDateGrainChange(
+                    e.target.value ? (e.target.value as DateGrain) : undefined,
+                  )
+                }
+                data-testid="header-date-grain"
+              >
+                <option value="">Original</option>
+                {DATE_GRAINS.map((grain) => (
+                  <option key={grain} value={grain}>
+                    {DATE_GRAIN_LABELS[grain]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {dateGrain && onDateDrill && (
+              <div className={styles.sortValueConfig}>
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  data-menu-nav
+                  tabIndex={-1}
+                  onClick={() => onDateDrill("up")}
+                  disabled={DATE_GRAINS.indexOf(dateGrain) === 0}
+                  data-testid="header-date-drill-up"
+                >
+                  <span className={styles.menuItemLabel}>Drill up</span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  data-menu-nav
+                  tabIndex={-1}
+                  onClick={() => onDateDrill("down")}
+                  disabled={
+                    DATE_GRAINS.indexOf(dateGrain) === DATE_GRAINS.length - 1
+                  }
+                  data-testid="header-date-drill-down"
+                >
+                  <span className={styles.menuItemLabel}>Drill down</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Totals section (value headers only) */}
       {onTotalToggle && config && (
         <>
@@ -558,7 +666,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
           role="group"
           aria-label={`Display mode for ${dimension}`}
         >
-          {SHOW_VALUES_AS_OPTIONS.map((opt) => (
+          {displayOptions.map((opt) => (
             <button
               key={opt.value}
               type="button"
@@ -651,15 +759,6 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
     </div>
   );
 };
-
-// ---- Display options ----
-
-const SHOW_VALUES_AS_OPTIONS: { value: ShowValuesAs; label: string }[] = [
-  { value: "raw", label: "Raw Value" },
-  { value: "pct_of_total", label: "of Grand Total" },
-  { value: "pct_of_row", label: "of Row Total" },
-  { value: "pct_of_col", label: "of Column Total" },
-];
 
 const DisplayIcon: FC<{ mode: ShowValuesAs }> = ({ mode }) => {
   if (mode === "raw") {

@@ -368,6 +368,12 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     menuOnSubtotalToggle,
     menuOnTotalToggle,
     menuConfig,
+    menuTitle,
+    menuDateGrain,
+    menuOnDateGrainChange,
+    menuOnDateDrill,
+    menuSupportsPeriodComparison,
+    menuFormatLabel,
     handleCellKeyDown,
   } = useHeaderMenu({
     config,
@@ -625,6 +631,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
           >
             <HeaderMenu
               dimension={menuTarget.dimension}
+              title={menuTitle}
               axis={menuTarget.axis === "value" ? "col" : menuTarget.axis}
               sortConfig={menuSortConfig}
               onSortChange={handleMenuSortChange}
@@ -647,6 +654,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
               config={menuConfig}
               onSubtotalToggle={menuOnSubtotalToggle}
               onTotalToggle={menuOnTotalToggle}
+              formatLabel={menuFormatLabel}
+              dateGrain={menuDateGrain}
+              onDateGrainChange={menuOnDateGrainChange}
+              onDateDrill={menuOnDateDrill}
+              supportsPeriodComparison={menuSupportsPeriodComparison}
               onClose={handleCloseMenu}
             />
           </div>

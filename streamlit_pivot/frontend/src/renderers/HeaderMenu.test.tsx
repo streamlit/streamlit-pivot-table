@@ -216,6 +216,49 @@ describe("HeaderMenu - filter interactions", () => {
   });
 });
 
+describe("HeaderMenu - date grouping", () => {
+  it("renders date grain controls and comparison display modes when enabled", () => {
+    render(
+      <HeaderMenu
+        {...baseProps}
+        title="Order Date (Month)"
+        dateGrain="month"
+        onDateGrainChange={vi.fn()}
+        onDateDrill={vi.fn()}
+        supportsPeriodComparison={true}
+        onShowValuesAsChange={vi.fn()}
+        showValuesAs="diff_from_prev"
+      />,
+    );
+    expect(screen.getByTestId("header-menu-title")).toHaveTextContent(
+      "Order Date (Month)",
+    );
+    expect(screen.getByTestId("header-date-grain")).toHaveValue("month");
+    expect(
+      screen.getByTestId("header-display-diff_from_prev_year"),
+    ).toBeInTheDocument();
+  });
+
+  it("calls drill and grain change handlers", () => {
+    const onDateGrainChange = vi.fn();
+    const onDateDrill = vi.fn();
+    render(
+      <HeaderMenu
+        {...baseProps}
+        dateGrain="month"
+        onDateGrainChange={onDateGrainChange}
+        onDateDrill={onDateDrill}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("header-date-grain"), {
+      target: { value: "quarter" },
+    });
+    expect(onDateGrainChange).toHaveBeenCalledWith("quarter");
+    fireEvent.click(screen.getByTestId("header-date-drill-up"));
+    expect(onDateDrill).toHaveBeenCalledWith("up");
+  });
+});
+
 describe("HeaderMenu - keyboard", () => {
   it("calls onClose on Escape", () => {
     const onClose = vi.fn();

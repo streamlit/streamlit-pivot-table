@@ -31,8 +31,14 @@ import {
   type PivotData,
   type GroupedRow,
 } from "../engine/PivotData";
-import { formatWithPattern, formatPercent } from "../engine/formatters";
 import {
+  formatNumber,
+  formatWithPattern,
+  formatPercent,
+} from "../engine/formatters";
+import {
+  getDimensionLabel,
+  getPeriodComparisonMode,
   getRenderedValueFields,
   getRenderedValueLabel,
   getSyntheticMeasureFormat,
@@ -256,6 +262,23 @@ export function buildCellClickPayload(
   };
 }
 
+function formatComparisonDisplay(
+  value: number | null,
+  valField: string,
+  config: PivotConfigV1,
+  mode: ShowValuesAs,
+): string {
+  if (value === null) return config.empty_cell_value;
+  if (mode === "pct_diff_from_prev" || mode === "pct_diff_from_prev_year") {
+    return formatPercent(value);
+  }
+  const pattern =
+    getSyntheticMeasureFormat(config, valField) ??
+    config.number_format?.[valField] ??
+    config.number_format?.["__all__"];
+  return pattern ? formatWithPattern(value, pattern) : formatNumber(value);
+}
+
 /**
  * Format a cell value considering show_values_as, number_format, and column_alignment.
  */
@@ -271,6 +294,24 @@ function formatCellValue(
   if (rawValue === null) return { text: emptyCellValue };
 
   const showAs: ShowValuesAs | undefined = config.show_values_as?.[valField];
+  const comparisonMode = getPeriodComparisonMode(config, valField);
+
+  if (comparisonMode) {
+    const comparisonValue = pivotData.getCellComparisonValue(
+      rowKey,
+      colKey,
+      valField,
+      comparisonMode,
+    );
+    return {
+      text: formatComparisonDisplay(
+        comparisonValue,
+        valField,
+        config,
+        comparisonMode,
+      ),
+    };
+  }
 
   if (showAs && showAs !== "raw") {
     let denominator: number | null = null;
@@ -344,10 +385,21 @@ function formatTotalCellValue(
   config: PivotConfigV1,
   pivotData: PivotData,
   isTotalOfShowAsAxis: "row" | "col" | "grand" | null,
+  comparisonValue?: number | null,
   showAsDenominators?: { row?: number | null; col?: number | null },
 ): string {
   const rawValue = agg.value();
   const showAs = config.show_values_as?.[valField];
+  const comparisonMode = getPeriodComparisonMode(config, valField);
+
+  if (comparisonMode) {
+    return formatComparisonDisplay(
+      comparisonValue ?? null,
+      valField,
+      config,
+      comparisonMode,
+    );
+  }
 
   if (showAs && showAs !== "raw" && rawValue !== null) {
     if (isTotalOfShowAsAxis === "row" && showAs === "pct_of_row")
@@ -705,7 +757,7 @@ export function renderColumnHeaders(
                       }
                     },
                     "aria-expanded": !rowDimCollapsed,
-                    "aria-label": `${rowDimCollapsed ? "Expand" : "Collapse"} all ${dim} groups`,
+                    "aria-label": `${rowDimCollapsed ? "Expand" : "Collapse"} all ${getDimensionLabel(config, dim)} groups`,
                   }
                 : {})}
             >
@@ -714,7 +766,7 @@ export function renderColumnHeaders(
                   <DimToggleIcon collapsed={rowDimCollapsed} />
                 )}
                 <span className={isFiltered ? styles.headerFiltered : ""}>
-                  {dim}
+                  {getDimensionLabel(config, dim)}
                 </span>
                 {rowSortDir && <SortArrowIcon direction={rowSortDir} />}
                 {hasMenu && (
@@ -1248,6 +1300,7 @@ export function renderDataRow(
               slot.key,
               valField,
             );
+            const comparisonMode = getPeriodComparisonMode(config, valField);
             const cellValue = agg.value();
             const text = formatTotalCellValue(
               agg,
@@ -1255,6 +1308,14 @@ export function renderDataRow(
               config,
               pivotData,
               null,
+              comparisonMode
+                ? pivotData.getColGroupComparisonValue(
+                    rowKey,
+                    slot.key,
+                    valField,
+                    comparisonMode,
+                  )
+                : undefined,
               {
                 row: pivotData.getRowTotal(rowKey, valField).value(),
                 col: pivotData
@@ -1387,6 +1448,7 @@ export function renderDataRow(
               );
             }
             const agg = pivotData.getRowTotal(rowKey, valField);
+            const comparisonMode = getPeriodComparisonMode(config, valField);
             const cellValue = agg.value();
             const totalText = formatTotalCellValue(
               agg,
@@ -1394,6 +1456,13 @@ export function renderDataRow(
               config,
               pivotData,
               "row",
+              comparisonMode
+                ? pivotData.getRowTotalComparisonValue(
+                    rowKey,
+                    valField,
+                    comparisonMode,
+                  )
+                : undefined,
             );
             const totalStyle = buildTotalCellStyle(
               cellValue,
@@ -1549,6 +1618,7 @@ export function renderSubtotalRow(
       {/* Data cells: subtotal values */}
       {visibleSlots.map((slot) =>
         valueFields.map((valField) => {
+          const comparisonMode = getPeriodComparisonMode(config, valField);
           const agg =
             slot.collapsedLevel !== undefined
               ? pivotData.getSubtotalColGroupAgg(parentKey, slot.key, valField)
@@ -1560,6 +1630,21 @@ export function renderSubtotalRow(
             config,
             pivotData,
             null,
+            comparisonMode
+              ? slot.collapsedLevel !== undefined
+                ? pivotData.getColGroupComparisonValue(
+                    parentKey,
+                    slot.key,
+                    valField,
+                    comparisonMode,
+                  )
+                : pivotData.getSubtotalComparisonValue(
+                    parentKey,
+                    slot.key,
+                    valField,
+                    comparisonMode,
+                  )
+              : undefined,
             {
               row: pivotData
                 .getSubtotalAggregator(parentKey, [], valField)
@@ -1635,6 +1720,7 @@ export function renderSubtotalRow(
               [],
               valField,
             );
+            const comparisonMode = getPeriodComparisonMode(config, valField);
             const cellValue = agg.value();
             const text = formatTotalCellValue(
               agg,
@@ -1642,6 +1728,14 @@ export function renderSubtotalRow(
               config,
               pivotData,
               "row",
+              comparisonMode
+                ? pivotData.getSubtotalComparisonValue(
+                    parentKey,
+                    [],
+                    valField,
+                    comparisonMode,
+                  )
+                : undefined,
             );
             const cellStyle = buildTotalCellStyle(
               cellValue,
@@ -1741,6 +1835,7 @@ export function renderTotalsRow(
             slot.collapsedLevel !== undefined
               ? pivotData.getColGroupGrandSubtotal(slot.key, valField)
               : pivotData.getColTotal(slot.key, valField);
+          const comparisonMode = getPeriodComparisonMode(config, valField);
           const cellValue = agg.value();
           const text = formatTotalCellValue(
             agg,
@@ -1748,6 +1843,20 @@ export function renderTotalsRow(
             config,
             pivotData,
             "col",
+            comparisonMode
+              ? slot.collapsedLevel !== undefined
+                ? pivotData.getColGroupComparisonValue(
+                    [],
+                    slot.key,
+                    valField,
+                    comparisonMode,
+                  )
+                : pivotData.getColTotalComparisonValue(
+                    slot.key,
+                    valField,
+                    comparisonMode,
+                  )
+              : undefined,
           );
           const cellStyle = buildTotalCellStyle(
             cellValue,
@@ -1814,6 +1923,7 @@ export function renderTotalsRow(
             config,
             pivotData,
             "grand",
+            undefined,
           );
           const cellStyle = buildTotalCellStyle(
             cellValue,
@@ -2208,6 +2318,11 @@ const TableRenderer: FC<TableRendererProps> = ({
     menuOnSubtotalToggle,
     menuOnTotalToggle,
     menuConfig,
+    menuTitle,
+    menuDateGrain,
+    menuOnDateGrainChange,
+    menuOnDateDrill,
+    menuSupportsPeriodComparison,
     menuFormatLabel,
     handleCellKeyDown,
   } = useHeaderMenu({
@@ -2401,6 +2516,7 @@ const TableRenderer: FC<TableRendererProps> = ({
         >
           <HeaderMenu
             dimension={menuTarget.dimension}
+            title={menuTitle}
             axis={menuTarget.axis === "value" ? "col" : menuTarget.axis}
             sortConfig={menuSortConfig}
             onSortChange={handleMenuSortChange}
@@ -2424,6 +2540,10 @@ const TableRenderer: FC<TableRendererProps> = ({
             onSubtotalToggle={menuOnSubtotalToggle}
             onTotalToggle={menuOnTotalToggle}
             formatLabel={menuFormatLabel}
+            dateGrain={menuDateGrain}
+            onDateGrainChange={menuOnDateGrainChange}
+            onDateDrill={menuOnDateDrill}
+            supportsPeriodComparison={menuSupportsPeriodComparison}
             onClose={handleCloseMenu}
           />
         </div>

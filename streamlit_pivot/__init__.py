@@ -74,6 +74,7 @@ class PivotConfig(TypedDict, total=False):
     rows: list[str]
     columns: list[str]
     values: list[str]
+    date_grains: dict[str, str]
     synthetic_measures: list[dict[str, Any]]
     aggregation: dict[str, str]
     show_totals: bool
@@ -109,7 +110,27 @@ VALID_AGGREGATIONS = frozenset(
         "last",
     )
 )
-VALID_SHOW_VALUES_AS = frozenset(("raw", "pct_of_total", "pct_of_row", "pct_of_col"))
+VALID_SHOW_VALUES_AS = frozenset(
+    (
+        "raw",
+        "pct_of_total",
+        "pct_of_row",
+        "pct_of_col",
+        "diff_from_prev",
+        "pct_diff_from_prev",
+        "diff_from_prev_year",
+        "pct_diff_from_prev_year",
+    )
+)
+PERIOD_COMPARISON_SHOW_VALUES_AS = frozenset(
+    (
+        "diff_from_prev",
+        "pct_diff_from_prev",
+        "diff_from_prev_year",
+        "pct_diff_from_prev_year",
+    )
+)
+VALID_DATE_GRAINS = frozenset(("year", "quarter", "month", "week", "day"))
 VALID_ALIGNMENTS = frozenset(("left", "center", "right"))
 VALID_COND_FMT_TYPES = frozenset(("color_scale", "data_bars", "threshold"))
 VALID_NULL_MODES = frozenset(("exclude", "zero", "separate"))
@@ -260,6 +281,7 @@ def _prepare_threshold_hybrid_frame(
     column_types: dict[str, str] | None = None,
 ) -> Any:
     group_fields = [*config.get("rows", []), *config.get("columns", [])]
+    date_grains = config.get("date_grains", {})
     aggregation = dict(config.get("aggregation", {}))
     value_fields = list(config.get("values", []))
 
@@ -290,7 +312,11 @@ def _prepare_threshold_hybrid_frame(
             named[vf] = pd.NamedAgg(column=vf, aggfunc=agg)
 
     filtered_df = _resolve_and_filter(
-        df, config.get("filters", {}), null_handling, column_types
+        df,
+        config.get("filters", {}),
+        null_handling,
+        column_types,
+        date_grains=date_grains,
     )
 
     if not group_fields:
@@ -323,6 +349,13 @@ def _prepare_threshold_hybrid_frame(
         return pd.DataFrame([row])
 
     working = filtered_df.copy()
+    for dim in group_fields:
+        grain = date_grains.get(dim)
+        if not grain or dim not in working.columns:
+            continue
+        mode = _get_null_mode(dim, null_handling)
+        col_type = column_types.get(dim) if column_types else None
+        working[dim] = _resolve_dim_value_series(working[dim], col_type, mode, grain)
     for vf in numeric_coerce_fields:
         working[vf] = pd.to_numeric(working[vf], errors="coerce")
 
@@ -412,6 +445,33 @@ def _build_original_column_types(df: Any) -> dict[str, str]:
     return result
 
 
+def _validate_period_comparison_config(
+    show_values_as: dict[str, str] | None,
+    rows: list[str] | None,
+    columns: list[str] | None,
+    date_grains: dict[str, str] | None,
+    column_types: dict[str, str],
+) -> None:
+    """Require a grain-enabled temporal axis before allowing period comparisons."""
+    if not show_values_as:
+        return
+    has_period_mode = any(
+        mode in PERIOD_COMPARISON_SHOW_VALUES_AS for mode in show_values_as.values()
+    )
+    if not has_period_mode:
+        return
+    grouped_dims = set(rows or []) | set(columns or [])
+    for field, grain in (date_grains or {}).items():
+        if field not in grouped_dims or grain not in VALID_DATE_GRAINS:
+            continue
+        if column_types.get(field) in {"date", "datetime"}:
+            return
+    raise ValueError(
+        "period comparison show_values_as modes require at least one date_grains entry "
+        "on a date/datetime field used in rows or columns"
+    )
+
+
 def _canonical_temporal_key(value: Any, col_type: str) -> str:
     """Convert a temporal value to the canonical key matching the frontend."""
     if pd.isna(value):
@@ -428,13 +488,39 @@ def _canonical_temporal_key(value: Any, col_type: str) -> str:
     return str(value)
 
 
+def _bucket_temporal_key(value: Any, col_type: str, grain: str | None) -> str:
+    """Convert a temporal value to a grouped canonical key matching the frontend."""
+    if not grain:
+        return _canonical_temporal_key(value, col_type)
+    if pd.isna(value):
+        return ""
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC")
+    else:
+        ts = ts.tz_localize("UTC")
+    if grain == "year":
+        return f"{ts.year}"
+    if grain == "quarter":
+        return f"{ts.year}-Q{((ts.month - 1) // 3) + 1}"
+    if grain == "month":
+        return f"{ts.year}-{ts.month:02d}"
+    if grain == "week":
+        iso = ts.isocalendar()
+        return f"{int(iso.year)}-W{int(iso.week):02d}"
+    return ts.strftime("%Y-%m-%d")
+
+
 def _resolve_dim_value_series(
-    series: Any, col_type: str | None, null_handling_mode: str
+    series: Any,
+    col_type: str | None,
+    null_handling_mode: str,
+    date_grain: str | None = None,
 ) -> Any:
     """Resolve a dimension column to canonical string keys matching the frontend."""
     if col_type in ("datetime", "date"):
         return series.apply(
-            lambda v: _canonical_temporal_key(v, col_type)
+            lambda v: _bucket_temporal_key(v, col_type, date_grain)
             if pd.notna(v)
             else ("(null)" if null_handling_mode == "separate" else "")
         )
@@ -591,6 +677,7 @@ def _normalize_dim_values(
     dims: list[str],
     null_handling: Any,
     column_types: dict[str, str] | None = None,
+    date_grains: dict[str, str] | None = None,
 ) -> Any:
     """Rewrite null/empty dimension values to match frontend _resolveDimKey."""
     df = df.copy()
@@ -599,7 +686,8 @@ def _normalize_dim_values(
             continue
         mode = _get_null_mode(dim, null_handling)
         col_type = column_types.get(dim) if column_types else None
-        df[dim] = _resolve_dim_value_series(df[dim], col_type, mode)
+        grain = date_grains.get(dim) if date_grains else None
+        df[dim] = _resolve_dim_value_series(df[dim], col_type, mode, grain)
     return df
 
 
@@ -608,6 +696,7 @@ def _resolve_and_filter(
     filters: dict[str, dict] | None,
     null_handling: Any,
     column_types: dict[str, str] | None = None,
+    date_grains: dict[str, str] | None = None,
 ) -> Any:
     """Apply dimension filters to a raw DataFrame using resolved-value semantics.
 
@@ -622,7 +711,8 @@ def _resolve_and_filter(
             continue
         mode = _get_null_mode(field, null_handling)
         col_type = column_types.get(field) if column_types else None
-        resolved = _resolve_dim_value_series(df[field], col_type, mode)
+        grain = date_grains.get(field) if date_grains else None
+        resolved = _resolve_dim_value_series(df[field], col_type, mode, grain)
         inc = filt.get("include")
         exc = filt.get("exclude")
         if inc:
@@ -672,6 +762,9 @@ def _build_sidecar_fingerprint(config: PivotConfig, null_handling: Any) -> str:
     obj = {
         "aggregation": dict(sorted(agg.items())) if agg else {},
         "columns": config.get("columns", []),
+        "date_grains": dict(sorted(config.get("date_grains", {}).items()))
+        if config.get("date_grains")
+        else {},
         "filters": {
             k: {
                 "exclude": sorted(v.get("exclude", [])),
@@ -748,6 +841,7 @@ def _compute_hybrid_totals(
     columns = config.get("columns", [])
     values = config.get("values", [])
     show_subtotals = config.get("show_subtotals", False)
+    date_grains = config.get("date_grains", {})
 
     sidecar_fields = {
         vf: agg
@@ -773,9 +867,15 @@ def _compute_hybrid_totals(
         }
 
     all_dims = rows + columns
-    working = _normalize_dim_values(df, all_dims, null_handling, column_types)
+    working = _normalize_dim_values(
+        df, all_dims, null_handling, column_types, date_grains=date_grains
+    )
     working = _resolve_and_filter(
-        working, config.get("filters", {}), null_handling, column_types
+        working,
+        config.get("filters", {}),
+        null_handling,
+        column_types,
+        date_grains=date_grains,
     )
 
     fingerprint = _build_sidecar_fingerprint(config, null_handling)
@@ -907,6 +1007,7 @@ def _compute_hybrid_drilldown(
     config_filters: dict[str, dict] | None = None,
     page_size: int = _DRILLDOWN_PAGE_SIZE,
     column_types: dict[str, str] | None = None,
+    date_grains: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], int, int]:
     """Filter the original DataFrame for a hybrid-mode drill-down request.
 
@@ -918,7 +1019,11 @@ def _compute_hybrid_drilldown(
     Returns (records_list, column_names, total_matching_count, page).
     """
     working = _resolve_and_filter(
-        df, config_filters or {}, null_handling, column_types=column_types
+        df,
+        config_filters or {},
+        null_handling,
+        column_types=column_types,
+        date_grains=date_grains,
     )
 
     filters: dict[str, str] = drilldown_request.get("filters", {})
@@ -930,7 +1035,8 @@ def _compute_hybrid_drilldown(
             continue
         mode = _get_null_mode(col, null_handling)
         col_type = column_types.get(col) if column_types else None
-        resolved = _resolve_dim_value_series(working[col], col_type, mode)
+        grain = date_grains.get(col) if date_grains else None
+        resolved = _resolve_dim_value_series(working[col], col_type, mode, grain)
         mask &= resolved == str(val)
     filtered = working[mask]
     total_count = len(filtered)
@@ -1074,6 +1180,7 @@ def _default_config(
     rows: list[str] | None = None,
     columns: list[str] | None = None,
     values: list[str] | None = None,
+    date_grains: dict[str, str] | None = None,
     synthetic_measures: list[dict[str, Any]] | None = None,
     aggregation: str | dict[str, str] = "sum",
     show_totals: bool = True,
@@ -1127,6 +1234,8 @@ def _default_config(
         cfg["row_sort"] = row_sort
     if col_sort is not None:
         cfg["col_sort"] = col_sort
+    if date_grains:
+        cfg["date_grains"] = dict(sorted(date_grains.items()))
     if not sticky_headers:
         cfg["sticky_headers"] = False
     if show_subtotals:
@@ -1251,6 +1360,7 @@ def st_pivot_table(
     rows: list[str] | None = None,
     columns: list[str] | None = None,
     values: list[str] | None = None,
+    date_grains: dict[str, str] | None = None,
     synthetic_measures: list[dict[str, Any]] | None = None,
     aggregation: str | dict[str, str] = "sum",
     show_totals: bool = True,
@@ -1312,6 +1422,10 @@ def st_pivot_table(
         Column names from *data* to use as column dimensions.
     values : list[str] or None
         Column names from *data* to aggregate as measures.
+    date_grains : dict[str, str] or None
+        Optional per-field temporal grouping. Maps date/datetime dimensions
+        to one of ``"year"``, ``"quarter"``, ``"month"``, ``"week"``, or
+        ``"day"``.
     aggregation : str or dict[str, str]
         Aggregation setting for raw value fields. A single string applies to all
         measures, while a dict maps each value field to its aggregation.
@@ -1405,8 +1519,11 @@ def st_pivot_table(
         instead of being merged/spanned. Defaults to False.
     show_values_as : dict[str, str] or None
         Per-field display mode. Maps value field names to one of
-        ``"raw"``, ``"pct_of_total"``, ``"pct_of_row"``, or
-        ``"pct_of_col"``. Omitted fields default to ``"raw"``.
+        ``"raw"``, ``"pct_of_total"``, ``"pct_of_row"``, ``"pct_of_col"``,
+        ``"diff_from_prev"``, ``"pct_diff_from_prev"``,
+        ``"diff_from_prev_year"``, or ``"pct_diff_from_prev_year"``.
+        Period-comparison modes require at least one grain-enabled temporal
+        dimension on rows or columns. Omitted fields default to ``"raw"``.
     conditional_formatting : list[dict] or None
         List of conditional formatting rules applied to value cells.
         Each rule is a dict with ``"type"`` (``"color_scale"``,
@@ -1575,6 +1692,25 @@ def st_pivot_table(
 
     # --- Column list type + membership validation ---
     df_cols = set(data.columns)
+    normalized_date_grains: dict[str, str] | None = None
+
+    if date_grains is not None:
+        if not isinstance(date_grains, dict):
+            raise TypeError(
+                f"date_grains must be a dict or None, got {type(date_grains).__name__}"
+            )
+        normalized_date_grains = {}
+        for field, grain in sorted(date_grains.items()):
+            if not isinstance(field, str) or field not in df_cols:
+                raise ValueError(
+                    f"date_grains contains column not in DataFrame: {field!r}. "
+                    f"Available columns: {sorted(df_cols)}"
+                )
+            if grain not in VALID_DATE_GRAINS:
+                raise ValueError(
+                    f"date_grains[{field!r}] must be one of {sorted(VALID_DATE_GRAINS)}, got {grain!r}"
+                )
+            normalized_date_grains[field] = grain
 
     if source_filters is not None:
         if not isinstance(source_filters, dict):
@@ -1865,10 +2001,20 @@ def st_pivot_table(
     if isinstance(number_format, str):
         number_format = {"__all__": number_format}
 
+    original_column_types = _build_original_column_types(filtered_data)
+    _validate_period_comparison_config(
+        show_values_as,
+        resolved_rows,
+        resolved_columns,
+        normalized_date_grains,
+        original_column_types,
+    )
+
     initial_config = _default_config(
         rows=resolved_rows,
         columns=resolved_columns,
         values=resolved_values,
+        date_grains=normalized_date_grains,
         synthetic_measures=normalized_synthetic_measures,
         aggregation=normalized_aggregation,
         show_totals=show_totals,
@@ -1893,7 +2039,6 @@ def st_pivot_table(
     # Controlled-state hydration: preserve persisted user config across normal
     # reruns, but let explicit Python config changes take precedence.
     config_to_send = _resolve_config_to_send(st.session_state, key, initial_config)
-    original_column_types = _build_original_column_types(filtered_data)
 
     use_threshold_hybrid, threshold_reason = _should_use_threshold_hybrid(
         filtered_data, config_to_send, execution_mode
@@ -1991,6 +2136,7 @@ def st_pivot_table(
                 dims=all_dims,
                 config_filters=config_to_send.get("filters"),
                 column_types=original_column_types,
+                date_grains=config_to_send.get("date_grains"),
             )
             data_payload["drilldown_records"] = records
             data_payload["drilldown_columns"] = columns

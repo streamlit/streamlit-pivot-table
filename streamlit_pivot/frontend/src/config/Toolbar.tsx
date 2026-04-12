@@ -52,6 +52,7 @@ import {
 import {
   AGGREGATION_TYPES,
   getAggregationForField,
+  getDimensionLabel,
   normalizeAggregationConfig,
   stringifyPivotConfig,
   type AggregationConfig,
@@ -643,6 +644,7 @@ const Toolbar: FC<ToolbarProps> = ({
           isDropHighlighted={activeOverZone === "rows"}
           activeId={activeId}
           registerCloseDropdown={dropdownCloseRef}
+          displayLabelForField={(field) => getDimensionLabel(config, field)}
         />
         <DropdownMultiSelect
           label="Columns"
@@ -659,6 +661,7 @@ const Toolbar: FC<ToolbarProps> = ({
           isDropHighlighted={activeOverZone === "columns"}
           activeId={activeId}
           registerCloseDropdown={dropdownCloseRef}
+          displayLabelForField={(field) => getDimensionLabel(config, field)}
         />
         <DropdownMultiSelect
           label="Values"
@@ -685,6 +688,11 @@ const Toolbar: FC<ToolbarProps> = ({
           {activeField ? (
             <DragOverlayChip
               field={activeField.field}
+              displayLabel={
+                activeField.zone === "rows" || activeField.zone === "columns"
+                  ? getDimensionLabel(config, activeField.field)
+                  : undefined
+              }
               testId={`toolbar-${activeField.zone}`}
               isValuesField={activeField.zone === "values"}
               aggregationLabel={
@@ -834,6 +842,10 @@ const SHOW_AS_BADGE_LABELS: Record<string, string> = {
   pct_of_total: "% of Grand Total",
   pct_of_row: "% of Row Total",
   pct_of_col: "% of Column Total",
+  diff_from_prev: "vs previous period",
+  pct_diff_from_prev: "% vs previous period",
+  diff_from_prev_year: "vs prior year",
+  pct_diff_from_prev_year: "% vs prior year",
 };
 
 const SYNTHETIC_FORMAT_PRESETS = [
@@ -873,6 +885,8 @@ interface DropdownMultiSelectProps {
   activeId?: string | null;
   /** Ref to register the dropdown close function for DnD drag start. */
   registerCloseDropdown?: React.MutableRefObject<(() => void) | null>;
+  /** Optional formatter for selected chip labels. */
+  displayLabelForField?: (field: string) => string;
 }
 
 interface AggregationPickerProps {
@@ -1022,6 +1036,7 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
   isDropHighlighted,
   activeId,
   registerCloseDropdown,
+  displayLabelForField,
 }): ReactElement => {
   const [open, setOpen] = useState(false);
   const [syntheticOpen, setSyntheticOpen] = useState(false);
@@ -1319,6 +1334,7 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
                   id={makeItemId(zId, col)}
                   zone={zId}
                   field={col}
+                  displayLabel={displayLabelForField?.(col)}
                   testId={testId}
                   isFrozen={isFrozen}
                   disabled={disabled}

@@ -19,12 +19,17 @@ import { KeyboardEvent, useCallback, useRef, useState } from "react";
 import type { PivotData } from "../engine/PivotData";
 import type {
   CellClickPayload,
+  DateGrain,
   DimensionFilter,
   PivotConfigV1,
   ShowValuesAs,
   SortConfig,
 } from "../engine/types";
-import { normalizeToggleList } from "../engine/types";
+import {
+  DATE_GRAINS,
+  getDimensionLabel,
+  normalizeToggleList,
+} from "../engine/types";
 import {
   buildCellClickPayload,
   type HeaderMenuTarget,
@@ -76,6 +81,11 @@ export interface UseHeaderMenuResult {
     | ((measure: string, axis: "row" | "col") => void)
     | undefined;
   menuConfig: PivotConfigV1 | undefined;
+  menuTitle: string | undefined;
+  menuDateGrain: DateGrain | undefined;
+  menuOnDateGrainChange: ((grain: DateGrain | undefined) => void) | undefined;
+  menuOnDateDrill: ((direction: "up" | "down") => void) | undefined;
+  menuSupportsPeriodComparison: boolean;
   /** Format a canonical dimension key into a display label. */
   menuFormatLabel: ((key: string) => string) | undefined;
   handleCellKeyDown: (
@@ -240,6 +250,48 @@ export function useHeaderMenu({
       ? handleTotalToggle
       : undefined;
 
+  const menuTitle = menuTarget
+    ? getDimensionLabel(config, menuTarget.dimension)
+    : undefined;
+
+  const menuDateGrain =
+    menuTarget && menuTarget.axis !== "value"
+      ? config.date_grains?.[menuTarget.dimension]
+      : undefined;
+
+  const handleDateGrainChange = useCallback(
+    (grain: DateGrain | undefined) => {
+      const target = menuTargetRef.current;
+      if (!target || !onConfigChange || target.axis === "value") return;
+      const next = { ...(config.date_grains ?? {}) };
+      if (grain) next[target.dimension] = grain;
+      else delete next[target.dimension];
+      onConfigChange({
+        ...config,
+        date_grains: Object.keys(next).length > 0 ? next : undefined,
+      });
+    },
+    [config, onConfigChange],
+  );
+
+  const handleDateDrill = useCallback(
+    (direction: "up" | "down") => {
+      const target = menuTargetRef.current;
+      if (!target || target.axis === "value") return;
+      const current = config.date_grains?.[target.dimension];
+      if (!current) return;
+      const idx = DATE_GRAINS.indexOf(current);
+      const nextIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (nextIdx < 0 || nextIdx >= DATE_GRAINS.length) return;
+      handleDateGrainChange(DATE_GRAINS[nextIdx]);
+    },
+    [config.date_grains, handleDateGrainChange],
+  );
+
+  const comparisonAxis = pivotData.getPeriodComparisonAxis();
+  const menuSupportsPeriodComparison =
+    menuTarget?.axis === "value" && comparisonAxis !== null;
+
   const handleCellKeyDown = useCallback(
     (
       e: KeyboardEvent,
@@ -277,6 +329,24 @@ export function useHeaderMenu({
     menuOnSubtotalToggle,
     menuOnTotalToggle,
     menuConfig: menuTarget ? config : undefined,
+    menuTitle,
+    menuDateGrain,
+    menuOnDateGrainChange:
+      menuTarget &&
+      menuTarget.axis !== "value" &&
+      onConfigChange &&
+      (pivotData.getColumnType(menuTarget.dimension) === "date" ||
+        pivotData.getColumnType(menuTarget.dimension) === "datetime")
+        ? handleDateGrainChange
+        : undefined,
+    menuOnDateDrill:
+      menuTarget &&
+      menuTarget.axis !== "value" &&
+      menuDateGrain &&
+      onConfigChange
+        ? handleDateDrill
+        : undefined,
+    menuSupportsPeriodComparison,
     menuFormatLabel,
     handleCellKeyDown,
   };

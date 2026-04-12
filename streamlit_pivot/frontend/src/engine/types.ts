@@ -42,6 +42,8 @@ export interface PivotConfigV1 {
   rows: string[];
   columns: string[];
   values: string[];
+  /** Per-field temporal grain for date/datetime dimensions. */
+  date_grains?: Record<string, DateGrain>;
   synthetic_measures?: SyntheticMeasureConfig[];
   aggregation: AggregationConfig;
   show_totals: boolean;
@@ -278,7 +280,39 @@ export function stringifyPivotConfig(config: PivotConfigV1): string {
 // Show-values-as display mode (Phase 3b)
 // ---------------------------------------------------------------------------
 
-export type ShowValuesAs = "raw" | "pct_of_total" | "pct_of_row" | "pct_of_col";
+export type ShowValuesAs =
+  | "raw"
+  | "pct_of_total"
+  | "pct_of_row"
+  | "pct_of_col"
+  | "diff_from_prev"
+  | "pct_diff_from_prev"
+  | "diff_from_prev_year"
+  | "pct_diff_from_prev_year";
+
+export type PeriodComparisonMode =
+  | "diff_from_prev"
+  | "pct_diff_from_prev"
+  | "diff_from_prev_year"
+  | "pct_diff_from_prev_year";
+
+export type DateGrain = "year" | "quarter" | "month" | "week" | "day";
+
+export const DATE_GRAINS: readonly DateGrain[] = [
+  "year",
+  "quarter",
+  "month",
+  "week",
+  "day",
+] as const;
+
+export const DATE_GRAIN_LABELS: Record<DateGrain, string> = {
+  year: "Year",
+  quarter: "Quarter",
+  month: "Month",
+  week: "Week",
+  day: "Day",
+};
 
 // ---------------------------------------------------------------------------
 // Conditional formatting (Phase 3c)
@@ -463,6 +497,41 @@ export function isSyntheticMeasure(
   return getSyntheticMeasureMap(config).has(valueField);
 }
 
+export function getDimensionLabel(
+  config: PivotConfigV1,
+  field: string,
+): string {
+  const grain = config.date_grains?.[field];
+  if (!grain) return field;
+  return `${field} (${DATE_GRAIN_LABELS[grain]})`;
+}
+
+export function isPeriodComparisonMode(
+  mode: ShowValuesAs | undefined,
+): mode is PeriodComparisonMode {
+  return (
+    mode === "diff_from_prev" ||
+    mode === "pct_diff_from_prev" ||
+    mode === "diff_from_prev_year" ||
+    mode === "pct_diff_from_prev_year"
+  );
+}
+
+export function getPeriodComparisonMode(
+  config: PivotConfigV1,
+  valueField: string,
+): PeriodComparisonMode | undefined {
+  const mode = config.show_values_as?.[valueField];
+  return isPeriodComparisonMode(mode) ? mode : undefined;
+}
+
+function hasGroupedComparisonAxis(config: PivotConfigV1): boolean {
+  const groupedFields = new Set(Object.keys(config.date_grains ?? {}));
+  return [...config.rows, ...config.columns].some((field) =>
+    groupedFields.has(field),
+  );
+}
+
 export function getSyntheticMeasureFormat(
   config: PivotConfigV1,
   valueField: string,
@@ -548,6 +617,28 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
         ? o.interactive
         : DEFAULT_CONFIG.interactive,
   };
+  if (
+    o.date_grains !== undefined &&
+    typeof o.date_grains === "object" &&
+    o.date_grains !== null &&
+    !Array.isArray(o.date_grains)
+  ) {
+    const rawDateGrains = o.date_grains as Record<string, unknown>;
+    const normalizedDateGrains = Object.fromEntries(
+      Object.entries(rawDateGrains).sort(([a], [b]) => a.localeCompare(b)),
+    );
+    for (const [field, grain] of Object.entries(normalizedDateGrains)) {
+      if (typeof field !== "string") {
+        throw new Error("'date_grains' keys must be strings");
+      }
+      if (!DATE_GRAINS.includes(grain as DateGrain)) {
+        throw new Error(
+          `'date_grains["${field}"]' must be one of: ${DATE_GRAINS.join(", ")}`,
+        );
+      }
+    }
+    result.date_grains = normalizedDateGrains as Record<string, DateGrain>;
+  }
   if (o.filters !== undefined)
     result.filters = o.filters as Record<string, DimensionFilter>;
   if (rowSort) result.row_sort = rowSort;
@@ -576,6 +667,10 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       "pct_of_total",
       "pct_of_row",
       "pct_of_col",
+      "diff_from_prev",
+      "pct_diff_from_prev",
+      "diff_from_prev_year",
+      "pct_diff_from_prev_year",
     ]);
     const syntheticIds = new Set(syntheticMeasures.map((m) => m.id));
     const sva = o.show_values_as as Record<string, unknown>;
@@ -592,6 +687,14 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     result.show_values_as = Object.fromEntries(
       Object.entries(sva).filter(([k]) => !syntheticIds.has(k)),
     ) as Record<string, ShowValuesAs>;
+    const hasPeriodMode = Object.values(result.show_values_as).some((mode) =>
+      isPeriodComparisonMode(mode),
+    );
+    if (hasPeriodMode && !hasGroupedComparisonAxis(result)) {
+      throw new Error(
+        "period comparison show_values_as modes require at least one date_grains field on rows or columns",
+      );
+    }
   }
   if (Array.isArray(o.conditional_formatting)) {
     const VALID_CF_TYPES = new Set<string>([

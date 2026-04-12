@@ -218,6 +218,21 @@ describe("validatePivotConfigV1", () => {
     ).toThrow("'aggregation' must be one of");
   });
 
+  it("rejects period comparison modes without a grouped comparison axis", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        version: 1,
+        rows: ["Region"],
+        columns: ["Year"],
+        values: ["Revenue"],
+        aggregation: "sum",
+        show_values_as: { Revenue: "diff_from_prev" },
+      }),
+    ).toThrow(
+      "period comparison show_values_as modes require at least one date_grains field on rows or columns",
+    );
+  });
+
   it("normalizes scalar aggregation input to a per-value map", () => {
     const result = validatePivotConfigV1({
       version: 1,

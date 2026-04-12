@@ -25,6 +25,7 @@ import {
   type AggregationConfig,
   type AggregationType,
   type PivotConfigV1,
+  type ShowValuesAs,
 } from "./types";
 
 const EPS = 0.001;
@@ -297,6 +298,124 @@ describe("show_values_as structural invariants (PivotData denominators)", () => 
       }
     }
     expect(sumProfitFrac).not.toBeCloseTo(1, 1);
+  });
+});
+
+describe("date-grain period comparisons", () => {
+  const DATE_SAMPLE: DataRecord[] = [
+    { region: "US", order_date: "2024-01-03", revenue: 100 },
+    { region: "US", order_date: "2024-02-10", revenue: 150 },
+    { region: "US", order_date: "2025-01-08", revenue: 130 },
+    { region: "EU", order_date: "2024-01-04", revenue: 80 },
+    { region: "EU", order_date: "2024-02-12", revenue: 95 },
+    { region: "EU", order_date: "2025-01-09", revenue: 90 },
+  ];
+
+  function makeDateConfig(showAs: ShowValuesAs): PivotConfigV1 {
+    return makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      date_grains: { order_date: "month" },
+      show_values_as: { revenue: showAs },
+    });
+  }
+
+  it("computes change vs previous period using grouped month buckets", () => {
+    const pd = new PivotData(DATE_SAMPLE, makeDateConfig("diff_from_prev"), {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    expect(pd.getColKeys()).toEqual([["2024-01"], ["2024-02"], ["2025-01"]]);
+    expect(
+      pd.getCellComparisonValue(
+        ["US"],
+        ["2024-02"],
+        "revenue",
+        "diff_from_prev",
+      ),
+    ).toBe(50);
+    expect(
+      pd.getColTotalComparisonValue(["2024-02"], "revenue", "diff_from_prev"),
+    ).toBe(65);
+  });
+
+  it("computes change vs prior year on the grouped temporal axis", () => {
+    const pd = new PivotData(
+      DATE_SAMPLE,
+      makeDateConfig("diff_from_prev_year"),
+      {
+        columnTypes: new Map([["order_date", "date"]]),
+      },
+    );
+    expect(
+      pd.getCellComparisonValue(
+        ["US"],
+        ["2025-01"],
+        "revenue",
+        "diff_from_prev_year",
+      ),
+    ).toBe(30);
+    expect(
+      pd.getColTotalComparisonValue(
+        ["2025-01"],
+        "revenue",
+        "diff_from_prev_year",
+      ),
+    ).toBe(40);
+  });
+
+  it("computes percent change vs previous period", () => {
+    const pd = new PivotData(
+      DATE_SAMPLE,
+      makeDateConfig("pct_diff_from_prev"),
+      {
+        columnTypes: new Map([["order_date", "date"]]),
+      },
+    );
+    expect(
+      pd.getCellComparisonValue(
+        ["US"],
+        ["2024-02"],
+        "revenue",
+        "pct_diff_from_prev",
+      ),
+    ).toBeCloseTo(0.5, 6);
+  });
+
+  it("supports period comparisons when the grouped temporal axis is on rows", () => {
+    const rowAxisData: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+      { order_date: "2024-01-04", region: "EU", revenue: 80 },
+      { order_date: "2024-02-12", region: "EU", revenue: 95 },
+    ];
+    const pd = new PivotData(
+      rowAxisData,
+      makeConfig({
+        rows: ["order_date"],
+        columns: ["region"],
+        values: ["revenue"],
+        date_grains: { order_date: "month" },
+        show_values_as: { revenue: "diff_from_prev" },
+      }),
+      {
+        columnTypes: new Map([["order_date", "date"]]),
+      },
+    );
+    expect(pd.getPeriodComparisonAxis()).toEqual({
+      axis: "row",
+      field: "order_date",
+      index: 0,
+      grain: "month",
+    });
+    expect(
+      pd.getCellComparisonValue(
+        ["2024-02"],
+        ["US"],
+        "revenue",
+        "diff_from_prev",
+      ),
+    ).toBe(50);
   });
 });
 

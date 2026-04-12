@@ -189,6 +189,70 @@ def test_prepare_threshold_hybrid_frame_avg_matches_pandas_groupby(pivot_module)
     )
 
 
+def test_prepare_threshold_hybrid_frame_groups_dates_by_month(pivot_module):
+    df = pd.DataFrame(
+        {
+            "order_date": pd.to_datetime(
+                ["2024-01-03", "2024-01-18", "2024-02-05", "2024-02-20"]
+            ),
+            "region": ["US", "EU", "US", "EU"],
+            "revenue": [100, 80, 150, 95],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["region"],
+        "columns": ["order_date"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "date_grains": {"order_date": "month"},
+        "synthetic_measures": [],
+    }
+    got = pivot_module._prepare_threshold_hybrid_frame(
+        df,
+        cfg,
+        column_types={"order_date": "date"},
+    )
+    expected = pd.DataFrame(
+        {
+            "region": ["EU", "EU", "US", "US"],
+            "order_date": ["2024-01", "2024-02", "2024-01", "2024-02"],
+            "revenue": [80, 95, 100, 150],
+        }
+    )
+    pd.testing.assert_frame_equal(
+        got.sort_values(["region", "order_date"]).reset_index(drop=True),
+        expected.sort_values(["region", "order_date"]).reset_index(drop=True),
+    )
+
+
+def test_compute_hybrid_drilldown_filters_grouped_date_bucket(pivot_module):
+    df = pd.DataFrame(
+        {
+            "order_date": pd.to_datetime(
+                ["2024-01-03", "2024-01-18", "2024-02-05", "2024-02-20"]
+            ),
+            "region": ["US", "EU", "US", "EU"],
+            "revenue": [100, 80, 150, 95],
+        }
+    )
+    records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+        df,
+        {"filters": {"order_date": "2024-01"}, "page": 0},
+        dims=["region", "order_date"],
+        column_types={"order_date": "date"},
+        date_grains={"order_date": "month"},
+    )
+    assert total == 2
+    assert page == 0
+    assert columns == ["order_date", "region", "revenue"]
+    assert {record["region"] for record in records} == {"US", "EU"}
+    assert {str(record["order_date"])[:10] for record in records} == {
+        "2024-01-03",
+        "2024-01-18",
+    }
+
+
 def test_should_use_threshold_hybrid_forced_bypasses_row_threshold(pivot_module):
     tiny = pd.DataFrame({"a": [1], "b": [2], "v": [3.0]})
     cfg = {

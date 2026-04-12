@@ -35,6 +35,7 @@ export function parseItemId(id: string): { zone: string; field: string } {
 
 export interface FieldChipProps {
   field: string;
+  displayLabel?: string;
   testId: string;
   isFrozen?: boolean;
   disabled?: boolean;
@@ -66,6 +67,7 @@ const GripDotsIcon: FC = () => (
 
 function ChipContent({
   field,
+  displayLabel,
   testId,
   isFrozen,
   disabled,
@@ -84,7 +86,7 @@ function ChipContent({
         className={styles.chipLabelText}
         data-testid={`${testId}-chip-label-${field}`}
       >
-        <span className={styles.chipPrimaryText}>{field}</span>
+        <span className={styles.chipPrimaryText}>{displayLabel ?? field}</span>
         {isValuesField && aggregationLabel && (
           <span
             className={styles.chipAggregationLabel}

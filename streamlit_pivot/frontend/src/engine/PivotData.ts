@@ -42,8 +42,14 @@ import {
   formatDateTimeValue,
   formatIntegerLabel,
   formatDateWithPattern,
-  normalizeToUTC,
 } from "./formatters";
+import {
+  bucketTemporalKey,
+  formatTemporalBucketLabel,
+  isTemporalColumnType,
+  shiftTemporalBucketKey,
+} from "./dateGrouping";
+import type { DateGrain } from "./types";
 
 export type DataRecord = Record<string, unknown>;
 
@@ -106,6 +112,13 @@ export function buildSidecarFingerprint(
       Object.entries(agg).sort(([a], [b]) => a.localeCompare(b)),
     ),
     columns: config.columns,
+    date_grains: config.date_grains
+      ? Object.fromEntries(
+          Object.entries(config.date_grains).sort(([a], [b]) =>
+            a.localeCompare(b),
+          ),
+        )
+      : undefined,
     filters: Object.fromEntries(
       Object.entries(filters)
         .sort(([a], [b]) => a.localeCompare(b))
@@ -370,37 +383,12 @@ export class PivotData {
   // Null handling
   // ---------------------------------------------------------------------------
 
-  private _canonicalTemporalKey(
-    colType: ColumnType,
-    raw: unknown,
-  ): string | null {
-    if (colType === "datetime") {
-      if (typeof raw === "number") {
-        return new Date(raw).toISOString();
-      }
-      if (typeof raw === "string") {
-        const d = new Date(normalizeToUTC(raw));
-        if (!isNaN(d.getTime())) return d.toISOString();
-      }
-      if (raw instanceof Date) {
-        return raw.toISOString();
-      }
-      return null;
-    }
-    if (colType === "date") {
-      if (typeof raw === "number") {
-        return new Date(raw).toISOString().slice(0, 10);
-      }
-      if (typeof raw === "string") {
-        const d = new Date(normalizeToUTC(raw));
-        if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-      }
-      if (raw instanceof Date) {
-        return raw.toISOString().slice(0, 10);
-      }
-      return null;
-    }
-    return null;
+  private _dateGrainForField(field: string): DateGrain | undefined {
+    return this._config.date_grains?.[field];
+  }
+
+  private _compareDimKeys(_field: string, a: string, b: string): number {
+    return mixedCompare(a, b);
   }
 
   private _resolveDimKey(field: string, raw: unknown): string {
@@ -409,8 +397,9 @@ export class PivotData {
       return mode === "separate" ? "(null)" : "";
     }
     const colType = this._columnTypes?.get(field);
-    if (colType === "datetime" || colType === "date") {
-      const canonical = this._canonicalTemporalKey(colType, raw);
+    if (isTemporalColumnType(colType)) {
+      const grain = this._dateGrainForField(field);
+      const canonical = bucketTemporalKey(raw, colType, grain);
       if (canonical !== null) {
         // Cache the original raw value for export
         if (!this._rawValueMap.has(field)) {
@@ -448,8 +437,11 @@ export class PivotData {
     const pattern =
       this._config.dimension_format?.[field] ??
       this._config.dimension_format?.["__all__"];
+    const grain = this._dateGrainForField(field);
 
-    if (pattern && (colType === "datetime" || colType === "date")) {
+    if (grain && isTemporalColumnType(colType)) {
+      label = formatTemporalBucketLabel(key, grain, pattern);
+    } else if (pattern && (colType === "datetime" || colType === "date")) {
       label = formatDateWithPattern(key, pattern);
     } else if (colType === "datetime") {
       const rawVal = this._rawValueMap.get(field)?.get(key);
@@ -665,7 +657,7 @@ export class PivotData {
       this._uniqueValuesCache = new Map(
         [...uniqueValueSets.entries()].map(([field, values]) => [
           field,
-          [...values].sort((a, b) => a.localeCompare(b)),
+          [...values].sort((a, b) => this._compareDimKeys(field, a, b)),
         ]),
       );
     }
@@ -750,9 +742,9 @@ export class PivotData {
           const oa = ia === -1 ? customOrder.length : ia;
           const ob = ib === -1 ? customOrder.length : ib;
           cmp = oa - ob;
-          if (cmp === 0) cmp = mixedCompare(ai, bi);
+          if (cmp === 0) cmp = this._compareDimKeys(dim ?? "", ai, bi);
         } else {
-          cmp = mixedCompare(ai, bi);
+          cmp = this._compareDimKeys(dim ?? "", ai, bi);
         }
         const levelSign = targetDimIdx === -1 || i === targetDimIdx ? sign : 1;
         if (cmp !== 0) return cmp * levelSign;
@@ -824,6 +816,212 @@ export class PivotData {
       this._sortedColKeys = [...this._colKeySet.values()].sort(cmp);
     }
     return this._sortedColKeys;
+  }
+
+  getPeriodComparisonAxis(): {
+    axis: "row" | "col";
+    field: string;
+    index: number;
+    grain: DateGrain;
+  } | null {
+    const columnCandidate = this._config.columns.findIndex((field) => {
+      const colType = this._columnTypes?.get(field);
+      return isTemporalColumnType(colType) && !!this._dateGrainForField(field);
+    });
+    if (columnCandidate !== -1) {
+      const field = this._config.columns[columnCandidate]!;
+      return {
+        axis: "col",
+        field,
+        index: columnCandidate,
+        grain: this._dateGrainForField(field)!,
+      };
+    }
+    const rowCandidate = this._config.rows.findIndex((field) => {
+      const colType = this._columnTypes?.get(field);
+      return isTemporalColumnType(colType) && !!this._dateGrainForField(field);
+    });
+    if (rowCandidate !== -1) {
+      const field = this._config.rows[rowCandidate]!;
+      return {
+        axis: "row",
+        field,
+        index: rowCandidate,
+        grain: this._dateGrainForField(field)!,
+      };
+    }
+    return null;
+  }
+
+  getPreviousComparableKey(
+    axis: "row" | "col",
+    key: string[],
+    mode:
+      | "diff_from_prev"
+      | "pct_diff_from_prev"
+      | "diff_from_prev_year"
+      | "pct_diff_from_prev_year",
+  ): string[] | null {
+    const ctx = this.getPeriodComparisonAxis();
+    if (!ctx || ctx.axis !== axis) return null;
+    const currentBucket = key[ctx.index];
+    if (!currentBucket) return null;
+    const strategy =
+      mode === "diff_from_prev_year" || mode === "pct_diff_from_prev_year"
+        ? "previous_year"
+        : "previous";
+    const previousBucket = shiftTemporalBucketKey(
+      currentBucket,
+      ctx.grain,
+      strategy,
+    );
+    if (!previousBucket) return null;
+    const nextKey = [...key];
+    nextKey[ctx.index] = previousBucket;
+    return nextKey;
+  }
+
+  computePeriodComparisonValue(
+    current: number | null,
+    previous: number | null,
+    mode:
+      | "diff_from_prev"
+      | "pct_diff_from_prev"
+      | "diff_from_prev_year"
+      | "pct_diff_from_prev_year",
+  ): number | null {
+    if (current == null || previous == null) return null;
+    if (mode === "diff_from_prev" || mode === "diff_from_prev_year") {
+      return current - previous;
+    }
+    if (previous === 0) return null;
+    return (current - previous) / previous;
+  }
+
+  getCellComparisonValue(
+    rowKey: string[],
+    colKey: string[],
+    valField: string,
+    mode:
+      | "diff_from_prev"
+      | "pct_diff_from_prev"
+      | "diff_from_prev_year"
+      | "pct_diff_from_prev_year",
+  ): number | null {
+    const ctx = this.getPeriodComparisonAxis();
+    if (!ctx) return null;
+    const current = this.getAggregator(rowKey, colKey, valField).value();
+    if (ctx.axis === "col") {
+      const prevColKey = this.getPreviousComparableKey("col", colKey, mode);
+      if (!prevColKey) return null;
+      const previous = this.getAggregator(rowKey, prevColKey, valField).value();
+      return this.computePeriodComparisonValue(current, previous, mode);
+    }
+    const prevRowKey = this.getPreviousComparableKey("row", rowKey, mode);
+    if (!prevRowKey) return null;
+    const previous = this.getAggregator(prevRowKey, colKey, valField).value();
+    return this.computePeriodComparisonValue(current, previous, mode);
+  }
+
+  getRowTotalComparisonValue(
+    rowKey: string[],
+    valField: string,
+    mode:
+      | "diff_from_prev"
+      | "pct_diff_from_prev"
+      | "diff_from_prev_year"
+      | "pct_diff_from_prev_year",
+  ): number | null {
+    const ctx = this.getPeriodComparisonAxis();
+    if (!ctx || ctx.axis !== "row") return null;
+    const prevRowKey = this.getPreviousComparableKey("row", rowKey, mode);
+    if (!prevRowKey) return null;
+    const current = this.getRowTotal(rowKey, valField).value();
+    const previous = this.getRowTotal(prevRowKey, valField).value();
+    return this.computePeriodComparisonValue(current, previous, mode);
+  }
+
+  getColTotalComparisonValue(
+    colKey: string[],
+    valField: string,
+    mode:
+      | "diff_from_prev"
+      | "pct_diff_from_prev"
+      | "diff_from_prev_year"
+      | "pct_diff_from_prev_year",
+  ): number | null {
+    const ctx = this.getPeriodComparisonAxis();
+    if (!ctx || ctx.axis !== "col") return null;
+    const prevColKey = this.getPreviousComparableKey("col", colKey, mode);
+    if (!prevColKey) return null;
+    const current = this.getColTotal(colKey, valField).value();
+    const previous = this.getColTotal(prevColKey, valField).value();
+    return this.computePeriodComparisonValue(current, previous, mode);
+  }
+
+  getSubtotalComparisonValue(
+    parentKey: string[],
+    colKey: string[],
+    valField: string,
+    mode:
+      | "diff_from_prev"
+      | "pct_diff_from_prev"
+      | "diff_from_prev_year"
+      | "pct_diff_from_prev_year",
+  ): number | null {
+    const ctx = this.getPeriodComparisonAxis();
+    if (!ctx) return null;
+    const current = this.getSubtotalAggregator(
+      parentKey,
+      colKey,
+      valField,
+    ).value();
+    if (ctx.axis === "col") {
+      if (ctx.index >= colKey.length) return null;
+      const prevColKey = this.getPreviousComparableKey("col", colKey, mode);
+      if (!prevColKey) return null;
+      const previous = this.getSubtotalAggregator(
+        parentKey,
+        prevColKey,
+        valField,
+      ).value();
+      return this.computePeriodComparisonValue(current, previous, mode);
+    }
+    if (ctx.index >= parentKey.length) return null;
+    const prevParentKey = this.getPreviousComparableKey("row", parentKey, mode);
+    if (!prevParentKey) return null;
+    const previous = this.getSubtotalAggregator(
+      prevParentKey,
+      colKey,
+      valField,
+    ).value();
+    return this.computePeriodComparisonValue(current, previous, mode);
+  }
+
+  getColGroupComparisonValue(
+    rowKey: string[],
+    colPrefix: string[],
+    valField: string,
+    mode:
+      | "diff_from_prev"
+      | "pct_diff_from_prev"
+      | "diff_from_prev_year"
+      | "pct_diff_from_prev_year",
+  ): number | null {
+    const ctx = this.getPeriodComparisonAxis();
+    if (!ctx || ctx.axis !== "col" || ctx.index >= colPrefix.length)
+      return null;
+    const prevPrefix = this.getPreviousComparableKey("col", colPrefix, mode);
+    if (!prevPrefix) return null;
+    const current =
+      rowKey.length === 0
+        ? this.getColGroupGrandSubtotal(colPrefix, valField).value()
+        : this.getSubtotalColGroupAgg(rowKey, colPrefix, valField).value();
+    const previous =
+      rowKey.length === 0
+        ? this.getColGroupGrandSubtotal(prevPrefix, valField).value()
+        : this.getSubtotalColGroupAgg(rowKey, prevPrefix, valField).value();
+    return this.computePeriodComparisonValue(current, previous, mode);
   }
 
   // ---------------------------------------------------------------------------
