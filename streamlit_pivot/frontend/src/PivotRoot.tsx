@@ -100,6 +100,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   drilldown_page_size,
   hybrid_totals,
   hybrid_agg_remap,
+  source_row_count,
   setStateValue,
   setTriggerValue,
 }): ReactElement => {
@@ -291,7 +292,7 @@ const PivotRoot: FC<PivotRootProps> = ({
       firstMountMs:
         debugMetrics?.firstMountMs ??
         Math.round((parseMs + computeMs + renderMs) * 100) / 100,
-      sourceRows: pivotData.recordCount,
+      sourceRows: source_row_count ?? pivotData.recordCount,
       sourceCols: rawAllColumns.length,
       totalRows: pivotData.uniqueRowKeyCount,
       totalCols: pivotData.uniqueColKeyCount,
@@ -358,7 +359,7 @@ const PivotRoot: FC<PivotRootProps> = ({
     if (execution_mode === "threshold_hybrid") {
       const hybridInfo =
         server_mode_reason?.trim() ||
-        "This table uses server pre-aggregated data. Drill-down to raw rows is not available.";
+        "This table uses server pre-aggregated data for performance.";
       if (!w.includes(hybridInfo)) w.push(hybridInfo);
     }
     return w;

@@ -33,6 +33,45 @@ def test_can_use_threshold_hybrid_accepts_avg(pivot_module):
     assert ok is True
 
 
+def test_non_dimension_filter_causes_fallback(pivot_module):
+    """Filter on a field not in rows/columns makes hybrid incompatible."""
+    cfg = {
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "filters": {"category": {"include": ["A"]}},
+    }
+    ok, msg = pivot_module._can_use_threshold_hybrid(cfg)
+    assert ok is False
+    assert "category" in msg
+
+
+def test_dimension_filter_allows_hybrid(pivot_module):
+    """Filter on a row/column dimension is compatible with hybrid."""
+    cfg = {
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "filters": {"region": {"include": ["US"]}},
+    }
+    ok, _msg = pivot_module._can_use_threshold_hybrid(cfg)
+    assert ok is True
+
+
+def test_no_filters_allows_hybrid(pivot_module):
+    """No filters at all is compatible with hybrid."""
+    cfg = {
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+    }
+    ok, _msg = pivot_module._can_use_threshold_hybrid(cfg)
+    assert ok is True
+
+
 def test_prepare_threshold_hybrid_frame_avg_matches_pandas_groupby(pivot_module):
     df = pd.DataFrame(
         {
@@ -293,8 +332,25 @@ class TestComputeHybridDrilldown:
         )
         assert total == 3
 
-    def test_non_dim_column_uses_fillna_semantics(self, pivot_module):
-        """Non-dimension columns use fillna('').astype(str), not resolved-dim logic."""
+    def test_non_dim_column_uses_per_field_null_mode(self, pivot_module):
+        """All fields use per-field _get_null_mode, matching frontend _resolveDimValue."""
+        df = pd.DataFrame(
+            {
+                "region": ["US", "EU"],
+                "revenue": [100, None],
+            }
+        )
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df,
+            {"filters": {"revenue": "(null)"}},
+            null_handling="separate",
+            dims=["region"],
+        )
+        assert total == 1
+        assert records[0]["region"] == "EU"
+
+    def test_non_dim_column_exclude_mode_uses_empty_string(self, pivot_module):
+        """With null_handling='exclude', null non-dim values resolve to ''."""
         df = pd.DataFrame(
             {
                 "region": ["US", "EU"],
@@ -304,11 +360,66 @@ class TestComputeHybridDrilldown:
         records, columns, total, page = pivot_module._compute_hybrid_drilldown(
             df,
             {"filters": {"revenue": ""}},
-            null_handling="separate",
+            null_handling="exclude",
             dims=["region"],
         )
         assert total == 1
         assert records[0]["region"] == "EU"
+
+    def test_config_filters_intersect_cell_filters(self, pivot_module, df):
+        """Config filter 'region: include US' + cell click 'year: 2023' = only US+2023 rows."""
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df,
+            {"filters": {"year": "2023"}},
+            null_handling=None,
+            dims=["region", "year"],
+            config_filters={"region": {"include": ["US"]}},
+        )
+        assert total == 2
+        assert all(r["region"] == "US" for r in records)
+        assert all(r["year"] == "2023" for r in records)
+
+    def test_config_exclude_filter_in_drilldown(self, pivot_module, df):
+        """Config filter 'region: exclude EU' removes EU from drilldown."""
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df,
+            {"filters": {}},
+            config_filters={"region": {"exclude": ["EU"]}},
+        )
+        assert total == 3
+        assert all(r["region"] == "US" for r in records)
+
+    def test_config_filter_separate_mode_null_in_drilldown(self, pivot_module):
+        """Config filter + null_handling='separate' correctly filters '(null)'."""
+        df = pd.DataFrame(
+            {
+                "region": ["US", None, "EU", None],
+                "revenue": [100, 200, 300, 400],
+            }
+        )
+        records, columns, total, page = pivot_module._compute_hybrid_drilldown(
+            df,
+            {"filters": {}},
+            null_handling="separate",
+            dims=["region"],
+            config_filters={"region": {"include": ["(null)"]}},
+        )
+        assert total == 2
+        revenues = sorted(r["revenue"] for r in records)
+        assert revenues == [200, 400]
+
+    def test_config_filters_none_is_noop(self, pivot_module, df):
+        """config_filters=None should not affect results."""
+        records_with, _, total_with, _ = pivot_module._compute_hybrid_drilldown(
+            df,
+            {"filters": {"region": "US"}},
+            config_filters=None,
+        )
+        records_without, _, total_without, _ = pivot_module._compute_hybrid_drilldown(
+            df,
+            {"filters": {"region": "US"}},
+        )
+        assert total_with == total_without
 
 
 # ---- New aggregation support tests ----
@@ -506,6 +617,99 @@ def test_sidecar_agg_func_count_distinct_does_not_coerce(pivot_module):
     """count_distinct in sidecar should count distinct non-null values of any type."""
     series = pd.Series(["abc", "abc", "def", None])
     assert int(pivot_module._sidecar_agg_func("count_distinct", series)) == 2
+
+
+# ---- Pre-aggregation config.filters tests ----
+
+
+def test_prepare_hybrid_frame_applies_dimension_include_filter(pivot_module):
+    """Include filter removes excluded groups from pre-aggregated output."""
+    df = pd.DataFrame(
+        {
+            "region": ["US", "US", "EU", "EU"],
+            "year": ["2023", "2024", "2023", "2024"],
+            "revenue": [100.0, 150.0, 200.0, 250.0],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "filters": {"region": {"include": ["US"]}},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(df, cfg)
+    assert set(result["region"].unique()) == {"US"}
+    assert len(result) == 2
+
+
+def test_prepare_hybrid_frame_applies_dimension_exclude_filter(pivot_module):
+    """Exclude filter removes those groups from pre-aggregated output."""
+    df = pd.DataFrame(
+        {
+            "region": ["US", "US", "EU", "EU"],
+            "year": ["2023", "2024", "2023", "2024"],
+            "revenue": [100.0, 150.0, 200.0, 250.0],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "filters": {"region": {"exclude": ["EU"]}},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(df, cfg)
+    assert set(result["region"].unique()) == {"US"}
+    assert len(result) == 2
+
+
+def test_prepare_hybrid_frame_separate_mode_null_filter(pivot_module):
+    """null_handling='separate' + filter on '(null)' correctly pre-filters."""
+    df = pd.DataFrame(
+        {
+            "region": ["US", None, "EU", None],
+            "revenue": [100.0, 200.0, 300.0, 400.0],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["region"],
+        "columns": [],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "filters": {"region": {"include": ["(null)"]}},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(
+        df, cfg, null_handling="separate"
+    )
+    assert len(result) == 1
+    assert float(result["revenue"].values[0]) == 600.0
+
+
+def test_prepare_hybrid_frame_no_filters_unchanged(pivot_module):
+    """No filters produces same output as before."""
+    df = pd.DataFrame(
+        {
+            "region": ["US", "EU"],
+            "revenue": [100.0, 200.0],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["region"],
+        "columns": [],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(df, cfg)
+    assert len(result) == 2
 
 
 # ---- Sidecar computation tests ----

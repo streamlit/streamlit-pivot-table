@@ -149,6 +149,15 @@ def _estimate_group_count(df: Any, fields: list[str]) -> int:
 def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
     if config.get("synthetic_measures"):
         return False, "threshold_hybrid currently skips synthetic measures"
+    filters = config.get("filters", {})
+    if filters:
+        dim_set = set(config.get("rows", []) + config.get("columns", []))
+        non_dim = [f for f in filters if f not in dim_set]
+        if non_dim:
+            return False, (
+                f"threshold_hybrid requires filters on row/column dimensions only; "
+                f"filter on {non_dim} is not in the current layout"
+            )
     return True, "config is compatible with threshold_hybrid"
 
 
@@ -193,7 +202,9 @@ def _should_use_threshold_hybrid(
     return False, "auto-selected client_only because the dataset stays within budget"
 
 
-def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
+def _prepare_threshold_hybrid_frame(
+    df: Any, config: PivotConfig, null_handling: Any = None
+) -> Any:
     group_fields = [*config.get("rows", []), *config.get("columns", [])]
     aggregation = dict(config.get("aggregation", {}))
     value_fields = list(config.get("values", []))
@@ -224,11 +235,13 @@ def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
         else:
             named[vf] = pd.NamedAgg(column=vf, aggfunc=agg)
 
+    filtered_df = _resolve_and_filter(df, config.get("filters", {}), null_handling)
+
     if not group_fields:
         row: dict[str, Any] = {}
         for vf in value_fields:
             agg = aggregation.get(vf, "sum")
-            ser = df[vf]
+            ser = filtered_df[vf]
             if agg in _NUMERIC_COERCE_AGGS:
                 ser = pd.to_numeric(ser, errors="coerce")
             if agg == "avg":
@@ -253,7 +266,7 @@ def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
                 row[vf] = ser.agg(agg)
         return pd.DataFrame([row])
 
-    working = df.copy()
+    working = filtered_df.copy()
     for vf in numeric_coerce_fields:
         working[vf] = pd.to_numeric(working[vf], errors="coerce")
 
@@ -308,29 +321,33 @@ def _normalize_dim_values(df: Any, dims: list[str], null_handling: Any) -> Any:
     return df
 
 
-def _apply_hybrid_filters(
+def _resolve_and_filter(
     df: Any,
-    config: PivotConfig,
-    dims: list[str],
+    filters: dict[str, dict] | None,
+    null_handling: Any,
 ) -> Any:
-    """Apply config filters to a DataFrame whose dimension columns have already
-    been normalized via _normalize_dim_values (values are resolved strings)."""
-    filters = config.get("filters", {})
+    """Apply dimension filters to a raw DataFrame using resolved-value semantics.
+
+    Mirrors PivotData._shouldIncludeRow + _resolveDimValue: for every filter
+    field, resolve null/empty values via per-field _get_null_mode, then compare.
+    """
     if not filters:
         return df
     mask = pd.Series(True, index=df.index)
     for field, filt in filters.items():
         if field not in df.columns:
             continue
-        col_str = (
-            df[field].astype(str) if field in dims else df[field].fillna("").astype(str)
-        )
+        mode = _get_null_mode(field, null_handling)
+        if mode == "separate":
+            resolved = df[field].fillna("(null)").replace("", "(null)").astype(str)
+        else:
+            resolved = df[field].fillna("").astype(str)
         inc = filt.get("include")
         exc = filt.get("exclude")
         if inc:
-            mask &= col_str.isin(inc)
+            mask &= resolved.isin(inc)
         elif exc:
-            mask &= ~col_str.isin(exc)
+            mask &= ~resolved.isin(exc)
     return df[mask]
 
 
@@ -475,7 +492,7 @@ def _compute_hybrid_totals(
 
     all_dims = rows + columns
     working = _normalize_dim_values(df, all_dims, null_handling)
-    working = _apply_hybrid_filters(working, config, all_dims)
+    working = _resolve_and_filter(working, config.get("filters", {}), null_handling)
 
     fingerprint = _build_sidecar_fingerprint(config, null_handling)
 
@@ -603,35 +620,34 @@ def _compute_hybrid_drilldown(
     drilldown_request: dict[str, Any],
     null_handling: Any = None,
     dims: list[str] | None = None,
+    config_filters: dict[str, dict] | None = None,
     page_size: int = _DRILLDOWN_PAGE_SIZE,
 ) -> tuple[list[dict[str, Any]], list[str], int, int]:
     """Filter the original DataFrame for a hybrid-mode drill-down request.
 
     Uses resolved-dimension semantics (matching _resolveDimValue on the
     frontend) so that filter values like "(null)" align correctly with
-    null_handling modes.
+    null_handling modes.  Applies config-level dimension filters first
+    (matching _shouldIncludeRow), then cell-click filters.
 
     Returns (records_list, column_names, total_matching_count, page).
     """
+    working = _resolve_and_filter(df, config_filters or {}, null_handling)
+
     filters: dict[str, str] = drilldown_request.get("filters", {})
     page: int = max(0, int(drilldown_request.get("page", 0)))
 
-    dim_set = set(dims) if dims else set()
-
-    mask = pd.Series(True, index=df.index)
+    mask = pd.Series(True, index=working.index)
     for col, val in filters.items():
-        if col not in df.columns:
+        if col not in working.columns:
             continue
-        if col in dim_set:
-            mode = _get_null_mode(col, null_handling)
-            if mode == "separate":
-                resolved = df[col].fillna("(null)").replace("", "(null)").astype(str)
-            else:
-                resolved = df[col].fillna("").astype(str)
-            mask &= resolved == str(val)
+        mode = _get_null_mode(col, null_handling)
+        if mode == "separate":
+            resolved = working[col].fillna("(null)").replace("", "(null)").astype(str)
         else:
-            mask &= df[col].fillna("").astype(str) == str(val)
-    filtered = df[mask]
+            resolved = working[col].fillna("").astype(str)
+        mask &= resolved == str(val)
+    filtered = working[mask]
     total_count = len(filtered)
     offset = page * page_size
     page_slice = filtered.iloc[offset : offset + page_size]
@@ -1478,7 +1494,7 @@ def st_pivot_table(
         if drill_note not in threshold_reason:
             threshold_reason = f"{threshold_reason}{drill_note}"
     materialized_data = (
-        _prepare_threshold_hybrid_frame(data, config_to_send)
+        _prepare_threshold_hybrid_frame(data, config_to_send, null_handling)
         if use_threshold_hybrid
         else data
     )
@@ -1497,6 +1513,7 @@ def st_pivot_table(
     }
 
     if use_threshold_hybrid:
+        data_payload["source_row_count"] = len(data)
         agg_dict = config_to_send.get("aggregation", {})
         agg_remap = _build_hybrid_agg_remap(agg_dict)
         if agg_remap:
@@ -1555,6 +1572,7 @@ def st_pivot_table(
                 drilldown_request,
                 null_handling=null_handling,
                 dims=all_dims,
+                config_filters=config_to_send.get("filters"),
             )
             data_payload["drilldown_records"] = records
             data_payload["drilldown_columns"] = columns

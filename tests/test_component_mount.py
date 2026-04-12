@@ -297,3 +297,54 @@ def test_threshold_hybrid_omits_sidecar_for_decomposable(
     payload = calls[0]["data"]
     assert "hybrid_totals" not in payload
     assert "hybrid_agg_remap" not in payload
+
+
+def test_threshold_hybrid_includes_source_row_count(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert payload["source_row_count"] == len(large_df)
+
+
+def test_client_only_omits_source_row_count(sample_df, pivot_module, mount_recorder):
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="client_only",
+    )
+
+    payload = calls[0]["data"]
+    assert "source_row_count" not in payload
+
+
+def test_non_dimension_filter_causes_client_fallback(pivot_module):
+    """Programmatic filter on non-dimension field makes hybrid incompatible."""
+    cfg = {
+        "rows": ["Region"],
+        "columns": ["Year"],
+        "values": ["Revenue"],
+        "aggregation": {"Revenue": "sum"},
+        "filters": {"Category": {"include": ["A"]}},
+    }
+    ok, msg = pivot_module._can_use_threshold_hybrid(cfg)
+    assert ok is False
+    assert "Category" in msg

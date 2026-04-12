@@ -884,6 +884,8 @@ export interface PivotTableData {
   drilldown_page?: number;
   /** Number of rows per page (set by the server). */
   drilldown_page_size?: number;
+  /** Original row count before hybrid pre-aggregation. */
+  source_row_count?: number;
 }
 
 // ---------------------------------------------------------------------------
