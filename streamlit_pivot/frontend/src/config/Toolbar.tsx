@@ -1272,7 +1272,7 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
                               className={styles.aggregationControlRow}
                             >
                               <span className={styles.aggregationControlLabel}>
-                                {col}
+                                {col}:
                               </span>
                               <AggregationPicker
                                 field={col}
