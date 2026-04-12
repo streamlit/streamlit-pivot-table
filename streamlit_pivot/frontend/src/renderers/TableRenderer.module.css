@@ -222,13 +222,13 @@
 }
 
 .headerCellInner:has(.headerMenuBtn) {
-  padding-right: 16px;
+  padding-right: 20px;
 }
 
 .headerMenuBtn {
   display: inline-flex;
   position: absolute;
-  right: -6px;
+  right: -2px;
   top: 50%;
   transform: translateY(-50%);
   width: 20px;

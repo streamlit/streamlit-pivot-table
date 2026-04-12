@@ -350,7 +350,10 @@ def test_toggle_row_totals_off(page_at_app: Page):
     )
     expect(container.get_by_test_id("pivot-row-total")).to_have_count(0, timeout=10000)
 
-    container.get_by_test_id("toolbar-row-totals").locator("input").click()
+    panel = open_settings_popover(page, container)
+    panel.get_by_test_id("toolbar-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
     expect(container.get_by_test_id("pivot-row-total").first).to_be_visible(
         timeout=10000
     )

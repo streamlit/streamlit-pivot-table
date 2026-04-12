@@ -1431,21 +1431,21 @@ describe("Column resize handles", () => {
     });
   });
 
-  it("renders resize handles on last value label per slot when multi-value", () => {
+  it("renders resize handles on value labels when multi-value", () => {
     const config = makeConfig({ values: ["revenue", "profit"] });
     const pd = createPivotData(SAMPLE_DATA, config);
     render(<TableRenderer pivotData={pd} config={config} />);
 
-    const valHandles = screen.getAllByTestId(/^resize-handle-val-\d+$/);
+    const valHandles = screen.getAllByTestId(/^resize-handle-val-\d+-\d+$/);
     expect(valHandles.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("does not render resize handles when no values are provided", () => {
+  it("does not render resize handles when single value", () => {
     const config = makeConfig({ values: ["revenue"] });
     const pd = createPivotData(SAMPLE_DATA, config);
     render(<TableRenderer pivotData={pd} config={config} />);
 
-    const valHandles = screen.queryAllByTestId(/^resize-handle-val-\d+$/);
+    const valHandles = screen.queryAllByTestId(/^resize-handle-val-\d+-\d+$/);
     expect(valHandles.length).toBe(0);
   });
 

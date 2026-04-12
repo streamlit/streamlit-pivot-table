@@ -218,7 +218,9 @@ const PivotRoot: FC<PivotRootProps> = ({
   }, [pivotData, currentConfig]);
 
   useEffect(() => {
-    setIsTableScrollable(Boolean(budget?.needsVirtualization));
+    if (budget?.needsVirtualization) {
+      setIsTableScrollable(true);
+    }
   }, [budget?.needsVirtualization]);
 
   const renderStartRef = useRef(0);
@@ -614,14 +616,10 @@ const PivotRoot: FC<PivotRootProps> = ({
                   isFullscreen ? windowHeight : (max_height ?? 500)
                 }
                 onSortChange={
-                  currentConfig.interactive && !locked
-                    ? handleSortChange
-                    : undefined
+                  currentConfig.interactive ? handleSortChange : undefined
                 }
                 onFilterChange={
-                  currentConfig.interactive && !locked
-                    ? handleFilterChange
-                    : undefined
+                  currentConfig.interactive ? handleFilterChange : undefined
                 }
                 onConfigChange={
                   currentConfig.interactive && !locked
@@ -629,7 +627,7 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive && !locked
+                  currentConfig.interactive
                     ? handleShowValuesAsChange
                     : undefined
                 }
@@ -651,14 +649,10 @@ const PivotRoot: FC<PivotRootProps> = ({
                 }
                 maxRows={safeMaxRows}
                 onSortChange={
-                  currentConfig.interactive && !locked
-                    ? handleSortChange
-                    : undefined
+                  currentConfig.interactive ? handleSortChange : undefined
                 }
                 onFilterChange={
-                  currentConfig.interactive && !locked
-                    ? handleFilterChange
-                    : undefined
+                  currentConfig.interactive ? handleFilterChange : undefined
                 }
                 onConfigChange={
                   currentConfig.interactive && !locked
@@ -666,7 +660,7 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive && !locked
+                  currentConfig.interactive
                     ? handleShowValuesAsChange
                     : undefined
                 }

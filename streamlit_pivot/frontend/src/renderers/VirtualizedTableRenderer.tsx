@@ -104,8 +104,98 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     startWidth: number;
   } | null>(null);
 
+  const handleResizeDoubleClick = useCallback(
+    (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const th = (e.target as HTMLElement).closest("th");
+      const table = wrapperRef.current?.querySelector("table");
+      if (!th || !table) return;
+
+      const headerRow = th.parentElement as HTMLTableRowElement;
+      let physicalCol = 0;
+      for (const cell of headerRow.cells) {
+        if (cell === th) break;
+        physicalCol += cell.colSpan || 1;
+      }
+
+      let maxWidth = MIN_COL_WIDTH;
+      for (const row of table.querySelectorAll("tbody tr")) {
+        const cells = (row as HTMLTableRowElement).cells;
+        let col = 0;
+        for (const cell of cells) {
+          const span = cell.colSpan || 1;
+          if (col <= physicalCol && physicalCol < col + span) {
+            const ruler = document.createElement("span");
+            ruler.style.visibility = "hidden";
+            ruler.style.position = "absolute";
+            ruler.style.whiteSpace = "nowrap";
+            ruler.style.font = getComputedStyle(cell).font;
+            ruler.textContent = cell.textContent;
+            document.body.appendChild(ruler);
+            const w = Math.ceil(ruler.getBoundingClientRect().width);
+            document.body.removeChild(ruler);
+
+            const cs = getComputedStyle(cell);
+            const padH =
+              parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+            const natural = Math.ceil(w + padH) + 2;
+            const perCol = Math.ceil(natural / span);
+            if (perCol > maxWidth) maxWidth = perCol;
+            break;
+          }
+          col += span;
+        }
+      }
+
+      const headerCells = th.closest("thead")?.querySelectorAll("th");
+      if (headerCells) {
+        for (const hc of headerCells) {
+          const hRow = hc.parentElement as HTMLTableRowElement;
+          let hCol = 0;
+          for (const cell of hRow.cells) {
+            if (cell === hc) break;
+            hCol += cell.colSpan || 1;
+          }
+          const hSpan = hc.colSpan || 1;
+          if (hCol <= physicalCol && physicalCol < hCol + hSpan) {
+            const inner =
+              hc.querySelector<HTMLElement>("[class*='headerCellInner']") ||
+              hc.querySelector<HTMLElement>("[class*='valueLabel']") ||
+              hc;
+            const ruler = document.createElement("span");
+            ruler.style.visibility = "hidden";
+            ruler.style.position = "absolute";
+            ruler.style.whiteSpace = "nowrap";
+            ruler.style.font = getComputedStyle(inner).font;
+            ruler.textContent = inner.textContent;
+            document.body.appendChild(ruler);
+            const w = Math.ceil(ruler.getBoundingClientRect().width);
+            document.body.removeChild(ruler);
+
+            const cs = getComputedStyle(hc);
+            const padH =
+              parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+            const natural = Math.ceil(w + padH) + 18;
+            const perCol = Math.ceil(natural / hSpan);
+            if (perCol > maxWidth) maxWidth = perCol;
+          }
+        }
+      }
+
+      setColumnWidthMap((prev) => {
+        const next = new Map(prev);
+        next.set(slotIndex, maxWidth);
+        return next;
+      });
+    },
+    [],
+  );
+
   const handleResizeMouseDown = useCallback(
     (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.detail >= 2) return;
       e.preventDefault();
       e.stopPropagation();
       const el = (e.target as HTMLElement).closest("th");
@@ -435,6 +525,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         handleResizeMouseDown,
         columnWidthMap,
         headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
+        handleResizeDoubleClick,
       );
     },
     [
@@ -450,6 +541,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       handleToggleColGroup,
       pivotData,
       handleResizeMouseDown,
+      handleResizeDoubleClick,
       headerRowOffsets,
     ],
   );
