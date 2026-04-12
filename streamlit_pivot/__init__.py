@@ -671,9 +671,12 @@ def st_pivot_table(
     hidden_from_aggregators : list[str] or None
         Column names hidden from the values/aggregators dropdown only.
     frozen_columns : list[str] or None
-        Column names that cannot be removed from their toolbar zone.
+        Column names that cannot be removed from their toolbar zone and
+        cannot be reordered or moved between zones via drag-and-drop.
+        Frozen chips render without a drag handle.
     hidden_from_drag_drop : list[str] or None
-        Deprecated alias for ``frozen_columns``.
+        Deprecated alias for ``frozen_columns``. Use ``frozen_columns``
+        instead.
     sorters : dict[str, list[str]] or None
         Custom sort orderings per dimension. Maps column name to a list
         of values in the desired order.

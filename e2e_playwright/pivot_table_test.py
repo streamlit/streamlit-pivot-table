@@ -442,3 +442,94 @@ def test_toolbar_reset_config(page_at_app: Page):
         "Region", timeout=10000
     )
     expect(container.get_by_test_id("toolbar-reset")).to_have_count(0, timeout=10000)
+
+
+# ---------------------------------------------------------------------------
+# Drag-and-drop E2E tests
+# ---------------------------------------------------------------------------
+
+
+def _drag_chip(page: Page, source, target):
+    """Simulate a dnd-kit drag from source chip to target chip/zone.
+
+    dnd-kit uses PointerSensor with 5px activation distance, so we need real
+    mouse-move events over at least that distance.
+    """
+    source_box = source.bounding_box()
+    target_box = target.bounding_box()
+    if not source_box or not target_box:
+        raise RuntimeError("Could not get bounding boxes for drag elements")
+
+    sx = source_box["x"] + source_box["width"] / 2
+    sy = source_box["y"] + source_box["height"] / 2
+    tx = target_box["x"] + target_box["width"] / 2
+    ty = target_box["y"] + target_box["height"] / 2
+
+    page.mouse.move(sx, sy)
+    page.mouse.down()
+    # Move past the 5px activation distance in small steps
+    steps = max(10, int(((tx - sx) ** 2 + (ty - sy) ** 2) ** 0.5 / 5))
+    for i in range(1, steps + 1):
+        page.mouse.move(
+            sx + (tx - sx) * i / steps,
+            sy + (ty - sy) * i / steps,
+        )
+        if i == 1:
+            page.wait_for_timeout(50)
+    page.mouse.up()
+
+
+def test_drag_reorder_rows(page_at_app: Page):
+    """Drag-and-drop reorder within Rows zone updates the pivot grouping order."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_subtotals")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    chips = container.get_by_test_id("toolbar-rows-chips")
+    expect(chips).to_contain_text("Region", timeout=5000)
+    expect(chips).to_contain_text("Category", timeout=5000)
+
+    region_chip = container.get_by_test_id("toolbar-rows-chip-Region")
+    category_chip = container.get_by_test_id("toolbar-rows-chip-Category")
+    expect(region_chip).to_be_visible(timeout=5000)
+    expect(category_chip).to_be_visible(timeout=5000)
+
+    _drag_chip(page, region_chip, category_chip)
+
+    # After reorder: Category should come first in the chips
+    page.wait_for_timeout(1000)
+    chip_text = chips.inner_text()
+    cat_pos = chip_text.find("Category")
+    reg_pos = chip_text.find("Region")
+    assert (
+        cat_pos < reg_pos
+    ), f"Expected Category before Region after drag reorder, got: {chip_text}"
+
+
+def test_drag_handle_visible_on_chips(page_at_app: Page):
+    """Drag handles (SVG grip dots) are visible on non-frozen chips."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    chip = container.get_by_test_id("toolbar-rows-chip-Region")
+    expect(chip).to_be_visible(timeout=5000)
+
+    handle = chip.locator("svg")
+    expect(handle).to_be_visible(timeout=5000)
+
+
+def test_empty_zone_shows_placeholder(page_at_app: Page):
+    """Zones with no chips display a 'Drag fields here' placeholder."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
+
+    # Remove the only row chip to create an empty zone
+    remove_btn = container.get_by_test_id("toolbar-rows-remove-Region")
+    expect(remove_btn).to_be_visible(timeout=5000)
+    remove_btn.click()
+
+    expect(container.locator("text=Drag fields here").first).to_be_visible(
+        timeout=10000
+    )

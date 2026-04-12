@@ -46,6 +46,15 @@ export default defineConfig(() => {
         formats: ["es"],
         fileName: "index-[hash]",
       },
+      rollupOptions: {
+        output: {
+          // Vite library mode may split the entry into a tiny re-export stub
+          // plus the main bundle, both named index-*. Streamlit CCv2 matches
+          // `js="index-*.js"` and requires exactly one file. Use chunkFileNames
+          // to push non-entry chunks to a different naming pattern.
+          chunkFileNames: "chunk-[hash].js",
+        },
+      },
       ...(!isDev && {
         esbuild: {
           drop: ["console", "debugger"],

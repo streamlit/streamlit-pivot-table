@@ -17,7 +17,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import Toolbar from "./Toolbar";
+import Toolbar, { applyDragMove } from "./Toolbar";
 import { PivotData, type DataRecord } from "../engine/PivotData";
 import { makeConfig } from "../test-utils";
 
@@ -1427,5 +1427,500 @@ describe("Toolbar - fullscreen toggle", () => {
     );
     const btn = screen.getByTestId("toolbar-fullscreen");
     expect(btn).toHaveAttribute("aria-label", "Exit fullscreen");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyDragMove – pure function unit tests
+// ---------------------------------------------------------------------------
+
+describe("applyDragMove – reordering within zones", () => {
+  it("reorders rows and clears collapsed_groups", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      collapsed_groups: ["region|US"],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "rows",
+      field: "region",
+      overField: "category",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows).toEqual(["category", "region"]);
+    expect(result!.collapsed_groups).toBeUndefined();
+  });
+
+  it("reorders columns and clears collapsed_col_groups", () => {
+    const cfg = makeConfig({
+      columns: ["year", "category"],
+      collapsed_col_groups: ["year|2023"],
+    });
+    const result = applyDragMove({
+      sourceZone: "columns",
+      targetZone: "columns",
+      field: "year",
+      overField: "category",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.columns).toEqual(["category", "year"]);
+    expect(result!.collapsed_col_groups).toBeUndefined();
+  });
+
+  it("reorders values without altering aggregation", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      aggregation: { revenue: "sum", profit: "avg" },
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "values",
+      field: "revenue",
+      overField: "profit",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.values).toEqual(["profit", "revenue"]);
+    expect(result!.aggregation).toEqual({ revenue: "sum", profit: "avg" });
+  });
+
+  it("returns null when reordering to same position", () => {
+    const cfg = makeConfig({ rows: ["region", "category"] });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "rows",
+      field: "region",
+      overField: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("returns null when overField is missing", () => {
+    const cfg = makeConfig({ rows: ["region", "category"] });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "rows",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).toBeNull();
+  });
+});
+
+describe("applyDragMove – cross-zone moves", () => {
+  it("moves Rows -> Columns", () => {
+    const cfg = makeConfig({ rows: ["region", "category"], columns: ["year"] });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows).toEqual(["category"]);
+    expect(result!.columns).toEqual(["year", "region"]);
+  });
+
+  it("moves Rows -> Values (numeric field)", () => {
+    const cfg = makeConfig({
+      rows: ["region", "revenue"],
+      values: ["profit"],
+      aggregation: { profit: "sum" },
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "values",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows).toEqual(["region"]);
+    expect(result!.values).toEqual(["profit", "revenue"]);
+    expect(result!.aggregation.revenue).toBe("sum");
+  });
+
+  it("rejects non-numeric field to Values", () => {
+    const cfg = makeConfig({ rows: ["region", "category"] });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "values",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("moves Values -> Rows and prunes aggregation + show_values_as", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      values: ["revenue", "profit"],
+      aggregation: { revenue: "sum", profit: "avg" },
+      show_values_as: { revenue: "pct_of_total" },
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.values).toEqual(["profit"]);
+    expect(result!.rows).toEqual(["region", "revenue"]);
+    expect(result!.aggregation).toEqual({ profit: "avg" });
+    expect(result!.show_values_as?.revenue).toBeUndefined();
+  });
+
+  it("moves Columns -> Rows", () => {
+    const cfg = makeConfig({ rows: ["region"], columns: ["year", "category"] });
+    const result = applyDragMove({
+      sourceZone: "columns",
+      targetZone: "rows",
+      field: "year",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.columns).toEqual(["category"]);
+    expect(result!.rows).toEqual(["region", "year"]);
+  });
+});
+
+describe("applyDragMove – config cleanup: sort", () => {
+  it("clears row_sort when dimension leaves rows", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      row_sort: { by: "key", direction: "asc", dimension: "region" },
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.row_sort).toBeUndefined();
+  });
+
+  it("clears col_sort when dimension leaves columns", () => {
+    const cfg = makeConfig({
+      columns: ["year", "category"],
+      col_sort: { by: "key", direction: "desc", dimension: "year" },
+    });
+    const result = applyDragMove({
+      sourceZone: "columns",
+      targetZone: "rows",
+      field: "year",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.col_sort).toBeUndefined();
+  });
+
+  it("clears row_sort when value_field leaves values", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      row_sort: { by: "value", direction: "asc", value_field: "revenue" },
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.row_sort).toBeUndefined();
+  });
+
+  it("clears col_sort when value_field leaves values", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      col_sort: { by: "value", direction: "desc", value_field: "profit" },
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "columns",
+      field: "profit",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.col_sort).toBeUndefined();
+  });
+
+  it("preserves row_sort when a different dimension leaves rows", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      row_sort: { by: "key", direction: "asc", dimension: "region" },
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "category",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.row_sort).toEqual({
+      by: "key",
+      direction: "asc",
+      dimension: "region",
+    });
+  });
+});
+
+describe("applyDragMove – config cleanup: totals", () => {
+  it("prunes show_row_totals string array when value field leaves", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      show_row_totals: ["revenue", "profit"],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.show_row_totals).toEqual(["profit"]);
+  });
+
+  it("sets show_row_totals to false when last value field is removed", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      show_row_totals: ["revenue"],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.show_row_totals).toBe(false);
+  });
+
+  it("prunes show_column_totals string array when value field leaves", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      show_column_totals: ["revenue", "profit"],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "columns",
+      field: "profit",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.show_column_totals).toEqual(["revenue"]);
+  });
+});
+
+describe("applyDragMove – config cleanup: show_subtotals", () => {
+  it("prunes show_subtotals string array when row dimension leaves", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      show_subtotals: ["region", "category"],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.show_subtotals).toEqual(["category"]);
+  });
+
+  it("sets show_subtotals to false when last entry is removed", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      show_subtotals: ["region"],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.show_subtotals).toBe(false);
+  });
+});
+
+describe("applyDragMove – config cleanup: collapsed_groups", () => {
+  it("clears collapsed_groups when field leaves rows", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      collapsed_groups: ["region|US"],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.collapsed_groups).toBeUndefined();
+  });
+
+  it("clears collapsed_col_groups when field leaves columns", () => {
+    const cfg = makeConfig({
+      columns: ["year", "category"],
+      collapsed_col_groups: ["year|2023"],
+    });
+    const result = applyDragMove({
+      sourceZone: "columns",
+      targetZone: "rows",
+      field: "year",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.collapsed_col_groups).toBeUndefined();
+  });
+});
+
+describe("applyDragMove – config cleanup: conditional_formatting", () => {
+  it("prunes conditional_formatting apply_to when value field leaves", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      conditional_formatting: [
+        { type: "color_scale", apply_to: ["revenue", "profit"] },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.conditional_formatting).toEqual([
+      { type: "color_scale", apply_to: ["profit"] },
+    ]);
+  });
+
+  it("removes rule entirely when apply_to becomes empty", () => {
+    const cfg = makeConfig({
+      values: ["revenue", "profit"],
+      conditional_formatting: [{ type: "color_scale", apply_to: ["revenue"] }],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.conditional_formatting).toEqual([]);
+  });
+});
+
+describe("applyDragMove – mutual exclusion", () => {
+  it("rejects dragging a field to rows when it is already in columns (not from columns)", () => {
+    const cfg = makeConfig({
+      rows: [],
+      columns: ["year"],
+      values: ["revenue", "year"] as string[],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "year",
+      config: cfg,
+      numericColumns: [...NUMERIC_COLUMNS, "year"],
+    });
+    expect(result).toBeNull();
+  });
+
+  it("allows moving from columns to rows (mutual exclusion satisfied by removal)", () => {
+    const cfg = makeConfig({ rows: ["region"], columns: ["year", "category"] });
+    const result = applyDragMove({
+      sourceZone: "columns",
+      targetZone: "rows",
+      field: "year",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows).toEqual(["region", "year"]);
+    expect(result!.columns).toEqual(["category"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop rendering tests
+// ---------------------------------------------------------------------------
+
+describe("Toolbar – DnD rendering", () => {
+  it("renders drag handles on non-frozen, non-disabled chips", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: ["region", "category"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    const chips = screen.getByTestId("toolbar-rows-chips");
+    const handles = chips.querySelectorAll("svg");
+    expect(handles.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not render drag handles on frozen chips", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: ["region", "category"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        frozenColumns={new Set(["region"])}
+      />,
+    );
+    const regionChip = screen.getByTestId("toolbar-rows-chip-region");
+    const handleInFrozen = regionChip.querySelectorAll("svg");
+    expect(handleInFrozen.length).toBe(0);
+
+    const categoryChip = screen.getByTestId("toolbar-rows-chip-category");
+    const handleInNormal = categoryChip.querySelectorAll("svg");
+    expect(handleInNormal.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not render drag handles when locked", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: ["region"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        locked={true}
+      />,
+    );
+    const chips = screen.getByTestId("toolbar-rows-chips");
+    const handles = chips.querySelectorAll("svg");
+    expect(handles.length).toBe(0);
+  });
+
+  it("shows empty drop zone placeholder when no chips are selected", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getAllByText("Drag fields here").length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });

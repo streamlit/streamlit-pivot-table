@@ -21,9 +21,28 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  pointerWithin,
+  type DragStartEvent,
+  type DragOverEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { useDroppable } from "@dnd-kit/core";
 import type { PivotData } from "../engine/PivotData";
 import {
   type ExportContent,
@@ -52,6 +71,12 @@ import {
 } from "../engine/formatters";
 import { useClickOutside } from "../shared/useClickOutside";
 import { useListboxKeyboard } from "../shared/useListboxKeyboard";
+import {
+  SortableFieldChip,
+  DragOverlayChip,
+  makeItemId,
+  parseItemId,
+} from "./DndFieldChip";
 import styles from "./Toolbar.module.css";
 
 export interface ToolbarProps {
@@ -138,6 +163,135 @@ const ChevronIcon: FC<{ open?: boolean }> = ({ open }) => (
     <polyline points="6 9 12 15 18 9" />
   </svg>
 );
+
+type ZoneKey = "rows" | "columns" | "values";
+
+export interface DragMoveParams {
+  sourceZone: ZoneKey;
+  targetZone: ZoneKey;
+  field: string;
+  /** For same-zone reorder: the field being hovered over. */
+  overField?: string;
+  config: PivotConfigV1;
+  numericColumns: string[];
+}
+
+/**
+ * Pure function that computes the updated PivotConfigV1 after a drag-and-drop
+ * move. Returns null when the move is invalid or a no-op.
+ */
+export function applyDragMove({
+  sourceZone,
+  targetZone,
+  field,
+  overField,
+  config,
+  numericColumns,
+}: DragMoveParams): PivotConfigV1 | null {
+  if (sourceZone === targetZone) {
+    const arr = config[sourceZone];
+    const oldIndex = arr.indexOf(field);
+    const newIndex = overField ? arr.indexOf(overField) : -1;
+    if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex)
+      return null;
+
+    const reordered = arrayMove(arr, oldIndex, newIndex);
+    const updated: PivotConfigV1 = { ...config, [sourceZone]: reordered };
+    if (sourceZone === "rows") {
+      delete updated.collapsed_groups;
+    } else if (sourceZone === "columns") {
+      delete updated.collapsed_col_groups;
+    }
+    return updated;
+  }
+
+  // Cross-zone move
+  if (targetZone === "values" && !numericColumns.includes(field)) return null;
+  if (
+    targetZone === "rows" &&
+    config.columns.includes(field) &&
+    sourceZone !== "columns"
+  )
+    return null;
+  if (
+    targetZone === "columns" &&
+    config.rows.includes(field) &&
+    sourceZone !== "rows"
+  )
+    return null;
+
+  const updated: PivotConfigV1 = {
+    ...config,
+    [sourceZone]: config[sourceZone].filter((f: string) => f !== field),
+    [targetZone]: [...config[targetZone], field],
+  };
+
+  const syncAgg = (values: string[], agg: AggregationConfig) =>
+    normalizeAggregationConfig(agg, values);
+
+  if (targetZone === "values") {
+    updated.aggregation = syncAgg(updated.values, updated.aggregation);
+  }
+
+  if (sourceZone === "values") {
+    updated.aggregation = syncAgg(updated.values, updated.aggregation);
+    if (updated.show_values_as?.[field]) {
+      updated.show_values_as = { ...updated.show_values_as };
+      delete updated.show_values_as[field];
+    }
+    if (Array.isArray(updated.show_row_totals)) {
+      const pruned = updated.show_row_totals.filter((f) => f !== field);
+      updated.show_row_totals = pruned.length > 0 ? pruned : false;
+    }
+    if (Array.isArray(updated.show_column_totals)) {
+      const pruned = updated.show_column_totals.filter((f) => f !== field);
+      updated.show_column_totals = pruned.length > 0 ? pruned : false;
+    }
+    if (
+      updated.row_sort?.by === "value" &&
+      updated.row_sort.value_field === field
+    ) {
+      delete updated.row_sort;
+    }
+    if (
+      updated.col_sort?.by === "value" &&
+      updated.col_sort.value_field === field
+    ) {
+      delete updated.col_sort;
+    }
+    if (updated.conditional_formatting) {
+      updated.conditional_formatting = updated.conditional_formatting
+        .map((rule) => {
+          if (!rule.apply_to.includes(field)) return rule;
+          const pruned = rule.apply_to.filter((f) => f !== field);
+          return { ...rule, apply_to: pruned };
+        })
+        .filter((rule) => rule.apply_to.length > 0);
+    }
+  }
+
+  if (sourceZone === "rows") {
+    if (updated.row_sort?.dimension === field) {
+      delete updated.row_sort;
+    }
+    delete updated.collapsed_groups;
+    if (Array.isArray(updated.show_subtotals)) {
+      const pruned = (updated.show_subtotals as string[]).filter(
+        (f) => f !== field,
+      );
+      updated.show_subtotals = pruned.length > 0 ? pruned : false;
+    }
+  }
+
+  if (sourceZone === "columns") {
+    if (updated.col_sort?.dimension === field) {
+      delete updated.col_sort;
+    }
+    delete updated.collapsed_col_groups;
+  }
+
+  return updated;
+}
 
 const Toolbar: FC<ToolbarProps> = ({
   config,
@@ -345,6 +499,95 @@ const Toolbar: FC<ToolbarProps> = ({
     });
   }, [config, emitIfChanged]);
 
+  // -------------------------------------------------------------------------
+  // Drag-and-drop state & handlers
+  // -------------------------------------------------------------------------
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeOverZone, setActiveOverZone] = useState<string | null>(null);
+  const dropdownCloseRef = useRef<(() => void) | null>(null);
+
+  const pointerSensor = useSensor(PointerSensor, {
+    activationConstraint: { distance: 5 },
+  });
+  const keyboardSensor = useSensor(KeyboardSensor);
+  const sensors = useSensors(pointerSensor, keyboardSensor);
+
+  const activeField = useMemo(() => {
+    if (!activeId) return null;
+    return parseItemId(activeId);
+  }, [activeId]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+    dropdownCloseRef.current?.();
+  }, []);
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { active, over } = event;
+      if (!over) {
+        setActiveOverZone(null);
+        return;
+      }
+
+      const sourceZone = (active.data.current as { zone: string })?.zone;
+      const field = (active.data.current as { field: string })?.field;
+      let targetZone: string | undefined;
+      if (over.data.current?.type === "container") {
+        targetZone = String(over.id);
+      } else {
+        targetZone = (over.data.current as { zone?: string })?.zone;
+      }
+
+      if (!targetZone || targetZone === sourceZone) {
+        setActiveOverZone(null);
+        return;
+      }
+
+      if (targetZone === "values" && field && !numericColumns.includes(field)) {
+        setActiveOverZone(null);
+        return;
+      }
+
+      setActiveOverZone(targetZone);
+    },
+    [numericColumns],
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveId(null);
+      setActiveOverZone(null);
+
+      if (!over) return;
+
+      const sourceZone = (active.data.current as { zone: string })?.zone;
+      const field = (active.data.current as { field: string })?.field;
+      if (!sourceZone || !field) return;
+
+      let targetZone: string | undefined;
+      if (over.data.current?.type === "container") {
+        targetZone = String(over.id);
+      } else {
+        targetZone = (over.data.current as { zone?: string })?.zone;
+      }
+      if (!targetZone) return;
+
+      const overField = (over.data.current as { field?: string })?.field;
+      const updated = applyDragMove({
+        sourceZone: sourceZone as ZoneKey,
+        targetZone: targetZone as ZoneKey,
+        field,
+        overField,
+        config,
+        numericColumns,
+      });
+      if (updated) emitIfChanged(updated);
+    },
+    [config, emitIfChanged, numericColumns],
+  );
+
   const utilGroupRef = useRef<HTMLDivElement>(null);
   const activeToolbarIdx = useRef(0);
 
@@ -378,47 +621,83 @@ const Toolbar: FC<ToolbarProps> = ({
       data-testid="pivot-toolbar"
       className={`${styles.toolbar} ${locked ? styles.toolbarLocked : ""}`}
     >
-      <DropdownMultiSelect
-        label="Rows"
-        testId="toolbar-rows"
-        options={availableForRows}
-        selected={config.rows}
-        onToggle={toggleRow}
-        onRemove={removeRow}
-        disabled={locked}
-        frozenColumns={frozenColumns}
-        sortConfig={config.row_sort}
-        filters={config.filters}
-      />
-      <DropdownMultiSelect
-        label="Columns"
-        testId="toolbar-columns"
-        options={availableForCols}
-        selected={config.columns}
-        onToggle={toggleColumn}
-        onRemove={removeColumn}
-        disabled={locked}
-        frozenColumns={frozenColumns}
-        sortConfig={config.col_sort}
-        filters={config.filters}
-      />
-      <DropdownMultiSelect
-        label="Values"
-        testId="toolbar-values"
-        options={numericColumns}
-        selected={config.values}
-        onToggle={toggleValue}
-        onRemove={removeValue}
-        disabled={locked}
-        frozenColumns={frozenColumns}
-        showValuesAs={config.show_values_as}
-        aggregation={config.aggregation}
-        syntheticMeasures={config.synthetic_measures ?? []}
-        allNumericColumns={syntheticSourceColumns ?? numericColumns}
-        onAggregationChange={handleValueAggregationChange}
-        onUpsertSyntheticMeasure={upsertSyntheticMeasure}
-        onRemoveSyntheticMeasure={removeSyntheticMeasure}
-      />
+      <DndContext
+        sensors={sensors}
+        collisionDetection={pointerWithin}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <DropdownMultiSelect
+          label="Rows"
+          testId="toolbar-rows"
+          options={availableForRows}
+          selected={config.rows}
+          onToggle={toggleRow}
+          onRemove={removeRow}
+          disabled={locked}
+          frozenColumns={frozenColumns}
+          sortConfig={config.row_sort}
+          filters={config.filters}
+          zoneId="rows"
+          isDropHighlighted={activeOverZone === "rows"}
+          activeId={activeId}
+          registerCloseDropdown={dropdownCloseRef}
+        />
+        <DropdownMultiSelect
+          label="Columns"
+          testId="toolbar-columns"
+          options={availableForCols}
+          selected={config.columns}
+          onToggle={toggleColumn}
+          onRemove={removeColumn}
+          disabled={locked}
+          frozenColumns={frozenColumns}
+          sortConfig={config.col_sort}
+          filters={config.filters}
+          zoneId="columns"
+          isDropHighlighted={activeOverZone === "columns"}
+          activeId={activeId}
+          registerCloseDropdown={dropdownCloseRef}
+        />
+        <DropdownMultiSelect
+          label="Values"
+          testId="toolbar-values"
+          options={numericColumns}
+          selected={config.values}
+          onToggle={toggleValue}
+          onRemove={removeValue}
+          disabled={locked}
+          frozenColumns={frozenColumns}
+          showValuesAs={config.show_values_as}
+          aggregation={config.aggregation}
+          syntheticMeasures={config.synthetic_measures ?? []}
+          allNumericColumns={syntheticSourceColumns ?? numericColumns}
+          onAggregationChange={handleValueAggregationChange}
+          onUpsertSyntheticMeasure={upsertSyntheticMeasure}
+          onRemoveSyntheticMeasure={removeSyntheticMeasure}
+          zoneId="values"
+          isDropHighlighted={activeOverZone === "values"}
+          activeId={activeId}
+          registerCloseDropdown={dropdownCloseRef}
+        />
+        <DragOverlay dropAnimation={{ duration: 200 }}>
+          {activeField ? (
+            <DragOverlayChip
+              field={activeField.field}
+              testId={`toolbar-${activeField.zone}`}
+              isValuesField={activeField.zone === "values"}
+              aggregationLabel={
+                activeField.zone === "values"
+                  ? AGG_CHIP_LABELS[
+                      config.aggregation?.[activeField.field] ?? "sum"
+                    ]
+                  : undefined
+              }
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       <div
         ref={utilGroupRef}
@@ -586,6 +865,14 @@ interface DropdownMultiSelectProps {
   onAggregationChange?: (field: string, aggregation: AggregationType) => void;
   onUpsertSyntheticMeasure?: (measure: SyntheticMeasureConfig) => void;
   onRemoveSyntheticMeasure?: (id: string) => void;
+  /** Zone identifier for drag-and-drop. */
+  zoneId?: string;
+  /** Whether this zone is highlighted as a valid drop target. */
+  isDropHighlighted?: boolean;
+  /** Currently dragged item ID (zone-prefixed). */
+  activeId?: string | null;
+  /** Ref to register the dropdown close function for DnD drag start. */
+  registerCloseDropdown?: React.MutableRefObject<(() => void) | null>;
 }
 
 interface AggregationPickerProps {
@@ -731,6 +1018,10 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
   onAggregationChange,
   onUpsertSyntheticMeasure,
   onRemoveSyntheticMeasure,
+  zoneId,
+  isDropHighlighted,
+  activeId,
+  registerCloseDropdown,
 }): ReactElement => {
   const [open, setOpen] = useState(false);
   const [syntheticOpen, setSyntheticOpen] = useState(false);
@@ -762,6 +1053,23 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
     '[role="option"]',
   );
   const isValuesField = label === "Values";
+
+  // Drag-and-drop integration
+  const { setNodeRef: setDroppableRef } = useDroppable({
+    id: zoneId ?? label.toLowerCase(),
+    data: { type: "container" },
+  });
+  const sortableIds = useMemo(
+    () => (zoneId ? selected.map((f) => makeItemId(zoneId, f)) : selected),
+    [zoneId, selected],
+  );
+
+  // Register this dropdown's close function so drag start can close all panels
+  useEffect(() => {
+    if (registerCloseDropdown) {
+      registerCloseDropdown.current = closeDropdown;
+    }
+  }, [registerCloseDropdown, closeDropdown]);
 
   const openCreateSynthetic = useCallback(() => {
     setOpen(false);
@@ -859,7 +1167,15 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
     : SYNTHETIC_FORMAT_PREVIEW_NUMBER;
 
   return (
-    <div className={styles.fieldGroup} ref={containerRef}>
+    <div
+      className={`${styles.fieldGroup} ${isDropHighlighted ? styles.dropZoneActive : ""}`}
+      ref={(node) => {
+        (
+          containerRef as React.MutableRefObject<HTMLDivElement | null>
+        ).current = node;
+        setDroppableRef(node);
+      }}
+    >
       <div className={styles.sectionHeader} data-testid={`${testId}-header`}>
         <span className={styles.sectionTitle}>{label}</span>
         {sortConfig && (
@@ -980,97 +1296,86 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
         )}
       </div>
 
-      {(selected.length > 0 ||
-        (isValuesField && syntheticMeasures.length > 0)) && (
-        <div className={styles.chipRow} data-testid={`${testId}-chips`}>
-          {selected.map((col) => {
-            const isFrozen = frozenColumns?.has(col);
-            const hasFilter =
-              filters?.[col] &&
-              ((filters[col].include && filters[col].include.length > 0) ||
-                (filters[col].exclude && filters[col].exclude.length > 0));
-            const currentShowAs = showValuesAs?.[col] ?? "raw";
-            const currentAggregation = aggregation?.[col] ?? "sum";
-            const showAsBadge = currentShowAs !== "raw";
-            return (
-              <span key={col} className={styles.chip}>
+      <SortableContext
+        items={sortableIds}
+        strategy={horizontalListSortingStrategy}
+      >
+        {selected.length > 0 ||
+        (isValuesField && syntheticMeasures.length > 0) ? (
+          <div className={styles.chipRow} data-testid={`${testId}-chips`}>
+            {selected.map((col) => {
+              const zId = zoneId ?? label.toLowerCase();
+              const isFrozen = frozenColumns?.has(col);
+              const hasFilter =
+                filters?.[col] &&
+                ((filters[col].include && filters[col].include.length > 0) ||
+                  (filters[col].exclude && filters[col].exclude.length > 0));
+              const currentShowAs = showValuesAs?.[col] ?? "raw";
+              const currentAggregation = aggregation?.[col] ?? "sum";
+              const showAsBadge = currentShowAs !== "raw";
+              return (
+                <SortableFieldChip
+                  key={col}
+                  id={makeItemId(zId, col)}
+                  zone={zId}
+                  field={col}
+                  testId={testId}
+                  isFrozen={isFrozen}
+                  disabled={disabled}
+                  isValuesField={isValuesField}
+                  aggregationLabel={
+                    isValuesField
+                      ? AGG_CHIP_LABELS[currentAggregation]
+                      : undefined
+                  }
+                  showAsBadge={showAsBadge}
+                  showAsBadgeTitle={
+                    showAsBadge
+                      ? (SHOW_AS_BADGE_LABELS[currentShowAs] ?? currentShowAs)
+                      : undefined
+                  }
+                  hasFilter={!!hasFilter}
+                  onRemove={onRemove}
+                  activeId={activeId}
+                />
+              );
+            })}
+            {isValuesField &&
+              syntheticMeasures.map((measure) => (
                 <span
-                  className={styles.chipLabelText}
-                  data-testid={`${testId}-chip-label-${col}`}
+                  key={measure.id}
+                  className={styles.chip}
+                  data-testid={`${testId}-synthetic-${measure.id}`}
                 >
-                  <span className={styles.chipPrimaryText}>{col}</span>
-                  {isValuesField && (
-                    <span
-                      className={styles.chipAggregationLabel}
-                      data-testid={`${testId}-aggregation-label-${col}`}
-                    >
-                      {" "}
-                      ({AGG_CHIP_LABELS[currentAggregation]})
-                    </span>
+                  <span className={styles.aggChipIcon}>fx</span>
+                  {measure.label}
+                  {!disabled && (
+                    <>
+                      <button
+                        className={styles.chipRemove}
+                        onClick={() => openEditSynthetic(measure)}
+                        aria-label={`Edit ${measure.label}`}
+                        data-testid={`${testId}-edit-synthetic-${measure.id}`}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className={styles.chipRemove}
+                        onClick={() => onRemoveSyntheticMeasure?.(measure.id)}
+                        aria-label={`Remove ${measure.label}`}
+                        data-testid={`${testId}-remove-synthetic-${measure.id}`}
+                      >
+                        ×
+                      </button>
+                    </>
                   )}
                 </span>
-                {showAsBadge && (
-                  <span
-                    className={styles.chipShowAsBadge}
-                    title={SHOW_AS_BADGE_LABELS[currentShowAs] ?? currentShowAs}
-                    data-testid={`${testId}-show-as-badge-${col}`}
-                  >
-                    %
-                  </span>
-                )}
-                {hasFilter && (
-                  <span
-                    className={styles.chipFilterDot}
-                    title={`Filtered: ${col}`}
-                    data-testid={`${testId}-filter-indicator-${col}`}
-                  />
-                )}
-                {!disabled && !isFrozen && (
-                  <button
-                    className={styles.chipRemove}
-                    onClick={() => onRemove(col)}
-                    aria-label={`Remove ${col}`}
-                    data-testid={`${testId}-remove-${col}`}
-                  >
-                    ×
-                  </button>
-                )}
-              </span>
-            );
-          })}
-          {isValuesField &&
-            syntheticMeasures.map((measure) => (
-              <span
-                key={measure.id}
-                className={styles.chip}
-                data-testid={`${testId}-synthetic-${measure.id}`}
-              >
-                <span className={styles.aggChipIcon}>fx</span>
-                {measure.label}
-                {!disabled && (
-                  <>
-                    <button
-                      className={styles.chipRemove}
-                      onClick={() => openEditSynthetic(measure)}
-                      aria-label={`Edit ${measure.label}`}
-                      data-testid={`${testId}-edit-synthetic-${measure.id}`}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      className={styles.chipRemove}
-                      onClick={() => onRemoveSyntheticMeasure?.(measure.id)}
-                      aria-label={`Remove ${measure.label}`}
-                      data-testid={`${testId}-remove-synthetic-${measure.id}`}
-                    >
-                      ×
-                    </button>
-                  </>
-                )}
-              </span>
-            ))}
-        </div>
-      )}
+              ))}
+          </div>
+        ) : (
+          <div className={styles.emptyDropZone}>Drag fields here</div>
+        )}
+      </SortableContext>
       {isValuesField && syntheticOpen && (
         <div
           className={styles.syntheticBuilderPopover}

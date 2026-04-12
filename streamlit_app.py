@@ -1188,10 +1188,64 @@ st.caption(
 
 
 # ---------------------------------------------------------------------------
-# Section 15: Column Resize
+# Section 15: Drag-and-Drop Field Configuration
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("15. Column Resize")
+st.subheader("15. Drag-and-Drop Field Configuration")
+
+st.markdown(
+    """
+Each chip in the **Rows**, **Columns**, and **Values** toolbar zones has a
+**grip-dots drag handle** on its left side. Use it to:
+
+- **Reorder within a zone** — change the grouping hierarchy (e.g., swap
+  which dimension is the outer vs. inner group).
+- **Move between zones** — drag a Row chip into Columns, or move a numeric
+  field into Values. Non-numeric fields are rejected from the Values zone.
+
+**Try it** on the pivot below (two row dimensions so you can reorder):
+- Drag the grip handle on **Category** and drop it before **Region** to
+  reverse the grouping order.
+- Drag **Category** from Rows into the Columns zone.
+- Drag a numeric chip into/out of Values.
+
+Frozen columns (set via `frozen_columns`) cannot be dragged. When `locked=True`,
+drag-and-drop is fully disabled.
+"""
+)
+
+st_pivot_table(
+    df,
+    key="drag_and_drop_demo",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    show_totals=True,
+)
+
+with st.expander("View Code"):
+    st.code(
+        """
+st_pivot_table(
+    df,
+    key="drag_and_drop_demo",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    show_totals=True,
+)
+# Drag the grip-dots handle on any chip to reorder or move between zones.
+""",
+        language="python",
+    )
+
+# ---------------------------------------------------------------------------
+# Section 16: Column Resize
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("16. Column Resize")
 
 st.markdown(
     """
@@ -1242,10 +1296,10 @@ st_pivot_table(
     )
 
 # ---------------------------------------------------------------------------
-# Section 16: Fullscreen Mode
+# Section 17: Fullscreen Mode
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("16. Fullscreen Mode")
+st.subheader("17. Fullscreen Mode")
 
 st.markdown(
     """

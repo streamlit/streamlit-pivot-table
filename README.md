@@ -104,7 +104,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, viewer-safe actions like data export and group expand/collapse remain available, and header-menu sorting/filtering/`Show Values As` plus drill-down still work. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files (.xlsx, .csv, .tsv). Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
-> **Frontend-only interactions:** Column resize (drag header edges) and fullscreen mode (toolbar expand icon) are available automatically when `interactive=True`. No additional Python parameters are needed.
+> **Frontend-only interactions:** Drag-and-drop field reordering/moving, column resize (drag header edges), and fullscreen mode (toolbar expand icon) are available automatically when `interactive=True`. No additional Python parameters are needed.
 
 #### Data Control
 
@@ -113,7 +113,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `null_handling` | `str \| dict[str, str] \| None` | `None` | How to treat null/NaN values. See [Null Handling](#null-handling). |
 | `hidden_attributes` | `list[str] \| None` | `None` | Column names to hide entirely from the UI. |
 | `hidden_from_aggregators` | `list[str] \| None` | `None` | Column names hidden from the values/aggregators dropdown only. |
-| `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone. |
+| `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone and cannot be reordered or moved via drag-and-drop. |
 | `sorters` | `dict[str, list[str]] \| None` | `None` | Custom sort orderings per dimension. Maps column name to ordered list of values. |
 | `menu_limit` | `int \| None` | `None` | Max items in the header-menu filter checklist. Defaults to 50. |
 | `execution_mode` | `str` | `"auto"` | Performance execution mode. See [Execution Mode](#execution-mode). |
@@ -521,6 +521,29 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 
 In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings gear remains visible, its popover shows read-only display status plus group expand/collapse actions, and header-menu sorting, filtering, and `Show Values As` stay enabled.
 
+### Drag-and-Drop Field Configuration
+
+When `interactive=True`, each chip in the Rows, Columns, and Values toolbar zones has a **grip-dots drag handle** on its left side. Drag chips to:
+
+- **Reorder within a zone** — change the grouping hierarchy (e.g., swap which dimension is the outer vs. inner group in Rows).
+- **Move between zones** — drag a chip from Rows to Columns (or vice versa), or between Rows/Columns and Values. The Values zone only accepts numeric columns; non-numeric drops are silently rejected.
+
+**Visual feedback:**
+- A floating overlay chip follows the cursor during drag.
+- The source chip stays in place at reduced opacity (ghosted).
+- When dragging over a valid target zone, the zone highlights with a dashed border and subtle tint.
+- Within-zone reorders show smooth shift animations as chips make room.
+
+**Constraints:**
+- `frozen_columns` render without drag handles and cannot be dragged.
+- Synthetic measures cannot be dragged to other zones.
+- When `locked=True`, drag-and-drop is fully disabled.
+- A 5 px activation distance distinguishes clicks from drags, so remove buttons and dropdown toggles work normally.
+
+**Config cleanup on move:** When fields move between zones, related config properties (aggregation, sort, collapsed groups, subtotals, conditional formatting, show-values-as, per-measure totals) are automatically synchronized.
+
+No Python API parameter is required — drag-and-drop is a purely frontend interaction.
+
 ### Column Resize
 
 Drag the **right edge of any column header** to resize that column. A thin resize handle appears on hover (cursor changes to `col-resize`). Minimum column width is 40 px.
@@ -598,6 +621,7 @@ The returned `config` dict contains the current supported configuration state, i
 The component follows WAI-ARIA patterns for all interactive elements:
 
 - **Toolbar**: Arrow keys navigate between toolbar buttons (roving tabindex). Space/Enter activates.
+- **Drag-and-drop**: Space to pick up a chip, arrow keys to move, Space to drop at the new position. Screen reader announcements provided by dnd-kit.
 - **Header menus**: Escape closes. Arrow keys navigate options. Space/Enter selects.
 - **Export/Import popovers**: Focus is automatically placed on the first interactive element when opened. Tab/Shift+Tab moves between controls; tabbing out closes the popover.
 - **Settings popover** (gear icon): Focus moves to first checkbox on open. Escape closes. Tab navigates between toggles.
@@ -623,7 +647,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains 16 sections covering the major features and usage patterns with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains 17 sections covering the major features and usage patterns with interactive examples and inline documentation.
 
 ### Building the frontend
 

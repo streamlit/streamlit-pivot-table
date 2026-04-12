@@ -26,6 +26,9 @@
   ],
   "prettier": {},
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@streamlit/component-v2-lib": "^0.2.0",
     "apache-arrow": "^21.1.0",
     "exceljs": "^4.4.0",
