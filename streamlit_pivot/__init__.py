@@ -18,7 +18,9 @@
 from __future__ import annotations
 
 import json
+import re
 import warnings
+from datetime import date, datetime
 from math import prod
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -89,6 +91,7 @@ class PivotConfig(TypedDict, total=False):
     show_values_as: dict[str, str]
     conditional_formatting: list[dict[str, Any]]
     number_format: dict[str, str]
+    dimension_format: dict[str, str]
     column_alignment: dict[str, str]
 
 
@@ -251,7 +254,10 @@ def _should_use_threshold_hybrid(
 
 
 def _prepare_threshold_hybrid_frame(
-    df: Any, config: PivotConfig, null_handling: Any = None
+    df: Any,
+    config: PivotConfig,
+    null_handling: Any = None,
+    column_types: dict[str, str] | None = None,
 ) -> Any:
     group_fields = [*config.get("rows", []), *config.get("columns", [])]
     aggregation = dict(config.get("aggregation", {}))
@@ -283,7 +289,9 @@ def _prepare_threshold_hybrid_frame(
         else:
             named[vf] = pd.NamedAgg(column=vf, aggfunc=agg)
 
-    filtered_df = _resolve_and_filter(df, config.get("filters", {}), null_handling)
+    filtered_df = _resolve_and_filter(
+        df, config.get("filters", {}), null_handling, column_types
+    )
 
     if not group_fields:
         row: dict[str, Any] = {}
@@ -344,6 +352,229 @@ def _build_hybrid_agg_remap(aggregation: dict[str, str]) -> dict[str, str]:
     return remap
 
 
+# ---------------------------------------------------------------------------
+# Temporal key canonicalization + column type detection
+# ---------------------------------------------------------------------------
+
+_ISO_DATE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$"
+)
+_ISO_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _classify_temporal_value(v: Any) -> str | None:
+    """Classify a single value as 'date', 'datetime', or None (not temporal)."""
+    if isinstance(v, date) and not isinstance(v, datetime):
+        return "date"
+    if isinstance(v, (pd.Timestamp, datetime)):
+        return "datetime"
+    if isinstance(v, str):
+        if _ISO_DATE_ONLY_RE.match(v):
+            return "date"
+        if _ISO_DATE_RE.match(v):
+            return "datetime"
+    return None
+
+
+def _build_original_column_types(df: Any) -> dict[str, str]:
+    """Build a column name -> semantic type map from the DataFrame.
+
+    Uses pandas.api.types checks plus sample-based detection for object
+    columns. Distinguishes 'date' from 'datetime' for both Python temporal
+    instances and ISO-format date strings.
+    """
+    result: dict[str, str] = {}
+    for col in df.columns:
+        dtype = df[col].dtype
+        if pd.api.types.is_datetime64_any_dtype(dtype):
+            result[col] = "datetime"
+        elif pd.api.types.is_integer_dtype(dtype):
+            result[col] = "integer"
+        elif pd.api.types.is_float_dtype(dtype):
+            result[col] = "float"
+        elif pd.api.types.is_bool_dtype(dtype):
+            result[col] = "boolean"
+        elif pd.api.types.is_object_dtype(dtype) or pd.api.types.is_string_dtype(dtype):
+            sample = df[col].dropna().head(20)
+            if len(sample) > 0:
+                classifications = [_classify_temporal_value(v) for v in sample]
+                if all(c is not None for c in classifications):
+                    if "datetime" in classifications:
+                        result[col] = "datetime"
+                    else:
+                        result[col] = "date"
+                else:
+                    result[col] = "string"
+            else:
+                result[col] = "string"
+        else:
+            result[col] = "string"
+    return result
+
+
+def _canonical_temporal_key(value: Any, col_type: str) -> str:
+    """Convert a temporal value to the canonical key matching the frontend."""
+    if pd.isna(value):
+        return ""
+    ts = pd.Timestamp(value)
+    if col_type == "datetime":
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("UTC")
+        else:
+            ts = ts.tz_localize("UTC")
+        return ts.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ts.microsecond // 1000:03d}Z"
+    if col_type == "date":
+        return ts.strftime("%Y-%m-%d")
+    return str(value)
+
+
+def _resolve_dim_value_series(
+    series: Any, col_type: str | None, null_handling_mode: str
+) -> Any:
+    """Resolve a dimension column to canonical string keys matching the frontend."""
+    if col_type in ("datetime", "date"):
+        return series.apply(
+            lambda v: _canonical_temporal_key(v, col_type)
+            if pd.notna(v)
+            else ("(null)" if null_handling_mode == "separate" else "")
+        )
+    if null_handling_mode == "separate":
+        return series.fillna("(null)").replace("", "(null)").astype(str)
+    return series.fillna("").astype(str)
+
+
+def _extract_styler_formats(
+    styler: Any,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Extract format patterns from a pandas Styler's _display_funcs.
+
+    Probes each column's formatter with representative values to reverse-
+    engineer the format pattern. Returns (number_format, dimension_format)
+    dicts. Unrecognizable formatters are silently skipped.
+    """
+    number_fmts: dict[str, str] = {}
+    dimension_fmts: dict[str, str] = {}
+
+    display_funcs = getattr(styler, "_display_funcs", {})
+    if not display_funcs:
+        return number_fmts, dimension_fmts
+
+    probe_value = 1234.5678
+
+    for (row_idx, col_idx), func in display_funcs.items():
+        if row_idx != 0:
+            continue
+        try:
+            col_name = styler.data.columns[col_idx]
+        except (IndexError, AttributeError):
+            continue
+        try:
+            result = func(probe_value)
+        except Exception:
+            continue
+        if not isinstance(result, str):
+            continue
+
+        # Try to reverse-engineer the format pattern
+        pattern = _guess_format_pattern(result, probe_value)
+        if pattern:
+            number_fmts[col_name] = pattern
+
+    return number_fmts, dimension_fmts
+
+
+def _guess_format_pattern(formatted: str, probe: float) -> str | None:
+    """Reverse-engineer a d3-style format pattern from a formatted probe value."""
+    stripped = formatted.strip()
+    if not stripped:
+        return None
+
+    # Detect currency prefix
+    prefix = ""
+    for symbol in ("$", "€", "£", "¥"):
+        if stripped.startswith(symbol):
+            prefix = symbol
+            stripped = stripped[len(symbol) :].strip()
+            break
+
+    # Detect percent suffix
+    if stripped.endswith("%"):
+        # The probe was already a fraction; detect decimal places
+        stripped = stripped[:-1].strip()
+        try:
+            float(stripped.replace(",", ""))
+            # Determine decimal places from the formatted string
+            if "." in stripped:
+                decimals = len(stripped.split(".")[-1])
+            else:
+                decimals = 0
+            return f".{decimals}%"
+        except ValueError:
+            return None
+
+    # Detect grouping (commas)
+    has_grouping = (
+        "," in stripped
+        and stripped.replace(",", "").replace(".", "").replace("-", "").isdigit()
+    )
+
+    # Detect decimal places
+    if "." in stripped:
+        decimal_part = stripped.split(".")[-1]
+        decimals = len(decimal_part)
+    else:
+        decimals = 0
+
+    grouping = "," if has_grouping else ""
+    result = f"{prefix}{grouping}.{decimals}f"
+    return result
+
+
+def _translate_column_config(
+    column_config: dict[str, Any],
+    df: Any,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Translate Streamlit column_config into number_format and dimension_format dicts.
+
+    Returns (number_format_additions, dimension_format_additions).
+    """
+    number_additions: dict[str, str] = {}
+    dimension_additions: dict[str, str] = {}
+
+    for col_name, col_spec in column_config.items():
+        if not isinstance(col_spec, dict):
+            # Could be a column type string like "number" — try to extract
+            # the format from the object's attributes if it has them
+            if hasattr(col_spec, "to_dict"):
+                col_spec = col_spec.to_dict()
+            elif hasattr(col_spec, "__dict__"):
+                col_spec = col_spec.__dict__
+            else:
+                continue
+
+        fmt = col_spec.get("format")
+        if not isinstance(fmt, str) or not fmt:
+            continue
+
+        type_name = (
+            col_spec.get("type_config", {}).get("type", "")
+            if isinstance(col_spec.get("type_config"), dict)
+            else ""
+        )
+        col_type = col_spec.get("type", type_name)
+
+        if col_type in ("date", "datetime", "time"):
+            dimension_additions[col_name] = fmt
+        else:
+            # Translate Streamlit printf-style "%,.2f" to d3-style ",.2f"
+            translated = fmt
+            if translated.startswith("%"):
+                translated = translated[1:]
+            number_additions[col_name] = translated
+
+    return number_additions, dimension_additions
+
+
 def _get_null_mode(field: str, null_handling: Any) -> str:
     """Resolve per-field null handling mode (mirrors frontend getNullMode)."""
     if null_handling is None:
@@ -355,17 +586,20 @@ def _get_null_mode(field: str, null_handling: Any) -> str:
     return "exclude"
 
 
-def _normalize_dim_values(df: Any, dims: list[str], null_handling: Any) -> Any:
-    """Rewrite null/empty dimension values to match frontend _resolveDimValue."""
+def _normalize_dim_values(
+    df: Any,
+    dims: list[str],
+    null_handling: Any,
+    column_types: dict[str, str] | None = None,
+) -> Any:
+    """Rewrite null/empty dimension values to match frontend _resolveDimKey."""
     df = df.copy()
     for dim in dims:
         if dim not in df.columns:
             continue
         mode = _get_null_mode(dim, null_handling)
-        if mode == "separate":
-            df[dim] = df[dim].fillna("(null)").replace("", "(null)").astype(str)
-        else:
-            df[dim] = df[dim].fillna("").astype(str)
+        col_type = column_types.get(dim) if column_types else None
+        df[dim] = _resolve_dim_value_series(df[dim], col_type, mode)
     return df
 
 
@@ -373,10 +607,11 @@ def _resolve_and_filter(
     df: Any,
     filters: dict[str, dict] | None,
     null_handling: Any,
+    column_types: dict[str, str] | None = None,
 ) -> Any:
     """Apply dimension filters to a raw DataFrame using resolved-value semantics.
 
-    Mirrors PivotData._shouldIncludeRow + _resolveDimValue: for every filter
+    Mirrors PivotData._shouldIncludeRow + _resolveDimKey: for every filter
     field, resolve null/empty values via per-field _get_null_mode, then compare.
     """
     if not filters:
@@ -386,10 +621,8 @@ def _resolve_and_filter(
         if field not in df.columns:
             continue
         mode = _get_null_mode(field, null_handling)
-        if mode == "separate":
-            resolved = df[field].fillna("(null)").replace("", "(null)").astype(str)
-        else:
-            resolved = df[field].fillna("").astype(str)
+        col_type = column_types.get(field) if column_types else None
+        resolved = _resolve_dim_value_series(df[field], col_type, mode)
         inc = filt.get("include")
         exc = filt.get("exclude")
         if inc:
@@ -507,6 +740,7 @@ def _compute_hybrid_totals(
     df: Any,
     config: PivotConfig,
     null_handling: Any,
+    column_types: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """Build the hybrid_totals sidecar dict with pre-computed totals."""
     aggregation = config.get("aggregation", {})
@@ -539,8 +773,10 @@ def _compute_hybrid_totals(
         }
 
     all_dims = rows + columns
-    working = _normalize_dim_values(df, all_dims, null_handling)
-    working = _resolve_and_filter(working, config.get("filters", {}), null_handling)
+    working = _normalize_dim_values(df, all_dims, null_handling, column_types)
+    working = _resolve_and_filter(
+        working, config.get("filters", {}), null_handling, column_types
+    )
 
     fingerprint = _build_sidecar_fingerprint(config, null_handling)
 
@@ -670,17 +906,20 @@ def _compute_hybrid_drilldown(
     dims: list[str] | None = None,
     config_filters: dict[str, dict] | None = None,
     page_size: int = _DRILLDOWN_PAGE_SIZE,
+    column_types: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], int, int]:
     """Filter the original DataFrame for a hybrid-mode drill-down request.
 
-    Uses resolved-dimension semantics (matching _resolveDimValue on the
+    Uses resolved-dimension semantics (matching _resolveDimKey on the
     frontend) so that filter values like "(null)" align correctly with
     null_handling modes.  Applies config-level dimension filters first
     (matching _shouldIncludeRow), then cell-click filters.
 
     Returns (records_list, column_names, total_matching_count, page).
     """
-    working = _resolve_and_filter(df, config_filters or {}, null_handling)
+    working = _resolve_and_filter(
+        df, config_filters or {}, null_handling, column_types=column_types
+    )
 
     filters: dict[str, str] = drilldown_request.get("filters", {})
     page: int = max(0, int(drilldown_request.get("page", 0)))
@@ -690,10 +929,8 @@ def _compute_hybrid_drilldown(
         if col not in working.columns:
             continue
         mode = _get_null_mode(col, null_handling)
-        if mode == "separate":
-            resolved = working[col].fillna("(null)").replace("", "(null)").astype(str)
-        else:
-            resolved = working[col].fillna("").astype(str)
+        col_type = column_types.get(col) if column_types else None
+        resolved = _resolve_dim_value_series(working[col], col_type, mode)
         mask &= resolved == str(val)
     filtered = working[mask]
     total_count = len(filtered)
@@ -853,6 +1090,7 @@ def _default_config(
     conditional_formatting: list[dict[str, Any]] | None = None,
     number_format: str | dict[str, str] | None = None,
     column_alignment: dict[str, str] | None = None,
+    dimension_format: dict[str, str] | None = None,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -913,6 +1151,8 @@ def _default_config(
         cfg["number_format"] = nf
     if column_alignment is not None:
         cfg["column_alignment"] = column_alignment
+    if dimension_format is not None:
+        cfg["dimension_format"] = dimension_format
     return cfg
 
 
@@ -1048,6 +1288,9 @@ def st_pivot_table(
     execution_mode: str = "auto",
     # Report-level filtering
     source_filters: dict[str, dict[str, list[Any]]] | None = None,
+    # Format hints from Streamlit column_config / dimension_format
+    column_config: dict[str, Any] | None = None,
+    dimension_format: str | dict[str, str] | None = None,
 ) -> PivotTableResult:
     """Create a pivot table component.
 
@@ -1203,6 +1446,20 @@ def st_pivot_table(
             "key is required: pass a unique string that identifies this "
             "pivot table instance (e.g. key='my_pivot')"
         )
+
+    # --- Styler extraction (Phase 3): detect before conversion strips it ---
+    styler_number_formats: dict[str, str] = {}
+    styler_dimension_formats: dict[str, str] = {}
+    try:
+        from pandas.io.formats.style import Styler as _PandasStyler
+
+        if isinstance(data, _PandasStyler):
+            styler_number_formats, styler_dimension_formats = _extract_styler_formats(
+                data
+            )
+            data = data.data
+    except ImportError:
+        pass
 
     # --- Convert data to pandas DataFrame ---
     try:
@@ -1558,6 +1815,56 @@ def st_pivot_table(
                     f"column_alignment[{k!r}] must be one of {sorted(VALID_ALIGNMENTS)}, got {v!r}"
                 )
 
+    if dimension_format is not None:
+        if isinstance(dimension_format, str):
+            dimension_format = {"__all__": dimension_format}
+        elif isinstance(dimension_format, dict):
+            for k, v in dimension_format.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    raise TypeError("dimension_format keys and values must be strings")
+        else:
+            raise TypeError(
+                f"dimension_format must be str, dict, or None, got {type(dimension_format).__name__}"
+            )
+
+    # Merge Styler formats (lowest precedence): fill gaps only
+    if styler_number_formats:
+        if number_format is None:
+            number_format = styler_number_formats
+        elif isinstance(number_format, dict):
+            merged_snf = dict(styler_number_formats)
+            merged_snf.update(number_format)
+            number_format = merged_snf
+    if styler_dimension_formats:
+        if dimension_format is None:
+            dimension_format = styler_dimension_formats
+        elif isinstance(dimension_format, dict):
+            merged_sdf = dict(styler_dimension_formats)
+            merged_sdf.update(dimension_format)
+            dimension_format = merged_sdf
+
+    # Merge column_config formats: column_config fills gaps, explicit params override
+    if column_config is not None:
+        cc_number, cc_dimension = _translate_column_config(column_config, filtered_data)
+        if cc_number:
+            if number_format is None:
+                number_format = cc_number
+            elif isinstance(number_format, dict):
+                merged_nf = dict(cc_number)
+                merged_nf.update(number_format)
+                number_format = merged_nf
+        if cc_dimension:
+            if dimension_format is None:
+                dimension_format = cc_dimension
+            elif isinstance(dimension_format, dict):
+                merged_df = dict(cc_dimension)
+                merged_df.update(dimension_format)
+                dimension_format = merged_df
+
+    # Normalize number_format: str -> {"__all__": str}
+    if isinstance(number_format, str):
+        number_format = {"__all__": number_format}
+
     initial_config = _default_config(
         rows=resolved_rows,
         columns=resolved_columns,
@@ -1578,11 +1885,16 @@ def st_pivot_table(
         conditional_formatting=conditional_formatting,
         number_format=number_format,
         column_alignment=column_alignment,
+        dimension_format=dimension_format
+        if isinstance(dimension_format, dict)
+        else None,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal
     # reruns, but let explicit Python config changes take precedence.
     config_to_send = _resolve_config_to_send(st.session_state, key, initial_config)
+    original_column_types = _build_original_column_types(filtered_data)
+
     use_threshold_hybrid, threshold_reason = _should_use_threshold_hybrid(
         filtered_data, config_to_send, execution_mode
     )
@@ -1594,7 +1906,9 @@ def st_pivot_table(
         if drill_note not in threshold_reason:
             threshold_reason = f"{threshold_reason}{drill_note}"
     materialized_data = (
-        _prepare_threshold_hybrid_frame(filtered_data, config_to_send, null_handling)
+        _prepare_threshold_hybrid_frame(
+            filtered_data, config_to_send, null_handling, original_column_types
+        )
         if use_threshold_hybrid
         else filtered_data
     )
@@ -1610,6 +1924,7 @@ def st_pivot_table(
         "config": config_to_send,
         "execution_mode": effective_execution_mode,
         "server_mode_reason": threshold_reason,
+        "original_column_types": original_column_types,
     }
 
     if use_threshold_hybrid:
@@ -1619,7 +1934,7 @@ def st_pivot_table(
         if agg_remap:
             data_payload["hybrid_agg_remap"] = agg_remap
         totals_sidecar = _compute_hybrid_totals(
-            filtered_data, config_to_send, null_handling
+            filtered_data, config_to_send, null_handling, original_column_types
         )
         if totals_sidecar:
             data_payload["hybrid_totals"] = totals_sidecar
@@ -1675,6 +1990,7 @@ def st_pivot_table(
                 null_handling=null_handling,
                 dims=all_dims,
                 config_filters=config_to_send.get("filters"),
+                column_types=original_column_types,
             )
             data_payload["drilldown_records"] = records
             data_payload["drilldown_columns"] = columns

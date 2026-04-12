@@ -28,6 +28,8 @@ import {
 } from "react";
 import {
   type CellClickPayload,
+  type ColumnType,
+  type ColumnTypeMap,
   type DimensionFilter,
   DEFAULT_CONFIG,
   getRenderedValueFields,
@@ -101,6 +103,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   hybrid_totals,
   hybrid_agg_remap,
   source_row_count,
+  original_column_types,
   setStateValue,
   setTriggerValue,
 }): ReactElement => {
@@ -198,14 +201,47 @@ const PivotRoot: FC<PivotRootProps> = ({
     [rawNumericColumns, hiddenSet],
   );
 
+  const mergedColumnTypes: ColumnTypeMap = useMemo(() => {
+    const result: ColumnTypeMap = new Map<string, ColumnType>();
+    // Start with Python supplement (covers all columns including drilldown-only)
+    if (original_column_types) {
+      for (const [col, ct] of Object.entries(original_column_types)) {
+        result.set(col, ct);
+      }
+    }
+    // Arrow-derived types take precedence, except: if Arrow says "string"
+    // and Python says temporal, prefer Python (object-typed date columns)
+    if (pivotInput?.getColumnTypes) {
+      const arrowTypes = pivotInput.getColumnTypes();
+      for (const [col, arrowType] of arrowTypes) {
+        const pythonType = result.get(col);
+        if (
+          arrowType === "string" &&
+          (pythonType === "datetime" || pythonType === "date")
+        ) {
+          continue; // Python detected temporal in object column
+        }
+        result.set(col, arrowType);
+      }
+    }
+    return result;
+  }, [pivotInput, original_column_types]);
+
   const pivotOptions: PivotDataOptions = useMemo(
     () => ({
       nullHandling: null_handling,
       sorters,
       hybridTotals: hybrid_totals,
       hybridAggRemap: hybrid_agg_remap,
+      columnTypes: mergedColumnTypes,
     }),
-    [null_handling, sorters, hybrid_totals, hybrid_agg_remap],
+    [
+      null_handling,
+      sorters,
+      hybrid_totals,
+      hybrid_agg_remap,
+      mergedColumnTypes,
+    ],
   );
 
   const { pivotData, computeMs } = useMemo(() => {
@@ -703,6 +739,7 @@ const PivotRoot: FC<PivotRootProps> = ({
             payload={drilldownPayload}
             numberFormat={currentConfig.number_format}
             columnAlignment={currentConfig.column_alignment}
+            columnTypes={mergedColumnTypes}
             onClose={() => {
               setDrilldownPayload(null);
               if (isHybridMode) {

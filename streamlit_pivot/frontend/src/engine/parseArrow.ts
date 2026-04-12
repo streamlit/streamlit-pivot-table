@@ -17,7 +17,7 @@
 
 import { tableFromIPC, Table, Vector } from "apache-arrow";
 import type { DataRecord } from "./PivotData";
-import type { ColumnarDataSource } from "./types";
+import type { ColumnarDataSource, ColumnType, ColumnTypeMap } from "./types";
 
 /**
  * CCv2 delivers DataFrames as Apache Arrow Table objects (not raw Uint8Array).
@@ -61,6 +61,17 @@ function toTable(arrowData: unknown): Table | null {
 
   return null;
 }
+
+const ARROW_TYPE_MAP: Record<number, ColumnType> = {
+  2: "integer", // Type.Int
+  3: "float", // Type.Float
+  5: "string", // Type.Utf8
+  6: "boolean", // Type.Bool
+  7: "float", // Type.Decimal
+  8: "date", // Type.Date
+  10: "datetime", // Type.Timestamp
+  20: "string", // Type.LargeUtf8
+};
 
 export class ArrowDataSource implements ColumnarDataSource {
   private readonly columnMap = new Map<string, Vector>();
@@ -120,6 +131,15 @@ export class ArrowDataSource implements ColumnarDataSource {
     }
     this.float64Cache.set(fieldName, null);
     return null;
+  }
+
+  getColumnTypes(): ColumnTypeMap {
+    const result: ColumnTypeMap = new Map();
+    for (const field of this.table.schema.fields) {
+      const mapped = ARROW_TYPE_MAP[field.type.typeId];
+      if (mapped) result.set(field.name, mapped);
+    }
+    return result;
   }
 }
 

@@ -76,6 +76,8 @@ export interface UseHeaderMenuResult {
     | ((measure: string, axis: "row" | "col") => void)
     | undefined;
   menuConfig: PivotConfigV1 | undefined;
+  /** Format a canonical dimension key into a display label. */
+  menuFormatLabel: ((key: string) => string) | undefined;
   handleCellKeyDown: (
     e: KeyboardEvent,
     rowKey: readonly string[],
@@ -162,6 +164,11 @@ export function useHeaderMenu({
     menuTarget && !isValueMenu
       ? pivotData.getUniqueValues(menuTarget.dimension)
       : [];
+
+  const menuFormatLabel: ((key: string) => string) | undefined =
+    menuTarget && !isValueMenu
+      ? (key: string) => pivotData.formatDimLabel(menuTarget.dimension, key)
+      : undefined;
 
   const axisSort =
     menuTarget && !isValueMenu
@@ -270,6 +277,7 @@ export function useHeaderMenu({
     menuOnSubtotalToggle,
     menuOnTotalToggle,
     menuConfig: menuTarget ? config : undefined,
+    menuFormatLabel,
     handleCellKeyDown,
   };
 }

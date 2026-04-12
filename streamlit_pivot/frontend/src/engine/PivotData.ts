@@ -24,6 +24,8 @@ import {
 import {
   type AggregationType,
   type ColumnarDataSource,
+  type ColumnType,
+  type ColumnTypeMap,
   getAggregationForField,
   type DimensionFilter,
   type HybridTotals,
@@ -34,7 +36,14 @@ import {
   type SortConfig,
 } from "./types";
 import { DataRecordSource } from "./parseArrow";
-import { formatNumber } from "./formatters";
+import {
+  formatNumber,
+  formatDateValue,
+  formatDateTimeValue,
+  formatIntegerLabel,
+  formatDateWithPattern,
+  normalizeToUTC,
+} from "./formatters";
 
 export type DataRecord = Record<string, unknown>;
 
@@ -52,6 +61,7 @@ export interface PivotDataOptions {
   sorters?: Record<string, string[]>;
   hybridTotals?: HybridTotals;
   hybridAggRemap?: Record<string, AggregationType>;
+  columnTypes?: ColumnTypeMap;
 }
 
 export function makeKeyString(parts: string[]): string {
@@ -183,6 +193,14 @@ export class PivotData {
   /** Fields whose distinct values/indexes are worth precomputing. */
   private readonly _indexedFields: ReadonlySet<string>;
 
+  /** Merged column types (Arrow + Python supplement). */
+  private readonly _columnTypes: ColumnTypeMap | undefined;
+  /** Cached display labels: field -> canonicalKey -> formatted label. */
+  private readonly _displayLabelMap: Map<string, Map<string, string>> =
+    new Map();
+  /** Original typed raw values: field -> canonicalKey -> original Arrow value. */
+  private readonly _rawValueMap: Map<string, Map<string, unknown>> = new Map();
+
   /** Sidecar lookup maps (null if stale or absent). */
   private _hybridGrand: Map<string, number | null> | null = null;
   private _hybridRowTotals: Map<string, number | null> | null = null;
@@ -199,6 +217,7 @@ export class PivotData {
   ) {
     this._config = config;
     this._options = options ?? {};
+    this._columnTypes = options?.columnTypes;
     if (Array.isArray(input)) {
       const columns =
         input.length > 0 ? Object.keys(input[0] as DataRecord) : [];
@@ -337,7 +356,7 @@ export class PivotData {
     if (!filters) return true;
     for (const [field, filter] of Object.entries(filters)) {
       const raw = this._dataSource.getValue(rowIndex, field);
-      const val = this._resolveDimValue(field, raw);
+      const val = this._resolveDimKey(field, raw);
       if (filter.include && filter.include.length > 0) {
         if (!filter.include.includes(val)) return false;
       } else if (filter.exclude && filter.exclude.length > 0) {
@@ -351,12 +370,121 @@ export class PivotData {
   // Null handling
   // ---------------------------------------------------------------------------
 
-  private _resolveDimValue(field: string, raw: unknown): string {
+  private _canonicalTemporalKey(
+    colType: ColumnType,
+    raw: unknown,
+  ): string | null {
+    if (colType === "datetime") {
+      if (typeof raw === "number") {
+        return new Date(raw).toISOString();
+      }
+      if (typeof raw === "string") {
+        const d = new Date(normalizeToUTC(raw));
+        if (!isNaN(d.getTime())) return d.toISOString();
+      }
+      if (raw instanceof Date) {
+        return raw.toISOString();
+      }
+      return null;
+    }
+    if (colType === "date") {
+      if (typeof raw === "number") {
+        return new Date(raw).toISOString().slice(0, 10);
+      }
+      if (typeof raw === "string") {
+        const d = new Date(normalizeToUTC(raw));
+        if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      }
+      if (raw instanceof Date) {
+        return raw.toISOString().slice(0, 10);
+      }
+      return null;
+    }
+    return null;
+  }
+
+  private _resolveDimKey(field: string, raw: unknown): string {
     if (raw == null || raw === "") {
       const mode = getNullMode(field, this._options.nullHandling);
       return mode === "separate" ? "(null)" : "";
     }
+    const colType = this._columnTypes?.get(field);
+    if (colType === "datetime" || colType === "date") {
+      const canonical = this._canonicalTemporalKey(colType, raw);
+      if (canonical !== null) {
+        // Cache the original raw value for export
+        if (!this._rawValueMap.has(field)) {
+          this._rawValueMap.set(field, new Map());
+        }
+        const fieldRawMap = this._rawValueMap.get(field)!;
+        if (!fieldRawMap.has(canonical)) {
+          fieldRawMap.set(canonical, raw);
+        }
+        return canonical;
+      }
+    }
     return String(raw);
+  }
+
+  /**
+   * Compute a formatted display label for a dimension value.
+   * Uses the config's dimension_format if available, otherwise falls back
+   * to auto-formatting based on column type.
+   */
+  formatDimLabel(field: string, key: string): string {
+    if (!key || key === "(null)") return key;
+
+    // Check cache first
+    const fieldCache = this._displayLabelMap.get(field);
+    if (fieldCache) {
+      const cached = fieldCache.get(key);
+      if (cached !== undefined) return cached;
+    }
+
+    const colType = this._columnTypes?.get(field);
+    let label = key;
+
+    // Check for explicit dimension_format pattern
+    const pattern =
+      this._config.dimension_format?.[field] ??
+      this._config.dimension_format?.["__all__"];
+
+    if (pattern && (colType === "datetime" || colType === "date")) {
+      label = formatDateWithPattern(key, pattern);
+    } else if (colType === "datetime") {
+      const rawVal = this._rawValueMap.get(field)?.get(key);
+      label = formatDateTimeValue(rawVal ?? key);
+    } else if (colType === "date") {
+      const rawVal = this._rawValueMap.get(field)?.get(key);
+      label = formatDateValue(rawVal ?? key);
+    } else if (colType === "integer") {
+      label = formatIntegerLabel(key);
+    }
+
+    // Cache the label
+    if (!this._displayLabelMap.has(field)) {
+      this._displayLabelMap.set(field, new Map());
+    }
+    this._displayLabelMap.get(field)!.set(key, label);
+    return label;
+  }
+
+  /**
+   * Get the original typed raw value for a dimension key (e.g. epoch ms for timestamps).
+   * Returns undefined if not available.
+   */
+  getRawDimValue(field: string, key: string): unknown {
+    return this._rawValueMap.get(field)?.get(key);
+  }
+
+  /** Get the semantic column type for a field, or undefined if unknown. */
+  getColumnType(field: string): ColumnType | undefined {
+    return this._columnTypes?.get(field);
+  }
+
+  /** Get the full column type map. */
+  getColumnTypes(): ColumnTypeMap | undefined {
+    return this._columnTypes;
   }
 
   private _resolveAggValue(field: string, raw: unknown): unknown {
@@ -441,7 +569,7 @@ export class PivotData {
 
     for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
       for (const field of this._indexedFields) {
-        const resolved = this._resolveDimValue(
+        const resolved = this._resolveDimKey(
           field,
           this._dataSource.getValue(recordIndex, field),
         );
@@ -459,10 +587,10 @@ export class PivotData {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const rowKey = this._config.rows.map((r) =>
-        this._resolveDimValue(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
       );
       const colKey = this._config.columns.map((c) =>
-        this._resolveDimValue(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
       );
       const rowKeyStr = makeKeyString(rowKey);
       const colKeyStr = makeKeyString(colKey);
@@ -810,10 +938,10 @@ export class PivotData {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const fullRowKey = rowDims.map((r) =>
-        this._resolveDimValue(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
       );
       const colKey = this._config.columns.map((c) =>
-        this._resolveDimValue(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
       );
       const colKeyStr = makeKeyString(colKey);
 
@@ -1028,10 +1156,10 @@ export class PivotData {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const rowKey = rowDims.map((r) =>
-        this._resolveDimValue(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
       );
       const fullColKey = colDims.map((c) =>
-        this._resolveDimValue(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
       );
       const rowKeyStr = makeKeyString(rowKey);
 
@@ -1202,7 +1330,7 @@ export class PivotData {
       const n = this._dataSource.numRows;
       for (let i = 0; i < n; i++) {
         set.add(
-          this._resolveDimValue(field, this._dataSource.getValue(i, field)),
+          this._resolveDimKey(field, this._dataSource.getValue(i, field)),
         );
       }
       cached = [...set].sort((a, b) => a.localeCompare(b));
@@ -1300,7 +1428,7 @@ export class PivotData {
 
       let matchesClick = true;
       for (const [field, value] of Object.entries(filters)) {
-        const recordVal = this._resolveDimValue(
+        const recordVal = this._resolveDimKey(
           field,
           this._dataSource.getValue(recordIndex, field),
         );

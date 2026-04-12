@@ -167,3 +167,168 @@ const pctFormatter = new Intl.NumberFormat(undefined, {
 export function formatPercent(n: number): string {
   return pctFormatter.format(n);
 }
+
+// ---------------------------------------------------------------------------
+// Date / datetime / integer display formatters (Phase 1c)
+// ---------------------------------------------------------------------------
+
+const ISO_NAIVE_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?)?$/;
+
+/**
+ * Normalize a naive ISO datetime string to UTC by appending "Z".
+ * JS `new Date("2024-01-15T12:30:00")` parses as LOCAL TIME (browser-dependent),
+ * but `new Date("2024-01-15T12:30:00Z")` parses as UTC.
+ * Date-only strings like "2024-01-15" are already UTC per the JS spec.
+ */
+export function normalizeToUTC(s: string): string {
+  if (ISO_NAIVE_RE.test(s) && (s.includes("T") || s.includes(" "))) {
+    return s.replace(" ", "T") + "Z";
+  }
+  return s;
+}
+
+function toDate(raw: unknown): Date | null {
+  if (raw instanceof Date) return raw;
+  if (typeof raw === "number") return new Date(raw);
+  if (typeof raw === "string") {
+    const d = new Date(normalizeToUTC(raw));
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+const dateFmt = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "UTC",
+});
+
+const intLabelFmt = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 0,
+});
+
+export function formatDateValue(raw: unknown): string {
+  const d = toDate(raw);
+  return d ? dateFmt.format(d) : String(raw);
+}
+
+export function formatDateTimeValue(raw: unknown): string {
+  const d = toDate(raw);
+  return d ? dateTimeFmt.format(d) : String(raw);
+}
+
+export function formatIntegerLabel(raw: unknown): string {
+  if (typeof raw === "number" && isFinite(raw)) {
+    return intLabelFmt.format(raw);
+  }
+  if (typeof raw === "string") {
+    const n = Number(raw);
+    if (isFinite(n)) return intLabelFmt.format(n);
+  }
+  return String(raw);
+}
+
+// ---------------------------------------------------------------------------
+// Date pattern formatting (Phase 2b)
+// ---------------------------------------------------------------------------
+
+const MONTH_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+const MONTH_LONG = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+type TokenResolver = (d: Date) => string;
+
+const TOKEN_RESOLVERS: [string, TokenResolver][] = [
+  ["YYYY", (d) => String(d.getUTCFullYear())],
+  ["YY", (d) => String(d.getUTCFullYear()).slice(-2)],
+  ["MMMM", (d) => MONTH_LONG[d.getUTCMonth()]],
+  ["MMM", (d) => MONTH_SHORT[d.getUTCMonth()]],
+  ["MM", (d) => String(d.getUTCMonth() + 1).padStart(2, "0")],
+  ["M", (d) => String(d.getUTCMonth() + 1)],
+  ["DD", (d) => String(d.getUTCDate()).padStart(2, "0")],
+  ["D", (d) => String(d.getUTCDate())],
+  ["HH", (d) => String(d.getUTCHours()).padStart(2, "0")],
+  ["mm", (d) => String(d.getUTCMinutes()).padStart(2, "0")],
+  ["ss", (d) => String(d.getUTCSeconds()).padStart(2, "0")],
+];
+
+const TOKEN_RE = /YYYY|YY|MMMM|MMM|MM|M|DD|D|HH|mm|ss/g;
+
+const patternResolverCache = new Map<
+  string,
+  { parts: { literal: string; resolve?: TokenResolver }[] }
+>();
+
+function buildPatternParts(
+  pattern: string,
+): { literal: string; resolve?: TokenResolver }[] {
+  const resolverMap = new Map(TOKEN_RESOLVERS);
+  const parts: { literal: string; resolve?: TokenResolver }[] = [];
+  let lastIndex = 0;
+  TOKEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TOKEN_RE.exec(pattern)) !== null) {
+    if (m.index > lastIndex) {
+      parts.push({ literal: pattern.slice(lastIndex, m.index) });
+    }
+    parts.push({ literal: "", resolve: resolverMap.get(m[0]) });
+    lastIndex = TOKEN_RE.lastIndex;
+  }
+  if (lastIndex < pattern.length) {
+    parts.push({ literal: pattern.slice(lastIndex) });
+  }
+  return parts;
+}
+
+export function formatDateWithPattern(raw: unknown, pattern: string): string {
+  const d = toDate(raw);
+  if (!d) return String(raw);
+
+  let cached = patternResolverCache.get(pattern);
+  if (!cached) {
+    cached = { parts: buildPatternParts(pattern) };
+    patternResolverCache.set(pattern, cached);
+  }
+
+  let result = "";
+  for (const part of cached.parts) {
+    result += part.literal;
+    if (part.resolve) result += part.resolve(d);
+  }
+  return result;
+}

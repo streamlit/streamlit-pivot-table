@@ -902,7 +902,9 @@ export function renderColumnHeaders(
                 </svg>
               )}
               <span className={isFiltered ? styles.headerFiltered : ""}>
-                {val || "(empty)"}
+                {(val
+                  ? (pivotData?.formatDimLabel(dimName, val) ?? val)
+                  : "") || "(empty)"}
               </span>
               {showColSortIndicator && (
                 <SortArrowIcon direction={colSortDir!} />
@@ -1224,7 +1226,9 @@ export function renderDataRow(
               : {})}
           >
             {showToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
-            {part || "(empty)"}
+            {(part
+              ? pivotData.formatDimLabel(config.rows[dimIdx] ?? "", part)
+              : "") || "(empty)"}
           </th>
         );
       })}
@@ -2204,6 +2208,7 @@ const TableRenderer: FC<TableRendererProps> = ({
     menuOnSubtotalToggle,
     menuOnTotalToggle,
     menuConfig,
+    menuFormatLabel,
     handleCellKeyDown,
   } = useHeaderMenu({
     config,
@@ -2418,6 +2423,7 @@ const TableRenderer: FC<TableRendererProps> = ({
             config={menuConfig}
             onSubtotalToggle={menuOnSubtotalToggle}
             onTotalToggle={menuOnTotalToggle}
+            formatLabel={menuFormatLabel}
             onClose={handleCloseMenu}
           />
         </div>

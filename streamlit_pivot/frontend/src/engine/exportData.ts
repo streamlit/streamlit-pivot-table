@@ -17,6 +17,7 @@
 
 import type { PivotData } from "./PivotData";
 import type {
+  ColumnTypeMap,
   PivotConfigV1,
   ShowValuesAs,
   ConditionalFormatRule,
@@ -30,7 +31,7 @@ import {
   showColumnTotals,
   showTotalForMeasure,
 } from "./types";
-import { formatWithPattern, formatPercent } from "./formatters";
+import { formatWithPattern, formatPercent, normalizeToUTC } from "./formatters";
 
 export type ExportFormat = "csv" | "tsv" | "clipboard" | "xlsx";
 export type ExportContent = "formatted" | "raw";
@@ -61,8 +62,8 @@ export type CellKind =
 export interface ExportCell {
   /** Formatted display string (consumed by CSV/TSV). */
   display: string;
-  /** Raw numeric value for Excel (null for label/empty cells). */
-  raw: number | null;
+  /** Raw value for Excel: number, Date (temporal dims), or null (labels/empty). */
+  raw: number | Date | null;
   /** Semantic type driving Excel styling. */
   kind: CellKind;
   /** Merge rightward N additional cells (column headers). */
@@ -270,6 +271,20 @@ function formatExportTotalValue(
   return { display: agg.format(config.empty_cell_value), raw: rawValue };
 }
 
+/**
+ * Convert a raw dimension value to a Date object for typed Excel export.
+ * Handles epoch ms (number), ISO strings (from Utf8 object columns), and Date objects.
+ */
+function toExportDate(raw: unknown): Date | null {
+  if (raw instanceof Date) return raw;
+  if (typeof raw === "number" && isFinite(raw)) return new Date(raw);
+  if (typeof raw === "string") {
+    const d = new Date(normalizeToUTC(raw));
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Shared IR builder
 // ---------------------------------------------------------------------------
@@ -277,7 +292,7 @@ function formatExportTotalValue(
 function cell(
   display: string,
   kind: CellKind,
-  raw: number | null = null,
+  raw: number | Date | null = null,
   extra?: Partial<
     Pick<ExportCell, "mergeRight" | "mergeDown" | "numberFormat">
   >,
@@ -302,6 +317,7 @@ export function buildExportIR(
   config: PivotConfigV1,
   mode: ExportContent,
 ): ExportGrid {
+  const columnTypes: ColumnTypeMap | undefined = pivotData.getColumnTypes();
   const rowKeys = pivotData.getRowKeys();
   const colKeys = pivotData.getColKeys();
   const values = getRenderedValueFields(config);
@@ -331,7 +347,9 @@ export function buildExportIR(
     }
 
     for (const colKey of colKeys) {
-      const label = colKey[level] ?? "";
+      const rawLabel = colKey[level] ?? "";
+      const dimName = colDims[level] ?? "";
+      const label = rawLabel ? pivotData.formatDimLabel(dimName, rawLabel) : "";
       if (hasMultipleValues) {
         row.push(cell(label, "header", null, { mergeRight: colsPerKey - 1 }));
         for (let v = 1; v < colsPerKey; v++) {
@@ -412,7 +430,10 @@ export function buildExportIR(
     if (groupedRow.type === "subtotal") {
       for (let d = 0; d < numRowDimCols; d++) {
         if (d < groupedRow.key.length) {
-          row.push(cell(groupedRow.key[d], "subtotal"));
+          const sk = groupedRow.key[d];
+          const sdn = rowDims[d] ?? "";
+          const sdisplay = sk ? pivotData.formatDimLabel(sdn, sk) : "";
+          row.push(cell(sdisplay, "subtotal"));
         } else if (d === groupedRow.key.length) {
           row.push(cell("Subtotal", "subtotal"));
         } else {
@@ -480,7 +501,29 @@ export function buildExportIR(
     } else {
       const rowKey = groupedRow.key;
       for (let d = 0; d < numRowDimCols; d++) {
-        row.push(cell(rowKey[d] ?? "", "data"));
+        const dimKey = rowKey[d] ?? "";
+        const dimName = rowDims[d] ?? "";
+        const display = dimKey ? pivotData.formatDimLabel(dimName, dimKey) : "";
+        const colType = columnTypes?.get(dimName);
+        if (colType === "datetime" || colType === "date") {
+          const rawVal = pivotData.getRawDimValue(dimName, dimKey);
+          const exportDate = rawVal !== undefined ? toExportDate(rawVal) : null;
+          row.push(
+            cell(
+              display,
+              "data",
+              exportDate,
+              exportDate
+                ? {
+                    numberFormat:
+                      colType === "date" ? "yyyy-mm-dd" : "yyyy-mm-dd hh:mm",
+                  }
+                : undefined,
+            ),
+          );
+        } else {
+          row.push(cell(display, "data"));
+        }
       }
       for (const colKey of colKeys) {
         for (const valField of values) {

@@ -73,6 +73,8 @@ export interface PivotConfigV1 {
   sticky_headers?: boolean;
   /** Phase 3d: per-field number format patterns (e.g. {"Revenue": "$,.0f"}). */
   number_format?: Record<string, string>;
+  /** Per-field dimension format patterns for date/datetime labels. */
+  dimension_format?: Record<string, string>;
   /** Phase 3d: per-field alignment override. */
   column_alignment?: Record<string, "left" | "center" | "right">;
 }
@@ -637,6 +639,19 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     result.number_format = nf as Record<string, string>;
   }
   if (
+    o.dimension_format !== undefined &&
+    typeof o.dimension_format === "object" &&
+    !Array.isArray(o.dimension_format)
+  ) {
+    const df = o.dimension_format as Record<string, unknown>;
+    for (const [k, v] of Object.entries(df)) {
+      if (typeof v !== "string") {
+        throw new Error(`'dimension_format["${k}"]' must be a string`);
+      }
+    }
+    result.dimension_format = df as Record<string, string>;
+  }
+  if (
     o.column_alignment !== undefined &&
     typeof o.column_alignment === "object" &&
     !Array.isArray(o.column_alignment)
@@ -803,6 +818,20 @@ export interface PivotPerfMetrics {
 }
 
 // ---------------------------------------------------------------------------
+// Column type detection (Arrow schema + Python supplement)
+// ---------------------------------------------------------------------------
+
+export type ColumnType =
+  | "datetime"
+  | "date"
+  | "integer"
+  | "float"
+  | "string"
+  | "boolean";
+
+export type ColumnTypeMap = Map<string, ColumnType>;
+
+// ---------------------------------------------------------------------------
 // Null handling (developer constraint, passed via data channel)
 // ---------------------------------------------------------------------------
 
@@ -886,6 +915,8 @@ export interface PivotTableData {
   drilldown_page_size?: number;
   /** Original row count before hybrid pre-aggregation. */
   source_row_count?: number;
+  /** Python-detected column types (covers drilldown-only and object-dtype temporal columns). */
+  original_column_types?: Record<string, ColumnType>;
 }
 
 // ---------------------------------------------------------------------------
@@ -903,4 +934,5 @@ export interface ColumnarDataSource {
   getValue(rowIndex: number, fieldName: string): unknown;
   getColumnNames(): string[];
   getFloat64Column?(fieldName: string): Float64Array | null;
+  getColumnTypes?(): ColumnTypeMap;
 }

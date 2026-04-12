@@ -72,6 +72,8 @@ export interface HeaderMenuProps {
   onSubtotalToggle?: (dimension: string) => void;
   /** Callback to toggle a measure in row/column totals (value headers only). */
   onTotalToggle?: (measure: string, axis: "row" | "col") => void;
+  /** Format a canonical key into a display label (e.g. ISO date → "Jan 15, 2024"). */
+  formatLabel?: (key: string) => string;
   onClose: () => void;
 }
 
@@ -105,6 +107,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
   config,
   onSubtotalToggle,
   onTotalToggle,
+  formatLabel,
   onClose,
 }): ReactElement => {
   const showSort = !!onSortChange;
@@ -200,8 +203,12 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
   const filteredValues = useMemo(() => {
     if (!search) return uniqueValues;
     const lower = search.toLowerCase();
-    return uniqueValues.filter((v) => v.toLowerCase().includes(lower));
-  }, [uniqueValues, search]);
+    return uniqueValues.filter((v) => {
+      if (v.toLowerCase().includes(lower)) return true;
+      const label = formatLabel?.(v);
+      return label ? label.toLowerCase().includes(lower) : false;
+    });
+  }, [uniqueValues, search, formatLabel]);
 
   const visibleValues = filteredValues.slice(0, menuLimit);
   const overflowCount = filteredValues.length - visibleValues.length;
@@ -630,7 +637,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
                   onChange={() => toggleValue(val)}
                   tabIndex={-1}
                 />
-                <span>{val || "(empty)"}</span>
+                <span>{(formatLabel?.(val) ?? val) || "(empty)"}</span>
               </label>
             ))}
             {overflowCount > 0 && (

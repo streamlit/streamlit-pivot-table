@@ -25,9 +25,14 @@ import {
   useState,
 } from "react";
 import type { PivotData, DataRecord } from "../engine/PivotData";
-import type { CellClickPayload } from "../engine/types";
+import type { CellClickPayload, ColumnTypeMap } from "../engine/types";
 import { measureSync, type PerfActionMeasurement } from "../engine/perf";
-import { formatNumber, formatWithPattern } from "../engine/formatters";
+import {
+  formatNumber,
+  formatWithPattern,
+  formatDateValue,
+  formatDateTimeValue,
+} from "../engine/formatters";
 import styles from "./DrilldownPanel.module.css";
 
 const RECORD_LIMIT = 500;
@@ -55,6 +60,8 @@ export interface DrilldownPanelProps {
   numberFormat?: Record<string, string>;
   /** Per-field alignment overrides from config. */
   columnAlignment?: Record<string, string>;
+  /** Merged column type map for date/datetime formatting in cells. */
+  columnTypes?: ColumnTypeMap;
 }
 
 const CloseIcon: FC = () => (
@@ -73,10 +80,14 @@ const CloseIcon: FC = () => (
   </svg>
 );
 
-function formatDrilldownHeader(payload: CellClickPayload): string {
+function formatDrilldownHeader(
+  payload: CellClickPayload,
+  pivotData?: PivotData,
+): string {
   const parts: string[] = [];
   for (const [dim, val] of Object.entries(payload.filters)) {
-    parts.push(`${dim}: ${val}`);
+    const label = pivotData ? pivotData.formatDimLabel(dim, val) : val;
+    parts.push(`${dim}: ${label}`);
   }
   if (parts.length === 0) {
     const rowLabel = payload.rowKey.join(" > ");
@@ -91,8 +102,12 @@ function formatCellValue(
   value: unknown,
   column: string,
   numberFormat?: Record<string, string>,
+  columnTypes?: ColumnTypeMap,
 ): string {
   if (value === null || value === undefined) return "";
+  const colType = columnTypes?.get(column);
+  if (colType === "datetime") return formatDateTimeValue(value);
+  if (colType === "date") return formatDateValue(value);
   if (typeof value === "number") {
     if (Number.isNaN(value)) return "";
     const pattern = numberFormat?.[column] ?? numberFormat?.["__all__"];
@@ -127,6 +142,7 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
   onPageChange,
   numberFormat,
   columnAlignment,
+  columnTypes,
 }): ReactElement => {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -190,7 +206,7 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
     return pivotData.getColumnNames();
   }, [pivotData, serverColumns]);
 
-  const headerText = formatDrilldownHeader(payload);
+  const headerText = formatDrilldownHeader(payload, pivotData);
   const pageSize = serverPageSize ?? RECORD_LIMIT;
   const currentPage = useServerData ? (serverPage ?? 0) : clientPage;
   const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 1;
@@ -286,7 +302,12 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
                           className={styles.td}
                           style={align ? { textAlign: align } : undefined}
                         >
-                          {formatCellValue(record[col], col, numberFormat)}
+                          {formatCellValue(
+                            record[col],
+                            col,
+                            numberFormat,
+                            columnTypes,
+                          )}
                         </td>
                       );
                     })}
