@@ -253,6 +253,35 @@ def render_app(data):
         on_config_change=noop,
     )
 
+    # --- Hybrid mode pivots with non-decomposable aggs ---
+    df_large = df.loc[df.index.repeat(50)].reset_index(drop=True)
+
+    st.subheader("Hybrid Median Pivot")
+    st_pivot_table(
+        df_large,
+        key="test_pivot_hybrid_median",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="median",
+        show_totals=True,
+        execution_mode="threshold_hybrid",
+        on_config_change=noop,
+    )
+
+    st.subheader("Hybrid Count Distinct Pivot")
+    st_pivot_table(
+        df_large,
+        key="test_pivot_hybrid_count_distinct",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Category"],
+        aggregation="count_distinct",
+        show_totals=True,
+        execution_mode="threshold_hybrid",
+        on_config_change=noop,
+    )
+
     st.subheader("Synthetic Measures Pivot")
     st_pivot_table(
         df_synth,

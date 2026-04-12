@@ -110,8 +110,27 @@ VALID_SHOW_VALUES_AS = frozenset(("raw", "pct_of_total", "pct_of_row", "pct_of_c
 VALID_ALIGNMENTS = frozenset(("left", "center", "right"))
 VALID_COND_FMT_TYPES = frozenset(("color_scale", "data_bars", "threshold"))
 VALID_NULL_MODES = frozenset(("exclude", "zero", "separate"))
-SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS = frozenset(
-    ("sum", "count", "min", "max", "avg")
+_HYBRID_PANDAS_AGGFUNC: dict[str, str | None] = {
+    "sum": "sum",
+    "count": "count",
+    "min": "min",
+    "max": "max",
+    "avg": None,
+    "count_distinct": "nunique",
+    "median": "median",
+    "percentile_90": "percentile_90",
+    "first": "first",
+    "last": "last",
+}
+
+_SIDECAR_REQUIRED_AGGS = frozenset(
+    ("avg", "count_distinct", "median", "percentile_90", "first", "last")
+)
+
+_FULLY_DECOMPOSABLE_AGGS = frozenset(("sum", "min", "max"))
+
+_NUMERIC_COERCE_AGGS = frozenset(
+    ("sum", "avg", "min", "max", "median", "percentile_90", "first", "last")
 )
 
 
@@ -130,19 +149,6 @@ def _estimate_group_count(df: Any, fields: list[str]) -> int:
 def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
     if config.get("synthetic_measures"):
         return False, "threshold_hybrid currently skips synthetic measures"
-    aggregation = config.get("aggregation", {})
-    unsupported = sorted(
-        agg
-        for agg in set(aggregation.values())
-        if agg not in SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS
-    )
-    if unsupported:
-        return (
-            False,
-            "threshold_hybrid currently supports only "
-            f"{sorted(SUPPORTED_THRESHOLD_HYBRID_AGGREGATIONS)} aggregations; "
-            f"found {unsupported}",
-        )
     return True, "config is compatible with threshold_hybrid"
 
 
@@ -199,13 +205,22 @@ def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
 
     named: dict[str, pd.NamedAgg] = {}
     avg_fields: list[str] = []
+    numeric_coerce_fields: list[str] = []
 
     for vf in value_fields:
         agg = aggregation.get(vf, "sum")
+        if agg in _NUMERIC_COERCE_AGGS:
+            numeric_coerce_fields.append(vf)
         if agg == "avg":
             avg_fields.append(vf)
             named[f"{vf}__sum"] = pd.NamedAgg(column=vf, aggfunc="sum")
             named[f"{vf}__cnt"] = pd.NamedAgg(column=vf, aggfunc="count")
+        elif agg == "percentile_90":
+            named[vf] = pd.NamedAgg(column=vf, aggfunc=lambda x: x.quantile(0.9))
+        elif agg in ("first", "last"):
+            named[vf] = pd.NamedAgg(column=vf, aggfunc=agg)
+        elif agg == "count_distinct":
+            named[vf] = pd.NamedAgg(column=vf, aggfunc="nunique")
         else:
             named[vf] = pd.NamedAgg(column=vf, aggfunc=agg)
 
@@ -214,15 +229,38 @@ def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
         for vf in value_fields:
             agg = aggregation.get(vf, "sum")
             ser = df[vf]
+            if agg in _NUMERIC_COERCE_AGGS:
+                ser = pd.to_numeric(ser, errors="coerce")
             if agg == "avg":
                 cnt = int(ser.count())
                 row[vf] = float(ser.sum() / cnt) if cnt else float("nan")
+            elif agg == "percentile_90":
+                row[vf] = ser.quantile(0.9)
+            elif agg == "count_distinct":
+                row[vf] = ser.nunique()
+            elif agg in ("first", "last"):
+                numeric_ser = ser.dropna()
+                row[vf] = (
+                    numeric_ser.iloc[0]
+                    if agg == "first" and len(numeric_ser) > 0
+                    else (
+                        numeric_ser.iloc[-1]
+                        if agg == "last" and len(numeric_ser) > 0
+                        else float("nan")
+                    )
+                )
             else:
                 row[vf] = ser.agg(agg)
         return pd.DataFrame([row])
 
+    working = df.copy()
+    for vf in numeric_coerce_fields:
+        working[vf] = pd.to_numeric(working[vf], errors="coerce")
+
     out = (
-        df.groupby(group_fields, dropna=False, observed=True).agg(**named).reset_index()
+        working.groupby(group_fields, dropna=False, observed=True, sort=False)
+        .agg(**named)
+        .reset_index()
     )
 
     for vf in avg_fields:
@@ -236,25 +274,363 @@ def _prepare_threshold_hybrid_frame(df: Any, config: PivotConfig) -> Any:
     return out
 
 
+def _build_hybrid_agg_remap(aggregation: dict[str, str]) -> dict[str, str]:
+    """Map fields whose client-side aggregation must change for correct leaf cells."""
+    remap: dict[str, str] = {}
+    for field, agg in aggregation.items():
+        if agg in ("count", "count_distinct"):
+            remap[field] = "sum"
+    return remap
+
+
+def _get_null_mode(field: str, null_handling: Any) -> str:
+    """Resolve per-field null handling mode (mirrors frontend getNullMode)."""
+    if null_handling is None:
+        return "exclude"
+    if isinstance(null_handling, str):
+        return null_handling
+    if isinstance(null_handling, dict):
+        return null_handling.get(field, "exclude")
+    return "exclude"
+
+
+def _normalize_dim_values(df: Any, dims: list[str], null_handling: Any) -> Any:
+    """Rewrite null/empty dimension values to match frontend _resolveDimValue."""
+    df = df.copy()
+    for dim in dims:
+        if dim not in df.columns:
+            continue
+        mode = _get_null_mode(dim, null_handling)
+        if mode == "separate":
+            df[dim] = df[dim].fillna("(null)").replace("", "(null)").astype(str)
+        else:
+            df[dim] = df[dim].fillna("").astype(str)
+    return df
+
+
+def _apply_hybrid_filters(
+    df: Any,
+    config: PivotConfig,
+    dims: list[str],
+) -> Any:
+    """Apply config filters to a DataFrame whose dimension columns have already
+    been normalized via _normalize_dim_values (values are resolved strings)."""
+    filters = config.get("filters", {})
+    if not filters:
+        return df
+    mask = pd.Series(True, index=df.index)
+    for field, filt in filters.items():
+        if field not in df.columns:
+            continue
+        col_str = (
+            df[field].astype(str) if field in dims else df[field].fillna("").astype(str)
+        )
+        inc = filt.get("include")
+        exc = filt.get("exclude")
+        if inc:
+            mask &= col_str.isin(inc)
+        elif exc:
+            mask &= ~col_str.isin(exc)
+    return df[mask]
+
+
+def _normalize_sidecar_value(v: Any) -> int | float | None:
+    """Coerce numpy scalars/NaN to JSON-compatible Python types."""
+    import math
+    import numpy as np
+
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return None
+    if isinstance(v, np.integer):
+        return int(v)
+    if isinstance(v, np.floating):
+        val = float(v)
+        return None if math.isnan(val) else val
+    if isinstance(v, (int, float)):
+        if isinstance(v, float) and math.isnan(v):
+            return None
+        return v
+    return v
+
+
+def _normalize_null_handling(nh: Any) -> Any:
+    """Canonicalize null_handling: sort keys when it's a per-field dict."""
+    if isinstance(nh, dict):
+        return dict(sorted(nh.items()))
+    return nh
+
+
+def _normalize_show_subtotals(st: Any) -> Any:
+    """Canonicalize show_subtotals: sort when it's a string list (set semantics)."""
+    if isinstance(st, list):
+        return sorted(st)
+    return st
+
+
+def _build_sidecar_fingerprint(config: PivotConfig, null_handling: Any) -> str:
+    """Deterministic canonical JSON string for staleness detection."""
+    agg = config.get("aggregation", {})
+    filters = config.get("filters", {})
+    obj = {
+        "aggregation": dict(sorted(agg.items())) if agg else {},
+        "columns": config.get("columns", []),
+        "filters": {
+            k: {
+                "exclude": sorted(v.get("exclude", [])),
+                "include": sorted(v.get("include", [])),
+            }
+            for k, v in sorted(filters.items())
+        }
+        if filters
+        else {},
+        "null_handling": _normalize_null_handling(null_handling),
+        "rows": config.get("rows", []),
+        "show_subtotals": _normalize_show_subtotals(
+            config.get("show_subtotals", False)
+        ),
+        "values": config.get("values", []),
+    }
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+def _sidecar_agg_func(agg: str, series: Any) -> Any:
+    """Compute a single aggregate on a pandas Series for sidecar totals.
+
+    Applies pd.to_numeric coercion for numeric aggs to match the frontend's
+    toNumber() semantics (non-numeric strings are dropped).
+    """
+    if agg == "count_distinct":
+        return series.nunique()
+    numeric = pd.to_numeric(series, errors="coerce")
+    if agg == "avg":
+        return numeric.mean()
+    if agg == "median":
+        return numeric.median()
+    if agg == "percentile_90":
+        return numeric.quantile(0.9)
+    if agg == "first":
+        clean = numeric.dropna()
+        return clean.iloc[0] if len(clean) > 0 else None
+    if agg == "last":
+        clean = numeric.dropna()
+        return clean.iloc[-1] if len(clean) > 0 else None
+    return None
+
+
+def _sidecar_groupby_agg(
+    df: Any,
+    group_cols: list[str],
+    sidecar_fields: dict[str, str],
+) -> list[dict[str, Any]]:
+    """GroupBy + aggregate for sidecar total entries."""
+    if not group_cols or not sidecar_fields:
+        return []
+    entries: list[dict[str, Any]] = []
+    grouped = df.groupby(group_cols, dropna=False, observed=True, sort=False)
+    for key_tuple, group_df in grouped:
+        key = list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+        key = [str(k) for k in key]
+        values: dict[str, int | float | None] = {}
+        for field, agg in sidecar_fields.items():
+            val = _sidecar_agg_func(agg, group_df[field])
+            values[field] = _normalize_sidecar_value(val)
+        entries.append({"key": key, "values": values})
+    return entries
+
+
+def _compute_hybrid_totals(
+    df: Any,
+    config: PivotConfig,
+    null_handling: Any,
+) -> dict[str, Any] | None:
+    """Build the hybrid_totals sidecar dict with pre-computed totals."""
+    aggregation = config.get("aggregation", {})
+    rows = config.get("rows", [])
+    columns = config.get("columns", [])
+    values = config.get("values", [])
+    show_subtotals = config.get("show_subtotals", False)
+
+    sidecar_fields = {
+        vf: agg
+        for vf in values
+        if (agg := aggregation.get(vf, "sum")) in _SIDECAR_REQUIRED_AGGS
+    }
+    remap_only_fields = {
+        vf: agg
+        for vf in values
+        if (agg := aggregation.get(vf, "sum")) in ("count", "count_distinct")
+        and vf not in sidecar_fields
+    }
+
+    if not sidecar_fields and not remap_only_fields:
+        return None
+
+    if not sidecar_fields:
+        return {
+            "sidecar_fingerprint": _build_sidecar_fingerprint(config, null_handling),
+            "grand": {},
+            "row": [],
+            "col": [],
+        }
+
+    all_dims = rows + columns
+    working = _normalize_dim_values(df, all_dims, null_handling)
+    working = _apply_hybrid_filters(working, config, all_dims)
+
+    fingerprint = _build_sidecar_fingerprint(config, null_handling)
+
+    grand: dict[str, int | float | None] = {}
+    for field, agg in sidecar_fields.items():
+        val = _sidecar_agg_func(agg, working[field])
+        grand[field] = _normalize_sidecar_value(val)
+
+    row_entries = _sidecar_groupby_agg(working, rows, sidecar_fields) if rows else []
+    col_entries = (
+        _sidecar_groupby_agg(working, columns, sidecar_fields) if columns else []
+    )
+
+    result: dict[str, Any] = {
+        "sidecar_fingerprint": fingerprint,
+        "grand": grand,
+        "row": row_entries,
+        "col": col_entries,
+    }
+
+    if len(columns) >= 2:
+        col_prefix = columns[:1]
+        col_prefix_entries: list[dict[str, Any]] = []
+        col_prefix_grand_entries: list[dict[str, Any]] = []
+
+        if rows:
+            grouped = working.groupby(
+                rows + col_prefix, dropna=False, observed=True, sort=False
+            )
+            for key_tuple, group_df in grouped:
+                parts = list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                parts = [str(p) for p in parts]
+                row_key = parts[: len(rows)]
+                cp_key = parts[len(rows) :]
+                vals: dict[str, int | float | None] = {}
+                for field, agg in sidecar_fields.items():
+                    v = _sidecar_agg_func(agg, group_df[field])
+                    vals[field] = _normalize_sidecar_value(v)
+                col_prefix_entries.append(
+                    {"key": cp_key, "row": row_key, "values": vals}
+                )
+
+        grouped_grand = working.groupby(
+            col_prefix, dropna=False, observed=True, sort=False
+        )
+        for key_val, group_df in grouped_grand:
+            cp_key = (
+                [str(key_val)]
+                if not isinstance(key_val, tuple)
+                else [str(k) for k in key_val]
+            )
+            vals_grand: dict[str, int | float | None] = {}
+            for field, agg in sidecar_fields.items():
+                v = _sidecar_agg_func(agg, group_df[field])
+                vals_grand[field] = _normalize_sidecar_value(v)
+            col_prefix_grand_entries.append({"key": cp_key, "values": vals_grand})
+
+        result["col_prefix"] = col_prefix_entries
+        result["col_prefix_grand"] = col_prefix_grand_entries
+
+    if show_subtotals and len(rows) >= 2:
+        subtotal_entries: list[dict[str, Any]] = []
+        cross_subtotal_entries: list[dict[str, Any]] = []
+
+        for depth in range(1, len(rows)):
+            row_prefix = rows[:depth]
+
+            if columns:
+                grouped_sub = working.groupby(
+                    row_prefix + columns, dropna=False, observed=True, sort=False
+                )
+                for key_tuple, group_df in grouped_sub:
+                    parts = (
+                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                    )
+                    parts = [str(p) for p in parts]
+                    rp = parts[:depth]
+                    ck = parts[depth:]
+                    vals_sub: dict[str, int | float | None] = {}
+                    for field, agg in sidecar_fields.items():
+                        v = _sidecar_agg_func(agg, group_df[field])
+                        vals_sub[field] = _normalize_sidecar_value(v)
+                    subtotal_entries.append({"key": rp, "col": ck, "values": vals_sub})
+
+            grouped_row_total = working.groupby(
+                row_prefix, dropna=False, observed=True, sort=False
+            )
+            for key_tuple, group_df in grouped_row_total:
+                parts = list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                parts = [str(p) for p in parts]
+                vals_rt: dict[str, int | float | None] = {}
+                for field, agg in sidecar_fields.items():
+                    v = _sidecar_agg_func(agg, group_df[field])
+                    vals_rt[field] = _normalize_sidecar_value(v)
+                subtotal_entries.append({"key": parts, "col": [], "values": vals_rt})
+
+            if len(columns) >= 2:
+                col_prefix = columns[:1]
+                grouped_cross = working.groupby(
+                    row_prefix + col_prefix, dropna=False, observed=True, sort=False
+                )
+                for key_tuple, group_df in grouped_cross:
+                    parts_c = (
+                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                    )
+                    parts_c = [str(p) for p in parts_c]
+                    rp_c = parts_c[:depth]
+                    cp_c = parts_c[depth:]
+                    vals_cross: dict[str, int | float | None] = {}
+                    for field, agg in sidecar_fields.items():
+                        v = _sidecar_agg_func(agg, group_df[field])
+                        vals_cross[field] = _normalize_sidecar_value(v)
+                    cross_subtotal_entries.append(
+                        {"key": rp_c, "col_prefix": cp_c, "values": vals_cross}
+                    )
+
+        result["subtotals"] = subtotal_entries
+        result["cross_subtotals"] = cross_subtotal_entries
+
+    return result
+
+
 def _compute_hybrid_drilldown(
     df: Any,
     drilldown_request: dict[str, Any],
+    null_handling: Any = None,
+    dims: list[str] | None = None,
     page_size: int = _DRILLDOWN_PAGE_SIZE,
 ) -> tuple[list[dict[str, Any]], list[str], int, int]:
     """Filter the original DataFrame for a hybrid-mode drill-down request.
+
+    Uses resolved-dimension semantics (matching _resolveDimValue on the
+    frontend) so that filter values like "(null)" align correctly with
+    null_handling modes.
 
     Returns (records_list, column_names, total_matching_count, page).
     """
     filters: dict[str, str] = drilldown_request.get("filters", {})
     page: int = max(0, int(drilldown_request.get("page", 0)))
+
+    dim_set = set(dims) if dims else set()
+
     mask = pd.Series(True, index=df.index)
     for col, val in filters.items():
         if col not in df.columns:
             continue
-        if val == "(null)":
-            mask &= df[col].isna()
+        if col in dim_set:
+            mode = _get_null_mode(col, null_handling)
+            if mode == "separate":
+                resolved = df[col].fillna("(null)").replace("", "(null)").astype(str)
+            else:
+                resolved = df[col].fillna("").astype(str)
+            mask &= resolved == str(val)
         else:
-            mask &= df[col].astype(str) == str(val)
+            mask &= df[col].fillna("").astype(str) == str(val)
     filtered = df[mask]
     total_count = len(filtered)
     offset = page * page_size
@@ -1119,6 +1495,16 @@ def st_pivot_table(
         "execution_mode": effective_execution_mode,
         "server_mode_reason": threshold_reason,
     }
+
+    if use_threshold_hybrid:
+        agg_dict = config_to_send.get("aggregation", {})
+        agg_remap = _build_hybrid_agg_remap(agg_dict)
+        if agg_remap:
+            data_payload["hybrid_agg_remap"] = agg_remap
+        totals_sidecar = _compute_hybrid_totals(data, config_to_send, null_handling)
+        if totals_sidecar:
+            data_payload["hybrid_totals"] = totals_sidecar
+
     if null_handling is not None:
         data_payload["null_handling"] = null_handling
     if hidden_attributes is not None:
@@ -1161,8 +1547,14 @@ def st_pivot_table(
             drilldown_request = None
 
         if isinstance(drilldown_request, dict) and "filters" in drilldown_request:
+            all_dims = list(config_to_send.get("rows", [])) + list(
+                config_to_send.get("columns", [])
+            )
             records, columns, total, page = _compute_hybrid_drilldown(
-                data, drilldown_request
+                data,
+                drilldown_request,
+                null_handling=null_handling,
+                dims=all_dims,
             )
             data_payload["drilldown_records"] = records
             data_payload["drilldown_columns"] = columns

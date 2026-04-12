@@ -484,10 +484,9 @@ st_pivot_table(
 
 **Auto thresholds:** In `"auto"` mode, server-side pre-aggregation activates when the dataset has at least 100K rows (high-cardinality layouts) or 250K rows (moderate layouts) and the estimated pivot shape exceeds the client-side comfort budget.
 
-**Supported aggregations:** `sum`, `count`, `min`, `max`, and `avg`. Configs using other aggregations (e.g. `median`, `count_distinct`) fall back to client-side computation automatically.
+**Supported aggregations:** All 10 aggregation types are supported in hybrid mode. `count` and `count_distinct` work on any column type; all other aggregations (`sum`, `avg`, `min`, `max`, `median`, `percentile_90`, `first`, `last`) coerce values to numeric and ignore non-numeric entries, consistent with client-only mode behavior. For non-decomposable aggregations (`avg`, `count_distinct`, `median`, `percentile_90`, `first`, `last`), the server computes correct totals and subtotals via a sidecar payload, ensuring accuracy that client-side re-aggregation alone cannot provide.
 
 **Limitations:**
-- Drill-down is disabled in hybrid mode because values are pre-aggregated on the server rather than built from raw rows.
 - Synthetic measures are not supported in hybrid mode (falls back to client-side).
 
 ### Locked Mode

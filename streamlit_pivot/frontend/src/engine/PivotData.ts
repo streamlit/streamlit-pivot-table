@@ -22,9 +22,11 @@ import {
   getAggregatorFactory,
 } from "./aggregators";
 import {
+  type AggregationType,
   type ColumnarDataSource,
   getAggregationForField,
   type DimensionFilter,
+  type HybridTotals,
   type NullHandlingConfig,
   type NullHandlingMode,
   type PivotConfigV1,
@@ -48,6 +50,8 @@ export interface GroupedRow {
 export interface PivotDataOptions {
   nullHandling?: NullHandlingConfig;
   sorters?: Record<string, string[]>;
+  hybridTotals?: HybridTotals;
+  hybridAggRemap?: Record<string, AggregationType>;
 }
 
 export function makeKeyString(parts: string[]): string {
@@ -61,6 +65,54 @@ function getNullMode(
   if (!config) return "exclude";
   if (typeof config === "string") return config;
   return config[field] ?? "exclude";
+}
+
+function normalizeNullHandling(
+  nh: NullHandlingConfig | undefined,
+): NullHandlingConfig | null {
+  if (nh == null) return null;
+  if (typeof nh === "string") return nh;
+  return Object.fromEntries(
+    Object.entries(nh).sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
+function normalizeShowSubtotals(
+  st: boolean | string[] | undefined,
+): boolean | string[] {
+  if (st == null) return false;
+  if (Array.isArray(st)) return [...st].sort();
+  return st;
+}
+
+export function buildSidecarFingerprint(
+  config: PivotConfigV1,
+  nullHandling: NullHandlingConfig | undefined,
+): string {
+  const agg = config.aggregation ?? {};
+  const filters = config.filters ?? {};
+  const obj = {
+    aggregation: Object.fromEntries(
+      Object.entries(agg).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+    columns: config.columns,
+    filters: Object.fromEntries(
+      Object.entries(filters)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [
+          k,
+          {
+            exclude: [...(v.exclude ?? [])].sort(),
+            include: [...(v.include ?? [])].sort(),
+          },
+        ]),
+    ),
+    null_handling: normalizeNullHandling(nullHandling),
+    rows: config.rows,
+    show_subtotals: normalizeShowSubtotals(config.show_subtotals),
+    values: config.values,
+  };
+  return JSON.stringify(obj);
 }
 
 /**
@@ -131,6 +183,15 @@ export class PivotData {
   /** Fields whose distinct values/indexes are worth precomputing. */
   private readonly _indexedFields: ReadonlySet<string>;
 
+  /** Sidecar lookup maps (null if stale or absent). */
+  private _hybridGrand: Map<string, number | null> | null = null;
+  private _hybridRowTotals: Map<string, number | null> | null = null;
+  private _hybridColTotals: Map<string, number | null> | null = null;
+  private _hybridColPrefix: Map<string, number | null> | null = null;
+  private _hybridColPrefixGrand: Map<string, number | null> | null = null;
+  private _hybridSubtotals: Map<string, number | null> | null = null;
+  private _hybridCrossSubtotals: Map<string, number | null> | null = null;
+
   constructor(
     input: DataRecord[] | ColumnarDataSource,
     config: PivotConfigV1,
@@ -157,17 +218,89 @@ export class PivotData {
     this._allAggregatedFields = [
       ...new Set([...config.values, ...syntheticSourceFields]),
     ];
+    const hybridAggRemap = options?.hybridAggRemap;
     this._factoriesByField = new Map(
-      this._allAggregatedFields.map((field) => [
-        field,
-        getAggregatorFactory(getAggregationForField(field, config)),
-      ]),
+      this._allAggregatedFields.map((field) => {
+        const configAgg = getAggregationForField(field, config);
+        const effectiveAgg = hybridAggRemap?.[field] ?? configAgg;
+        return [field, getAggregatorFactory(effectiveAgg)];
+      }),
     );
     this._indexedFields = new Set([
       ...config.rows,
       ...config.columns,
       ...Object.keys(config.filters ?? {}),
     ]);
+
+    const hybridTotals = options?.hybridTotals;
+    if (hybridTotals) {
+      const localFp = buildSidecarFingerprint(config, options?.nullHandling);
+      if (localFp === hybridTotals.sidecar_fingerprint) {
+        this._hybridGrand = new Map(Object.entries(hybridTotals.grand));
+
+        this._hybridRowTotals = new Map();
+        for (const entry of hybridTotals.row) {
+          const keyStr = makeKeyString(entry.key);
+          for (const [f, v] of Object.entries(entry.values)) {
+            this._hybridRowTotals.set(`${keyStr}\x01${f}`, v);
+          }
+        }
+
+        this._hybridColTotals = new Map();
+        for (const entry of hybridTotals.col) {
+          const keyStr = makeKeyString(entry.key);
+          for (const [f, v] of Object.entries(entry.values)) {
+            this._hybridColTotals.set(`${keyStr}\x01${f}`, v);
+          }
+        }
+
+        if (hybridTotals.col_prefix) {
+          this._hybridColPrefix = new Map();
+          for (const entry of hybridTotals.col_prefix) {
+            const rowKeyStr = makeKeyString(entry.row ?? []);
+            const cpStr = makeKeyString(entry.key);
+            for (const [f, v] of Object.entries(entry.values)) {
+              this._hybridColPrefix.set(`${rowKeyStr}\x01${cpStr}\x01${f}`, v);
+            }
+          }
+        }
+
+        if (hybridTotals.col_prefix_grand) {
+          this._hybridColPrefixGrand = new Map();
+          for (const entry of hybridTotals.col_prefix_grand) {
+            const cpStr = makeKeyString(entry.key);
+            for (const [f, v] of Object.entries(entry.values)) {
+              this._hybridColPrefixGrand.set(`${cpStr}\x01${f}`, v);
+            }
+          }
+        }
+
+        if (hybridTotals.subtotals) {
+          this._hybridSubtotals = new Map();
+          for (const entry of hybridTotals.subtotals) {
+            const parentStr = makeKeyString(entry.key);
+            const colStr = makeKeyString(entry.col ?? []);
+            for (const [f, v] of Object.entries(entry.values)) {
+              this._hybridSubtotals.set(`${parentStr}\x01${colStr}\x01${f}`, v);
+            }
+          }
+        }
+
+        if (hybridTotals.cross_subtotals) {
+          this._hybridCrossSubtotals = new Map();
+          for (const entry of hybridTotals.cross_subtotals) {
+            const parentStr = makeKeyString(entry.key);
+            const cpStr = makeKeyString(entry.col_prefix ?? []);
+            for (const [f, v] of Object.entries(entry.values)) {
+              this._hybridCrossSubtotals.set(
+                `${parentStr}\x01${cpStr}\x01${f}`,
+                v,
+              );
+            }
+          }
+        }
+      }
+    }
 
     for (const valField of this._allAggregatedFields) {
       this._grandTotalAggs.set(
@@ -203,7 +336,8 @@ export class PivotData {
     const filters = this._config.filters;
     if (!filters) return true;
     for (const [field, filter] of Object.entries(filters)) {
-      const val = String(this._dataSource.getValue(rowIndex, field) ?? "");
+      const raw = this._dataSource.getValue(rowIndex, field);
+      const val = this._resolveDimValue(field, raw);
       if (filter.include && filter.include.length > 0) {
         if (!filter.include.includes(val)) return false;
       } else if (filter.exclude && filter.exclude.length > 0) {
@@ -601,6 +735,9 @@ export class PivotData {
       return this._fixedAggregator(value);
     }
     const keyStr = `${makeKeyString(rowKey)}\x01${field}`;
+    if (this._hybridRowTotals?.has(keyStr)) {
+      return this._fixedAggregator(this._hybridRowTotals.get(keyStr)!);
+    }
     const agg = this._rowTotalAggs.get(keyStr);
     if (!agg) {
       return this._factoryForField(field).create();
@@ -619,6 +756,9 @@ export class PivotData {
       return this._fixedAggregator(value);
     }
     const keyStr = `${makeKeyString(colKey)}\x01${field}`;
+    if (this._hybridColTotals?.has(keyStr)) {
+      return this._fixedAggregator(this._hybridColTotals.get(keyStr)!);
+    }
     const agg = this._colTotalAggs.get(keyStr);
     if (!agg) {
       return this._factoryForField(field).create();
@@ -636,6 +776,9 @@ export class PivotData {
           this._grandTotalSumAggs.get(sourceField)?.value() ?? null,
       );
       return this._fixedAggregator(value);
+    }
+    if (this._hybridGrand?.has(field)) {
+      return this._fixedAggregator(this._hybridGrand.get(field)!);
     }
     const agg = this._grandTotalAggs.get(field);
     if (!agg) {
@@ -730,20 +873,25 @@ export class PivotData {
     colKey: string[],
     valField: string,
   ): Aggregator {
-    const aggs = this._buildSubtotalAggs();
     const field = valField;
     const synthetic = this._syntheticById.get(field);
     const parentKeyStr = makeKeyString(parentKey);
     const colKeyStr = makeKeyString(colKey);
     if (synthetic) {
+      const aggs = this._buildSubtotalAggs();
+      void aggs;
       const value = this._evaluateSynthetic(synthetic, (sourceField) => {
         const sourceKey = `${parentKeyStr}\x01${colKeyStr}\x01${sourceField}`;
         return this._subtotalSumAggs?.get(sourceKey)?.value() ?? null;
       });
       return this._fixedAggregator(value);
     }
-    const key = `${parentKeyStr}\x01${colKeyStr}\x01${field}`;
-    return aggs.get(key) ?? this._factoryForField(field).create();
+    const lookupKey = `${parentKeyStr}\x01${colKeyStr}\x01${field}`;
+    if (this._hybridSubtotals?.has(lookupKey)) {
+      return this._fixedAggregator(this._hybridSubtotals.get(lookupKey)!);
+    }
+    const aggs = this._buildSubtotalAggs();
+    return aggs.get(lookupKey) ?? this._factoryForField(field).create();
   }
 
   /**
@@ -961,20 +1109,25 @@ export class PivotData {
     colPrefix: string[],
     valField: string,
   ): Aggregator {
-    const aggs = this._buildColSubtotalAggs();
     const rowKeyStr = makeKeyString(rowKey);
     const colPrefixStr = makeKeyString(colPrefix);
     const field = valField;
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
+      const aggs = this._buildColSubtotalAggs();
+      void aggs;
       const value = this._evaluateSynthetic(synthetic, (sourceField) => {
         const sourceKey = `${rowKeyStr}\x01${colPrefixStr}\x01${sourceField}`;
         return this._colSubtotalSumAggs?.get(sourceKey)?.value() ?? null;
       });
       return this._fixedAggregator(value);
     }
-    const key = `${rowKeyStr}\x01${colPrefixStr}\x01${field}`;
-    return aggs.get(key) ?? this._factoryForField(field).create();
+    const lookupKey = `${rowKeyStr}\x01${colPrefixStr}\x01${field}`;
+    if (this._hybridColPrefix?.has(lookupKey)) {
+      return this._fixedAggregator(this._hybridColPrefix.get(lookupKey)!);
+    }
+    const aggs = this._buildColSubtotalAggs();
+    return aggs.get(lookupKey) ?? this._factoryForField(field).create();
   }
 
   /**
@@ -982,17 +1135,23 @@ export class PivotData {
    * Pre-computed from raw records to ensure correctness for non-additive aggregators.
    */
   getColGroupGrandSubtotal(colPrefix: string[], valField: string): Aggregator {
-    const aggs = this._buildColSubtotalAggs();
     const colPrefixStr = makeKeyString(colPrefix);
     const field = valField;
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
+      const aggs = this._buildColSubtotalAggs();
+      void aggs;
       const value = this._evaluateSynthetic(synthetic, (sourceField) => {
         const sourceKey = `${makeKeyString([])}\x01${colPrefixStr}\x01${sourceField}`;
         return this._colSubtotalSumAggs?.get(sourceKey)?.value() ?? null;
       });
       return this._fixedAggregator(value);
     }
+    const lookupKey = `${colPrefixStr}\x01${field}`;
+    if (this._hybridColPrefixGrand?.has(lookupKey)) {
+      return this._fixedAggregator(this._hybridColPrefixGrand.get(lookupKey)!);
+    }
+    const aggs = this._buildColSubtotalAggs();
     const key = `${makeKeyString([])}\x01${colPrefixStr}\x01${field}`;
     return aggs.get(key) ?? this._factoryForField(field).create();
   }
@@ -1006,21 +1165,26 @@ export class PivotData {
     colPrefix: string[],
     valField: string,
   ): Aggregator {
-    this._buildColSubtotalAggs();
     const parentKeyStr = makeKeyString(parentKey);
     const colPrefixStr = makeKeyString(colPrefix);
     const field = valField;
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
+      this._buildColSubtotalAggs();
       const value = this._evaluateSynthetic(synthetic, (sourceField) => {
         const sourceKey = `${parentKeyStr}\x01${colPrefixStr}\x01${sourceField}`;
         return this._crossSubtotalSumAggs?.get(sourceKey)?.value() ?? null;
       });
       return this._fixedAggregator(value);
     }
-    const key = `${parentKeyStr}\x01${colPrefixStr}\x01${field}`;
+    const lookupKey = `${parentKeyStr}\x01${colPrefixStr}\x01${field}`;
+    if (this._hybridCrossSubtotals?.has(lookupKey)) {
+      return this._fixedAggregator(this._hybridCrossSubtotals.get(lookupKey)!);
+    }
+    this._buildColSubtotalAggs();
     return (
-      this._crossSubtotalAggs!.get(key) ?? this._factoryForField(field).create()
+      this._crossSubtotalAggs!.get(lookupKey) ??
+      this._factoryForField(field).create()
     );
   }
 
@@ -1037,7 +1201,9 @@ export class PivotData {
       const set = new Set<string>();
       const n = this._dataSource.numRows;
       for (let i = 0; i < n; i++) {
-        set.add(String(this._dataSource.getValue(i, field) ?? ""));
+        set.add(
+          this._resolveDimValue(field, this._dataSource.getValue(i, field)),
+        );
       }
       cached = [...set].sort((a, b) => a.localeCompare(b));
       this._uniqueValuesCache.set(field, cached);

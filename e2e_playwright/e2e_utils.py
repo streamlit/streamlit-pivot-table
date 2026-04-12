@@ -117,6 +117,8 @@ DATA_PIVOT_KEYS = [
     "test_pivot_null_separate",
     "test_pivot_null_zero",
     "test_pivot_sparse_drilldown",
+    "test_pivot_hybrid_median",
+    "test_pivot_hybrid_count_distinct",
     "test_pivot_synthetic",
 ]
 

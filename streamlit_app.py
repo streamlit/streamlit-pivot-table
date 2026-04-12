@@ -1183,6 +1183,71 @@ st.caption(
     "forced to threshold_hybrid mode for demonstration."
 )
 
+st.markdown(
+    """
+**Non-decomposable aggregations in hybrid mode:** All 10 aggregation types are
+supported in hybrid mode, including `median`, `count_distinct`, `percentile_90`,
+`first`, and `last`. The server computes correct totals via a sidecar payload.
+`count` and `count_distinct` work on any column type; all other aggregations
+coerce values to numeric and ignore non-numeric entries.
+"""
+)
+
+col_a, col_b = st.columns(2)
+with col_a:
+    st.markdown("**Hybrid Median Pivot**")
+    st_pivot_table(
+        df_hybrid,
+        key="hybrid_median_demo",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="median",
+        number_format={"Revenue": "$,.2f"},
+        show_totals=True,
+        execution_mode="threshold_hybrid",
+    )
+with col_b:
+    st.markdown("**Hybrid Count Distinct Pivot**")
+    st_pivot_table(
+        df_hybrid,
+        key="hybrid_count_distinct_demo",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Category"],
+        aggregation="count_distinct",
+        show_totals=True,
+        execution_mode="threshold_hybrid",
+    )
+
+with st.expander("View Code — Non-decomposable Aggregations"):
+    st.code(
+        """
+# Median: server computes correct grand/row/col totals
+st_pivot_table(
+    df_hybrid,
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    aggregation="median",
+    show_totals=True,
+    execution_mode="threshold_hybrid",
+)
+
+# Count Distinct: works on any column type (e.g. Category strings)
+st_pivot_table(
+    df_hybrid,
+    rows=["Region"],
+    columns=["Year"],
+    values=["Category"],
+    aggregation="count_distinct",
+    show_totals=True,
+    execution_mode="threshold_hybrid",
+)
+""",
+        language="python",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Section 15: Drag-and-Drop Field Configuration

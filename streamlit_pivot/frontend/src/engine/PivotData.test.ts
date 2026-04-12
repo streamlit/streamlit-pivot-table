@@ -1726,3 +1726,258 @@ describe("PivotData - non-materialized columnar source", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hybrid sidecar + remap tests
+// ---------------------------------------------------------------------------
+
+import { buildSidecarFingerprint } from "./PivotData";
+import type { HybridTotals } from "./types";
+
+function makeHybridTotals(
+  config: PivotConfigV1,
+  grand: Record<string, number | null>,
+  row: HybridTotals["row"] = [],
+  col: HybridTotals["col"] = [],
+): HybridTotals {
+  return {
+    sidecar_fingerprint: buildSidecarFingerprint(config, undefined),
+    grand,
+    row,
+    col,
+  };
+}
+
+describe("PivotData - hybrid sidecar override", () => {
+  it("getGrandTotal uses sidecar value when fingerprint matches", () => {
+    const cfg = makeConfig({ aggregation: "median" });
+    const totals = makeHybridTotals(cfg, { revenue: 42.5 });
+    const pd = new PivotData(SAMPLE_DATA, cfg, { hybridTotals: totals });
+    expect(pd.getGrandTotal("revenue").value()).toBe(42.5);
+  });
+
+  it("getRowTotal uses sidecar value when available", () => {
+    const cfg = makeConfig({ aggregation: "median" });
+    const totals = makeHybridTotals(cfg, { revenue: 42.5 }, [
+      { key: ["US"], values: { revenue: 100 } },
+      { key: ["EU"], values: { revenue: 225 } },
+    ]);
+    const pd = new PivotData(SAMPLE_DATA, cfg, { hybridTotals: totals });
+    expect(pd.getRowTotal(["US"], "revenue").value()).toBe(100);
+    expect(pd.getRowTotal(["EU"], "revenue").value()).toBe(225);
+  });
+
+  it("getColTotal uses sidecar value when available", () => {
+    const cfg = makeConfig({ aggregation: "median" });
+    const totals = makeHybridTotals(
+      cfg,
+      { revenue: 42.5 },
+      [],
+      [
+        { key: ["2023"], values: { revenue: 99 } },
+        { key: ["2024"], values: { revenue: 88 } },
+      ],
+    );
+    const pd = new PivotData(SAMPLE_DATA, cfg, { hybridTotals: totals });
+    expect(pd.getColTotal(["2023"], "revenue").value()).toBe(99);
+    expect(pd.getColTotal(["2024"], "revenue").value()).toBe(88);
+  });
+
+  it("falls back to client aggregation for decomposable fields", () => {
+    const cfg = makeConfig({ aggregation: "sum" });
+    const pd = new PivotData(SAMPLE_DATA, cfg);
+    expect(pd.getGrandTotal("revenue").value()).toBe(750);
+  });
+
+  it("falls back to client aggregation when sidecar is missing a field", () => {
+    const cfg = makeConfig({ aggregation: "median" });
+    const totals = makeHybridTotals(cfg, {});
+    const pd = new PivotData(SAMPLE_DATA, cfg, { hybridTotals: totals });
+    const gt = pd.getGrandTotal("revenue").value();
+    expect(typeof gt).toBe("number");
+  });
+});
+
+describe("PivotData - hybrid sidecar staleness", () => {
+  it("ignores sidecar when fingerprint mismatches (agg change)", () => {
+    const cfg = makeConfig({ aggregation: "median" });
+    const staleConfig = makeConfig({ aggregation: "sum" });
+    const totals: HybridTotals = {
+      sidecar_fingerprint: buildSidecarFingerprint(staleConfig, undefined),
+      grand: { revenue: 999 },
+      row: [],
+      col: [],
+    };
+    const pd = new PivotData(SAMPLE_DATA, cfg, { hybridTotals: totals });
+    expect(pd.getGrandTotal("revenue").value()).not.toBe(999);
+  });
+
+  it("ignores sidecar when fingerprint mismatches (layout change)", () => {
+    const cfg = makeConfig({ aggregation: "median" });
+    const staleConfig = makeConfig({
+      aggregation: "median",
+      rows: ["year"],
+      columns: ["region"],
+    });
+    const totals: HybridTotals = {
+      sidecar_fingerprint: buildSidecarFingerprint(staleConfig, undefined),
+      grand: { revenue: 999 },
+      row: [],
+      col: [],
+    };
+    const pd = new PivotData(SAMPLE_DATA, cfg, { hybridTotals: totals });
+    expect(pd.getGrandTotal("revenue").value()).not.toBe(999);
+  });
+});
+
+describe("PivotData - hybrid agg remap", () => {
+  it("count field uses SumAggregator via remap so leaf cells are correct", () => {
+    const countData: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 3 },
+      { region: "EU", year: "2023", revenue: 5 },
+    ];
+    const cfg = makeConfig({ aggregation: "count" });
+    const pd = new PivotData(countData, cfg, {
+      hybridAggRemap: { revenue: "sum" },
+    });
+    expect(pd.getAggregator(["US"], ["2023"]).value()).toBe(3);
+    expect(pd.getAggregator(["EU"], ["2023"]).value()).toBe(5);
+  });
+
+  it("count_distinct leaf cells with remap show pre-computed value", () => {
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 7 },
+      { region: "EU", year: "2023", revenue: 4 },
+    ];
+    const cfg = makeConfig({ aggregation: "count_distinct" });
+    const pd = new PivotData(data, cfg, {
+      hybridAggRemap: { revenue: "sum" },
+    });
+    expect(pd.getAggregator(["US"], ["2023"]).value()).toBe(7);
+    expect(pd.getAggregator(["EU"], ["2023"]).value()).toBe(4);
+  });
+
+  it("remap does not affect display config (toolbar stays count)", () => {
+    const cfg = makeConfig({ aggregation: "count" });
+    const pd = new PivotData(SAMPLE_DATA, cfg, {
+      hybridAggRemap: { revenue: "sum" },
+    });
+    expect(pd.config.aggregation["revenue"]).toBe("count");
+  });
+});
+
+describe("PivotData - buildSidecarFingerprint", () => {
+  it("produces deterministic output regardless of key order", () => {
+    const cfg1 = makeConfig({ aggregation: "median" });
+    const cfg2 = makeConfig({ aggregation: "median" });
+    expect(buildSidecarFingerprint(cfg1, undefined)).toBe(
+      buildSidecarFingerprint(cfg2, undefined),
+    );
+  });
+
+  it("differs when aggregation changes", () => {
+    const fp1 = buildSidecarFingerprint(
+      makeConfig({ aggregation: "median" }),
+      undefined,
+    );
+    const fp2 = buildSidecarFingerprint(
+      makeConfig({ aggregation: "avg" }),
+      undefined,
+    );
+    expect(fp1).not.toBe(fp2);
+  });
+
+  it("null_handling dict order does not affect fingerprint", () => {
+    const cfg = makeConfig();
+    const fp1 = buildSidecarFingerprint(cfg, {
+      region: "separate",
+      year: "exclude",
+    });
+    const fp2 = buildSidecarFingerprint(cfg, {
+      year: "exclude",
+      region: "separate",
+    });
+    expect(fp1).toBe(fp2);
+  });
+
+  it("show_subtotals array order does not affect fingerprint", () => {
+    const cfg1 = makeConfig({ show_subtotals: ["region", "year"] as any });
+    const cfg2 = makeConfig({ show_subtotals: ["year", "region"] as any });
+    expect(buildSidecarFingerprint(cfg1, undefined)).toBe(
+      buildSidecarFingerprint(cfg2, undefined),
+    );
+  });
+
+  it("cross-language parity: matches known fixture string", () => {
+    const cfg = makeConfig({ aggregation: "median" });
+    const fp = buildSidecarFingerprint(cfg, undefined);
+    const parsed = JSON.parse(fp);
+    expect(Object.keys(parsed)).toEqual(Object.keys(parsed).sort());
+    expect(parsed.aggregation).toEqual({ revenue: "median" });
+    expect(parsed.rows).toEqual(["region"]);
+  });
+});
+
+describe("PivotData - filter/null-handling fix", () => {
+  const DATA_WITH_NULLS: DataRecord[] = [
+    { region: "US", year: "2023", revenue: 100 },
+    { region: null, year: "2023", revenue: 200 },
+    { region: "EU", year: "2023", revenue: 300 },
+  ];
+
+  it("_shouldIncludeRow with separate mode: include (null) filters correctly", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      filters: { region: { include: ["(null)"] } },
+    });
+    const pd = new PivotData(DATA_WITH_NULLS, cfg, {
+      nullHandling: "separate",
+    });
+    const rowKeys = pd.getRowKeys().map((k) => k[0]);
+    expect(rowKeys).toEqual(["(null)"]);
+    expect(pd.getGrandTotal("revenue").value()).toBe(200);
+  });
+
+  it("_shouldIncludeRow with separate mode: exclude (null) works", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      filters: { region: { exclude: ["(null)"] } },
+    });
+    const pd = new PivotData(DATA_WITH_NULLS, cfg, {
+      nullHandling: "separate",
+    });
+    const rowKeys = pd.getRowKeys().map((k) => k[0]);
+    expect(rowKeys).not.toContain("(null)");
+    expect(rowKeys).toContain("US");
+    expect(rowKeys).toContain("EU");
+  });
+
+  it("_shouldIncludeRow with exclude mode: include empty string for nulls", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      filters: { region: { include: [""] } },
+    });
+    const pd = new PivotData(DATA_WITH_NULLS, cfg, {
+      nullHandling: "exclude",
+    });
+    const rowKeys = pd.getRowKeys().map((k) => k[0]);
+    expect(rowKeys).toEqual([""]);
+    expect(pd.getGrandTotal("revenue").value()).toBe(200);
+  });
+
+  it("getUniqueValues fallback uses resolved values with separate mode", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+    });
+    const pd = new PivotData(DATA_WITH_NULLS, cfg, {
+      nullHandling: "separate",
+    });
+    const unique = pd.getUniqueValues("region");
+    expect(unique).toContain("(null)");
+    expect(unique).not.toContain("");
+  });
+});

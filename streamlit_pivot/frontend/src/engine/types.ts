@@ -813,6 +813,29 @@ export type NullHandlingConfig =
   | Record<string, NullHandlingMode>;
 
 // ---------------------------------------------------------------------------
+// Hybrid mode: server-computed totals sidecar
+// ---------------------------------------------------------------------------
+
+export interface HybridTotalEntry {
+  key: string[];
+  row?: string[];
+  col?: string[];
+  col_prefix?: string[];
+  values: Record<string, number | null>;
+}
+
+export interface HybridTotals {
+  sidecar_fingerprint: string;
+  grand: Record<string, number | null>;
+  row: HybridTotalEntry[];
+  col: HybridTotalEntry[];
+  col_prefix?: HybridTotalEntry[];
+  col_prefix_grand?: HybridTotalEntry[];
+  subtotals?: HybridTotalEntry[];
+  cross_subtotals?: HybridTotalEntry[];
+}
+
+// ---------------------------------------------------------------------------
 // Data shape passed from Python via `data={...}`
 // ---------------------------------------------------------------------------
 
@@ -847,6 +870,10 @@ export interface PivotTableData {
   execution_mode?: "client_only" | "threshold_hybrid";
   /** Human-readable reason why the threshold_hybrid path was selected. */
   server_mode_reason?: string;
+  /** Server-computed totals sidecar for non-decomposable aggs in hybrid mode. */
+  hybrid_totals?: HybridTotals;
+  /** Aggregation type remap for count/count_distinct leaf cells in hybrid mode. */
+  hybrid_agg_remap?: Record<string, AggregationType>;
   /** Server-provided drill-down rows (hybrid mode round-trip). */
   drilldown_records?: Record<string, unknown>[];
   /** Column names for server drill-down rows, in display order. */

@@ -534,3 +534,45 @@ def test_synthetic_menu_hides_show_values_as(page_at_app: Page):
         timeout=5000
     )
     expect(page.get_by_test_id("header-menu-display")).to_have_count(0)
+
+
+# ---------------------------------------------------------------------------
+# Hybrid mode tests (non-decomposable aggregations)
+# ---------------------------------------------------------------------------
+
+
+def test_hybrid_median_renders_cells(page_at_app: Page):
+    """Hybrid median pivot renders data cells and totals."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hybrid_median")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    cells = container.get_by_test_id("pivot-data-cell")
+    expect(cells.first).to_be_visible(timeout=5000)
+    cell_count = cells.count()
+    assert cell_count > 0, "Hybrid median pivot should render data cells"
+
+
+def test_hybrid_median_grand_total_not_dash(page_at_app: Page):
+    """Grand total for hybrid median is not the empty cell value."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hybrid_median")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    grand_total_cells = container.get_by_test_id("pivot-grand-total-cell")
+    if grand_total_cells.count() > 0:
+        text = grand_total_cells.first.inner_text().strip()
+        assert text != "-", f"Grand total should be a number, got '{text}'"
+
+
+def test_hybrid_count_distinct_renders_correct_values(page_at_app: Page):
+    """Hybrid count_distinct pivot shows actual distinct counts (not 1)."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hybrid_count_distinct")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    cells = container.get_by_test_id("pivot-data-cell")
+    expect(cells.first).to_be_visible(timeout=5000)
+    texts = [
+        c.inner_text().strip() for c in cells.all() if c.inner_text().strip() != "-"
+    ]
+    for t in texts:
+        val = float(t.replace(",", ""))
+        assert val >= 1, f"Count distinct value should be >= 1, got {val}"

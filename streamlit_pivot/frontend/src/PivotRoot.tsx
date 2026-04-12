@@ -98,6 +98,8 @@ const PivotRoot: FC<PivotRootProps> = ({
   drilldown_total_count,
   drilldown_page,
   drilldown_page_size,
+  hybrid_totals,
+  hybrid_agg_remap,
   setStateValue,
   setTriggerValue,
 }): ReactElement => {
@@ -196,8 +198,13 @@ const PivotRoot: FC<PivotRootProps> = ({
   );
 
   const pivotOptions: PivotDataOptions = useMemo(
-    () => ({ nullHandling: null_handling, sorters }),
-    [null_handling, sorters],
+    () => ({
+      nullHandling: null_handling,
+      sorters,
+      hybridTotals: hybrid_totals,
+      hybridAggRemap: hybrid_agg_remap,
+    }),
+    [null_handling, sorters, hybrid_totals, hybrid_agg_remap],
   );
 
   const { pivotData, computeMs } = useMemo(() => {

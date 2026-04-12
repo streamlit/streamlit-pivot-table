@@ -46,6 +46,18 @@ def _pandas_client_oracle(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
             if agg == "avg":
                 cnt = int(ser.count())
                 row[vf] = float(ser.sum() / cnt) if cnt else float("nan")
+            elif agg == "count_distinct":
+                row[vf] = ser.nunique()
+            elif agg == "median":
+                row[vf] = ser.median()
+            elif agg == "percentile_90":
+                row[vf] = ser.quantile(0.9)
+            elif agg == "first":
+                numeric = pd.to_numeric(ser, errors="coerce").dropna()
+                row[vf] = numeric.iloc[0] if len(numeric) > 0 else float("nan")
+            elif agg == "last":
+                numeric = pd.to_numeric(ser, errors="coerce").dropna()
+                row[vf] = numeric.iloc[-1] if len(numeric) > 0 else float("nan")
             else:
                 row[vf] = ser.agg(agg)
         return pd.DataFrame([row])
@@ -58,6 +70,16 @@ def _pandas_client_oracle(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
             s = g.mean()
         elif agg == "count":
             s = g.count()
+        elif agg == "count_distinct":
+            s = g.nunique()
+        elif agg == "median":
+            s = g.median()
+        elif agg == "percentile_90":
+            s = g.quantile(0.9)
+        elif agg == "first":
+            s = g.first()
+        elif agg == "last":
+            s = g.last()
         else:
             s = getattr(g, agg)()
         parts.append(s.rename(vf))
@@ -84,7 +106,7 @@ def _assert_hybrid_and_client_match_pandas(
 
 @pytest.mark.parametrize(
     "agg",
-    ["sum", "count", "min", "max", "avg"],
+    ["sum", "count", "min", "max", "avg", "median", "count_distinct", "first", "last"],
 )
 def test_hybrid_and_client_oracle_match_pandas_per_hybrid_aggregator(
     pivot_module, agg: str

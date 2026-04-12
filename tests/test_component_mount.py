@@ -191,6 +191,36 @@ def test_threshold_hybrid_preaggregates_compatible_large_configs(
 def test_threshold_hybrid_falls_back_for_incompatible_configs(
     sample_df, pivot_module, mount_recorder
 ):
+    """Synthetic measures still force fallback to client_only."""
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        synthetic_measures=[
+            {
+                "id": "synth1",
+                "label": "Ratio",
+                "operation": "sum_over_sum",
+                "numerator": "Revenue",
+                "denominator": "Revenue",
+            }
+        ],
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "client_only"
+
+
+def test_threshold_hybrid_median_no_longer_falls_back(
+    sample_df, pivot_module, mount_recorder
+):
     calls = mount_recorder()
     large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
 
@@ -205,4 +235,65 @@ def test_threshold_hybrid_falls_back_for_incompatible_configs(
     )
 
     payload = calls[0]["data"]
-    assert payload["execution_mode"] == "client_only"
+    assert payload["execution_mode"] == "threshold_hybrid"
+
+
+def test_threshold_hybrid_includes_totals_sidecar(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="median",
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert "hybrid_totals" in payload
+    assert "sidecar_fingerprint" in payload["hybrid_totals"]
+
+
+def test_threshold_hybrid_includes_agg_remap(sample_df, pivot_module, mount_recorder):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="count",
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert "hybrid_agg_remap" in payload
+    assert payload["hybrid_agg_remap"]["Revenue"] == "sum"
+
+
+def test_threshold_hybrid_omits_sidecar_for_decomposable(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert "hybrid_totals" not in payload
+    assert "hybrid_agg_remap" not in payload
