@@ -90,8 +90,8 @@ function DimToggleIcon({ collapsed }: { collapsed: boolean }): ReactElement {
   return (
     <svg
       className={styles.dimensionToggleIcon}
-      width="10"
-      height="10"
+      width="8"
+      height="8"
       viewBox="0 0 10 10"
       fill="none"
       stroke="currentColor"
@@ -479,6 +479,7 @@ export function renderColumnHeaders(
     e: React.MouseEvent<HTMLDivElement>,
   ) => void,
   columnWidthMap?: Map<number, number>,
+  headerRowOffsets?: number[],
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
   const visibleSlots = colRange
@@ -534,7 +535,11 @@ export function renderColumnHeaders(
     const isLastColLevel = level === numColLevels - 1;
     const dimCellRowSpan = 1 + (hasMultipleValues ? 1 : 0);
     const stickyTop =
-      level > 0 ? { top: level * HEADER_ROW_HEIGHT } : undefined;
+      level > 0 && headerRowOffsets?.[level] != null
+        ? { top: headerRowOffsets[level] }
+        : level > 0
+          ? { top: level * HEADER_ROW_HEIGHT }
+          : undefined;
 
     if (numColLevels > 1 && !isLastColLevel) {
       const colDimName = config.columns[level];
@@ -869,8 +874,8 @@ export function renderColumnHeaders(
               {canToggle && onToggleColGroup && (
                 <svg
                   className={styles.groupToggleIcon}
-                  width="10"
-                  height="10"
+                  width="8"
+                  height="8"
                   viewBox="0 0 10 10"
                   fill="none"
                   stroke="currentColor"
@@ -959,7 +964,8 @@ export function renderColumnHeaders(
   }
 
   if (hasMultipleValues) {
-    const valueLabelTop = numColLevels * HEADER_ROW_HEIGHT;
+    const valueLabelTop =
+      headerRowOffsets?.[numColLevels] ?? numColLevels * HEADER_ROW_HEIGHT;
     const valueCells: ReactElement[] = [];
     for (let si = 0; si < visibleSlots.length; si++) {
       const slot = visibleSlots[si];
@@ -1064,8 +1070,8 @@ function GroupToggleIcon({ isCollapsed }: { isCollapsed: boolean }) {
   return (
     <svg
       className={styles.groupToggleIcon}
-      width="10"
-      height="10"
+      width="8"
+      height="8"
       viewBox="0 0 10 10"
       fill="none"
       stroke="currentColor"
@@ -1850,7 +1856,9 @@ const TableRenderer: FC<TableRendererProps> = ({
   onOverflowChange,
 }): ReactElement => {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const theadRef = useRef<HTMLTableSectionElement>(null);
   const prevOverflowRef = useRef(false);
+  const [headerRowOffsets, setHeaderRowOffsets] = useState<number[]>([]);
 
   useEffect(() => {
     const el = wrapperRef.current;
@@ -1867,6 +1875,25 @@ const TableRenderer: FC<TableRendererProps> = ({
     check();
     return () => observer.disconnect();
   }, [onOverflowChange]);
+
+  useEffect(() => {
+    const thead = theadRef.current;
+    if (!thead || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const rows = thead.querySelectorAll("tr");
+      const offsets: number[] = [0];
+      let cumulative = 0;
+      rows.forEach((row) => {
+        cumulative += row.getBoundingClientRect().height;
+        offsets.push(Math.round(cumulative));
+      });
+      setHeaderRowOffsets(offsets);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(thead);
+    measure();
+    return () => observer.disconnect();
+  }, [config.columns.length, config.values.length]);
 
   const [columnWidthMap, setColumnWidthMap] = useState<Map<number, number>>(
     () => new Map(),
@@ -2203,7 +2230,7 @@ const TableRenderer: FC<TableRendererProps> = ({
           className={`${styles.pivotTable} ${config.sticky_headers === false ? styles.noSticky : ""}`}
           role="grid"
         >
-          <thead>
+          <thead ref={theadRef}>
             {renderColumnHeaders(
               colSlots,
               config,
@@ -2219,6 +2246,7 @@ const TableRenderer: FC<TableRendererProps> = ({
               onCollapseChange,
               handleResizeMouseDown,
               columnWidthMap,
+              headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
             )}
           </thead>
           <tbody>

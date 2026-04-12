@@ -647,11 +647,13 @@ def st_pivot_table(
         header-menu actions. If False, the toolbar is hidden and header-menu
         sort/filter/show-values-as actions are disabled.
     height : int or None
-        Fixed height in pixels. None means auto-size (capped by ``max_height``).
+        .. deprecated:: Use ``max_height`` instead.
+        If provided, treated as ``max_height``.  Kept for backwards
+        compatibility.
     max_height : int
-        Maximum height in pixels when ``height`` is None. The table becomes
-        scrollable with sticky headers once content exceeds this value.
-        Ignored when ``height`` is explicitly set. Default 500.
+        Maximum height in pixels.  The table auto-sizes up to this limit
+        and becomes scrollable with sticky headers once content exceeds it.
+        Default 500.
     on_cell_click : callable or None
         Called (with no arguments) when a user clicks a data cell. Read the
         payload from ``st.session_state[key]`` after the callback fires.
@@ -1108,10 +1110,11 @@ def st_pivot_table(
         "threshold_hybrid" if use_threshold_hybrid else "client_only"
     )
 
+    effective_max_height = height if height is not None else max_height
     data_payload: dict[str, Any] = {
         "dataframe": materialized_data,
-        "height": height,
-        "max_height": max_height,
+        "height": None,
+        "max_height": effective_max_height,
         "config": config_to_send,
         "execution_mode": effective_execution_mode,
         "server_mode_reason": threshold_reason,
@@ -1157,7 +1160,7 @@ def st_pivot_table(
         except (AttributeError, TypeError):
             drilldown_request = None
 
-        if isinstance(drilldown_request, dict) and drilldown_request.get("filters"):
+        if isinstance(drilldown_request, dict) and "filters" in drilldown_request:
             records, columns, total, page = _compute_hybrid_drilldown(
                 data, drilldown_request
             )

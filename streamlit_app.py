@@ -759,20 +759,17 @@ By default, column headers **stick** to the top of the table as you scroll.
 You can disable this behavior with `sticky_headers=False` or toggle it at
 runtime via the **Sticky Headers** checkbox in the **Settings** popover (gear icon in the utility menu).
 
-The table container size is controlled by two parameters:
-- **`max_height`** (default ``500``) — the table auto-sizes up to this height,
-  then becomes scrollable. The sticky headers checkbox appears when the table
-  exceeds this limit.
-- **`height`** — an explicit fixed height in pixels. When set, it overrides
-  ``max_height``.
+The table container size is controlled by `max_height` (default ``500``).
+The table auto-sizes up to this limit, then becomes scrollable with sticky
+headers. The sticky headers checkbox appears when content exceeds this limit.
 
 **Try it:**
-- The table below has `height=700` and sticky headers **disabled** — scroll
+- The table below has `max_height=700` and sticky headers **disabled** — scroll
   down and notice the headers scroll away.
 - Hover over the top-right of the toolbar, click the **Settings** gear icon,
   and toggle the **Sticky Headers** checkbox to re-enable.
 
-**API parameters used:** `sticky_headers`, `height`, `max_height`
+**API parameters used:** `sticky_headers`, `max_height`
 """
 )
 
@@ -785,7 +782,7 @@ st_pivot_table(
     aggregation="sum",
     sticky_headers=False,
     show_subtotals=True,
-    height=700,
+    max_height=700,
 )
 
 with st.expander("View Code"):
@@ -799,7 +796,7 @@ st_pivot_table(
     values=["Revenue", "Profit"],
     sticky_headers=False,
     show_subtotals=True,
-    height=700,
+    max_height=700,
 )
 """,
         language="python",
@@ -1331,7 +1328,7 @@ st_pivot_table(
     number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
     show_totals=True,
     show_subtotals=True,
-    height=350,
+    max_height=350,
 )
 
 with st.expander("View Code"):
@@ -1347,7 +1344,7 @@ st_pivot_table(
     number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
     show_totals=True,
     show_subtotals=True,
-    height=350,
+    max_height=350,
 )
 # Click the expand icon in the toolbar to go fullscreen.
 # Press Escape to exit.
@@ -1360,5 +1357,5 @@ st_pivot_table(
 # ---------------------------------------------------------------------------
 st.divider()
 with st.expander("View Source Data"):
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width="stretch")
     st.caption(f"{len(df)} rows × {len(df.columns)} columns")

@@ -27,18 +27,18 @@
   border-collapse: separate;
   border-spacing: 0;
   font-family: var(--st-font);
-  font-size: var(--st-base-font-size);
+  font-size: 0.875rem;
   color: var(--st-text-color);
   background-color: var(--st-background-color);
   table-layout: auto;
 }
 
 .headerCell {
-  padding: 8px 12px;
+  padding: 6px 10px;
   text-align: center;
-  font-weight: 600;
+  font-weight: 500;
   background-color: var(--st-dataframe-header-background-color, var(--st-secondary-background-color));
-  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+  color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
   border-bottom: 1px solid var(--st-dataframe-border-color);
   border-right: 1px solid var(--st-dataframe-border-color);
   white-space: nowrap;
@@ -55,10 +55,10 @@
 }
 
 .rowHeaderCell {
-  padding: 8px 12px;
+  padding: 6px 10px;
   text-align: left;
-  font-weight: 500;
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 92%, var(--st-background-color));
+  font-weight: 400;
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 60%, var(--st-background-color));
   color: var(--st-text-color);
   border-right: 1px solid var(--st-dataframe-border-color);
   border-bottom: 1px solid var(--st-dataframe-border-color);
@@ -69,22 +69,10 @@
   position: sticky;
   left: 0;
   z-index: 1;
-  box-shadow: 1px 0 0 0 color-mix(in srgb, var(--st-text-color) 20%, transparent);
-}
-
-.rowHeaderCellPinned::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 1px;
-  background: color-mix(in srgb, var(--st-text-color) 22%, transparent);
-  pointer-events: none;
 }
 
 .dataCell {
-  padding: 8px 12px;
+  padding: 6px 10px;
   text-align: right;
   border-bottom: 1px solid var(--st-dataframe-border-color);
   border-right: 1px solid var(--st-dataframe-border-color);
@@ -93,7 +81,7 @@
 /* Full-row hover highlight for cross-row tracking */
 .pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover td,
 .pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover th {
-  background-color: color-mix(in srgb, var(--st-primary-color) 6%, var(--st-background-color));
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 30%, var(--st-background-color));
 }
 
 /* Conditionally formatted cells have inline background-color that overrides
@@ -125,13 +113,14 @@
 
 .totalsRow td,
 .totalsRow th {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 94%, var(--st-background-color));
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 75%, var(--st-background-color));
   border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
+  font-weight: 600;
 }
 
 .totalsCol {
   font-weight: 600;
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 90%, var(--st-background-color));
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-background-color));
 }
 
 .totalsCol.dataCell {
@@ -144,7 +133,7 @@
 .pivotTable tbody .evenDataRow td:not(.totalsCol) {
   background-color: color-mix(
     in srgb,
-    var(--st-secondary-background-color) 50%,
+    var(--st-secondary-background-color) 30%,
     var(--st-background-color)
   );
 }
@@ -154,7 +143,7 @@
 .pivotTable tbody .evenDataRow th.rowHeaderCell:not(.groupingDimCell) {
   background-color: color-mix(
     in srgb,
-    var(--st-secondary-background-color) 72%,
+    var(--st-secondary-background-color) 48%,
     var(--st-background-color)
   );
 }
@@ -195,10 +184,9 @@
 .valueLabel {
   font-size: 0.86em;
   color: color-mix(in srgb, var(--st-text-color) 80%, transparent);
-  padding: 5px 12px;
+  padding: 4px 10px;
   text-align: center;
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 80%, var(--st-background-color));
-  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 10%, transparent);
+  background-color: var(--st-dataframe-header-background-color, var(--st-secondary-background-color));
   border-bottom: 1px solid var(--st-dataframe-border-color);
   border-right: 1px solid var(--st-dataframe-border-color);
   position: sticky;
@@ -231,6 +219,9 @@
   justify-content: center;
   gap: 4px;
   position: relative;
+}
+
+.headerCellInner:has(.headerMenuBtn) {
   padding-right: 16px;
 }
 
@@ -310,12 +301,12 @@
 
 .subtotalRow td,
 .subtotalRow th {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 86%, var(--st-background-color));
-  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 65%, var(--st-background-color));
+  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
 }
 
 .subtotalHeaderCell {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .subtotalLabel {
@@ -325,21 +316,21 @@
 }
 
 .subtotalRow[data-level="1"] .subtotalHeaderCell {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 78%, var(--st-background-color));
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 58%, var(--st-background-color));
 }
 
 .subtotalRow[data-level="2"] .subtotalHeaderCell {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-background-color));
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 50%, var(--st-background-color));
 }
 
 .groupToggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   padding: 0;
-  margin-right: 6px;
+  margin-right: 4px;
   border: none;
   border-radius: calc(var(--st-base-radius) - 2px);
   background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
@@ -378,8 +369,8 @@
 
 .groupToggleIcon {
   display: inline-block;
-  vertical-align: middle;
-  margin-right: 6px;
+  vertical-align: -1px;
+  margin-right: 4px;
   opacity: 0.6;
   stroke-width: 1.8;
   flex-shrink: 0;
@@ -404,7 +395,7 @@
 
 /* Grouping dimension cell tinting — distinguish non-leaf from leaf cells */
 .groupingDimCell {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 96%, var(--st-background-color));
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-background-color));
   font-weight: 600;
 }
 

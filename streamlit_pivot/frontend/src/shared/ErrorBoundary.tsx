@@ -52,7 +52,7 @@ class ErrorBoundary extends Component<Props, State> {
             border: "1px solid var(--st-yellow-color, var(--st-border-color))",
             borderRadius: "var(--st-base-radius)",
             fontFamily: "var(--st-font)",
-            fontSize: "var(--st-base-font-size)",
+            fontSize: "0.875rem",
           }}
         >
           <strong>Pivot Table Error</strong>

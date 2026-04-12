@@ -30,10 +30,14 @@
 .toolbarLocked .fieldGroup {
   background: color-mix(
     in srgb,
-    var(--st-secondary-background-color) 72%,
+    var(--st-secondary-background-color) 45%,
     transparent
   );
   border-color: color-mix(in srgb, var(--st-text-color) 12%, transparent);
+}
+
+.toolbarLocked .chip {
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 15%, transparent);
 }
 
 /* --- Section cards (Rows/Columns/Values/Aggregate/Options) --- */
@@ -45,8 +49,8 @@
   gap: 6px;
   flex: 1 1 0;
   min-width: 100px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--st-text-color) 15%, transparent);
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 10%, transparent);
   border-radius: var(--st-base-radius);
 }
 
@@ -57,8 +61,8 @@
 }
 
 .sectionTitle {
-  font-weight: 600;
-  font-size: 1em;
+  font-weight: 500;
+  font-size: 0.875em;
   color: var(--st-text-color);
 }
 
@@ -145,11 +149,11 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
+  gap: 6px;
+  padding: 4px 8px;
   border-radius: calc(var(--st-base-radius) - 2px);
   cursor: pointer;
-  font-size: 0.84em;
+  font-size: 0.75em;
   white-space: nowrap;
   color: var(--st-text-color);
   border: none;
@@ -178,8 +182,8 @@
 .dropdownItem input[type="checkbox"] {
   margin: 0;
   accent-color: var(--st-primary-color);
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   cursor: pointer;
 }
 
@@ -226,7 +230,7 @@
   border-radius: 12px;
   background: var(--st-secondary-background-color);
   color: var(--st-text-color);
-  font-size: 0.875em;
+  font-size: 0.75em;
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
@@ -372,25 +376,25 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding: 4px 6px;
 }
 
 .aggregationControlLabel {
-  font-size: 0.82em;
+  font-size: 0.75em;
   color: var(--st-text-color);
   white-space: nowrap;
 }
 
 .aggregationSelect {
   min-width: 120px;
-  padding: 4px 6px;
+  padding: 3px 5px;
   border: 1px solid var(--st-border-color);
   border-radius: calc(var(--st-base-radius) - 2px);
   background: var(--st-background-color);
   color: var(--st-text-color);
   font-family: var(--st-font);
-  font-size: 0.8em;
+  font-size: 0.75em;
 }
 
 .aggregationSelect:focus-visible {
@@ -408,14 +412,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: 6px;
+  padding: 4px 8px;
   border: 1px solid var(--st-border-color);
   border-radius: calc(var(--st-base-radius) - 2px);
   background: var(--st-background-color);
   color: var(--st-text-color);
   font-family: var(--st-font);
-  font-size: 0.84em;
+  font-size: 0.75em;
   cursor: pointer;
 }
 
@@ -465,7 +469,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.9em;
+  font-size: 0.75em;
   color: var(--st-text-color);
   cursor: pointer;
   white-space: nowrap;
@@ -474,13 +478,13 @@
 .checkboxLabel input[type="checkbox"] {
   margin: 0;
   accent-color: var(--st-primary-color);
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   cursor: pointer;
 }
 
 .checkboxLabel input[type="checkbox"]:indeterminate {
-  accent-color: #808080;
+  accent-color: color-mix(in srgb, var(--st-text-color) 50%, transparent);
 }
 
 .checkboxLabel input[type="checkbox"]:focus-visible {
@@ -577,14 +581,8 @@
 }
 
 .utilGroupPinned {
-  position: static;
-  margin-left: auto;
-  padding: 0;
-  background: transparent;
-  box-shadow: none;
   opacity: 1;
   pointer-events: auto;
-  align-self: center;
 }
 
 .utilButton {

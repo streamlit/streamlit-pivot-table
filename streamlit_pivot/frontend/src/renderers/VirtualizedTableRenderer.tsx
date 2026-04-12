@@ -187,6 +187,35 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     return new Set(raw);
   }, [config.collapsed_groups, allRowKeys]);
 
+  const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState<
+    number | null
+  >(null);
+  const [headerRowOffsets, setHeaderRowOffsets] = useState<number[]>([]);
+
+  const theadObserverRef = useRef<ResizeObserver | null>(null);
+  const theadCallbackRef = useCallback(
+    (node: HTMLTableSectionElement | null) => {
+      theadObserverRef.current?.disconnect();
+      if (!node || typeof ResizeObserver === "undefined") return;
+      const measure = () => {
+        const rows = node.querySelectorAll("tr");
+        const offsets: number[] = [0];
+        let cumulative = 0;
+        rows.forEach((row) => {
+          cumulative += row.getBoundingClientRect().height;
+          offsets.push(Math.round(cumulative));
+        });
+        setHeaderRowOffsets(offsets);
+        setMeasuredHeaderHeight(Math.round(cumulative));
+      };
+      const obs = new ResizeObserver(measure);
+      obs.observe(node);
+      theadObserverRef.current = obs;
+      measure();
+    },
+    [],
+  );
+
   const computedHeaderHeight = useMemo(() => {
     const colLevels = Math.max(config.columns.length, 1);
     const hasValueRow = renderedValueFields.length > 1;
@@ -195,9 +224,10 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     );
   }, [config.columns.length, renderedValueFields.length]);
   const effectiveHeaderHeight =
-    headerHeight !== DEFAULT_HEADER_HEIGHT
+    measuredHeaderHeight ??
+    (headerHeight !== DEFAULT_HEADER_HEIGHT
       ? headerHeight
-      : computedHeaderHeight;
+      : computedHeaderHeight);
 
   const groupedRows: GroupedRow[] | null = useMemo(
     () => (useSubtotals ? pivotData.getGroupedRowKeys() : null),
@@ -404,6 +434,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         onCollapseChange,
         handleResizeMouseDown,
         columnWidthMap,
+        headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
       );
     },
     [
@@ -419,6 +450,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       handleToggleColGroup,
       pivotData,
       handleResizeMouseDown,
+      headerRowOffsets,
     ],
   );
 
@@ -491,6 +523,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
           renderHeader={renderHeader}
           renderTotalsRow={renderTotals}
           headerHeight={effectiveHeaderHeight}
+          theadRef={theadCallbackRef}
         />
 
         {menuTarget && menuPosition && (

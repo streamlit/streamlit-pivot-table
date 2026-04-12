@@ -27,6 +27,7 @@ import {
 import type { PivotData, DataRecord } from "../engine/PivotData";
 import type { CellClickPayload } from "../engine/types";
 import { measureSync, type PerfActionMeasurement } from "../engine/perf";
+import { formatNumber, formatWithPattern } from "../engine/formatters";
 import styles from "./DrilldownPanel.module.css";
 
 const RECORD_LIMIT = 500;
@@ -50,6 +51,10 @@ export interface DrilldownPanelProps {
   serverPageSize?: number;
   /** Called when the user navigates to a different page. */
   onPageChange?: (page: number) => void;
+  /** Per-field number format patterns from config (e.g. {"Revenue": "$,.0f"}). */
+  numberFormat?: Record<string, string>;
+  /** Per-field alignment overrides from config. */
+  columnAlignment?: Record<string, string>;
 }
 
 const CloseIcon: FC = () => (
@@ -82,13 +87,30 @@ function formatDrilldownHeader(payload: CellClickPayload): string {
   return parts.join(", ");
 }
 
-function formatCellValue(value: unknown): string {
+function formatCellValue(
+  value: unknown,
+  column: string,
+  numberFormat?: Record<string, string>,
+): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "number") {
     if (Number.isNaN(value)) return "";
-    return String(value);
+    const pattern = numberFormat?.[column] ?? numberFormat?.["__all__"];
+    if (pattern) return formatWithPattern(value, pattern);
+    return formatNumber(value);
   }
   return String(value);
+}
+
+function getCellAlign(
+  value: unknown,
+  column: string,
+  columnAlignment?: Record<string, string>,
+): React.CSSProperties["textAlign"] | undefined {
+  const explicit = columnAlignment?.[column];
+  if (explicit) return explicit as React.CSSProperties["textAlign"];
+  if (typeof value === "number" && !Number.isNaN(value)) return "right";
+  return undefined;
 }
 
 const DrilldownPanel: FC<DrilldownPanelProps> = ({
@@ -103,6 +125,8 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
   serverPage,
   serverPageSize,
   onPageChange,
+  numberFormat,
+  columnAlignment,
 }): ReactElement => {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -225,7 +249,10 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
         </button>
       </div>
       {isLoading ? (
-        <div className={styles.emptyMessage}>Loading drill-down data…</div>
+        <div className={styles.loadingContainer}>
+          <div className={styles.spinner} />
+          <span className={styles.loadingText}>Loading…</span>
+        </div>
       ) : records.length === 0 ? (
         <div className={styles.emptyMessage}>No matching records found.</div>
       ) : (
@@ -247,11 +274,22 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
                     key={idx}
                     className={idx % 2 === 1 ? styles.altRow : undefined}
                   >
-                    {columns.map((col) => (
-                      <td key={col} className={styles.td}>
-                        {formatCellValue(record[col])}
-                      </td>
-                    ))}
+                    {columns.map((col) => {
+                      const align = getCellAlign(
+                        record[col],
+                        col,
+                        columnAlignment,
+                      );
+                      return (
+                        <td
+                          key={col}
+                          className={styles.td}
+                          style={align ? { textAlign: align } : undefined}
+                        >
+                          {formatCellValue(record[col], col, numberFormat)}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -267,8 +305,21 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
                 disabled={currentPage === 0 || isLoading}
                 onClick={() => handlePageChange(currentPage - 1)}
                 data-testid="drilldown-prev"
+                aria-label="Previous page"
               >
-                ← Prev
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="10 3 5 8 10 13" />
+                </svg>
+                Prev
               </button>
               <span className={styles.pageInfo}>
                 Page {currentPage + 1} of {totalPages}
@@ -278,8 +329,21 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
                 disabled={currentPage >= totalPages - 1 || isLoading}
                 onClick={() => handlePageChange(currentPage + 1)}
                 data-testid="drilldown-next"
+                aria-label="Next page"
               >
-                Next →
+                Next
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="6 3 11 8 6 13" />
+                </svg>
               </button>
             </div>
           )}

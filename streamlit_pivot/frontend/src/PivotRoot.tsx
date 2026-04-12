@@ -218,10 +218,8 @@ const PivotRoot: FC<PivotRootProps> = ({
   }, [pivotData, currentConfig]);
 
   useEffect(() => {
-    setIsTableScrollable(
-      Boolean(budget?.needsVirtualization || height != null),
-    );
-  }, [budget?.needsVirtualization, height]);
+    setIsTableScrollable(Boolean(budget?.needsVirtualization));
+  }, [budget?.needsVirtualization]);
 
   const renderStartRef = useRef(0);
   const [debugMetrics, setDebugMetrics] =
@@ -357,14 +355,21 @@ const PivotRoot: FC<PivotRootProps> = ({
     return w;
   }, [budget, perfWarnings, execution_mode, server_mode_reason]);
 
+  const pendingFlushRef = useRef<PivotConfigV1 | null>(null);
+
   const handleConfigChange = useCallback(
     (newConfig: PivotConfigV1) => {
       if (stringifyPivotConfig(newConfig) !== currentConfigJson) {
         setLocalConfig(newConfig);
-        setStateValue("config", newConfig);
+        if (isFullscreen) {
+          pendingFlushRef.current = newConfig;
+        } else {
+          pendingFlushRef.current = null;
+          setStateValue("config", newConfig);
+        }
       }
     },
-    [setStateValue, currentConfigJson],
+    [setStateValue, currentConfigJson, isFullscreen],
   );
 
   const drilldownEnabled = enable_drilldown == null || !!enable_drilldown;
@@ -474,16 +479,27 @@ const PivotRoot: FC<PivotRootProps> = ({
 
   const handleToggleFullscreen = useCallback(() => {
     setIsFullscreen((prev) => {
-      if (!prev) setWindowHeight(window.innerHeight);
+      if (!prev) {
+        setWindowHeight(window.innerHeight);
+      } else if (pendingFlushRef.current) {
+        setStateValue("config", pendingFlushRef.current);
+        pendingFlushRef.current = null;
+      }
       return !prev;
     });
-  }, []);
+  }, [setStateValue]);
 
   useEffect(() => {
     if (!isFullscreen) return;
     const onResize = () => setWindowHeight(window.innerHeight);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setIsFullscreen(false);
+      if (e.key === "Escape") {
+        if (pendingFlushRef.current) {
+          setStateValue("config", pendingFlushRef.current);
+          pendingFlushRef.current = null;
+        }
+        setIsFullscreen(false);
+      }
     };
     window.addEventListener("resize", onResize);
     window.addEventListener("keydown", onKeyDown);
@@ -491,7 +507,7 @@ const PivotRoot: FC<PivotRootProps> = ({
       window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isFullscreen]);
+  }, [isFullscreen, setStateValue]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -537,13 +553,7 @@ const PivotRoot: FC<PivotRootProps> = ({
           overflow: "hidden",
           padding: "2.875rem 1.5rem 1.5rem",
         }
-      : height != null
-        ? {
-            height: `${height}px`,
-            display: "flex",
-            flexDirection: "column" as const,
-          }
-        : {}),
+      : {}),
   };
 
   return (
@@ -578,7 +588,7 @@ const PivotRoot: FC<PivotRootProps> = ({
 
         <div
           style={
-            isFullscreen || height != null
+            isFullscreen
               ? {
                   flex: 1,
                   minHeight: 0,
@@ -601,13 +611,17 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 containerHeight={
-                  isFullscreen ? windowHeight : (height ?? max_height ?? 500)
+                  isFullscreen ? windowHeight : (max_height ?? 500)
                 }
                 onSortChange={
-                  currentConfig.interactive ? handleSortChange : undefined
+                  currentConfig.interactive && !locked
+                    ? handleSortChange
+                    : undefined
                 }
                 onFilterChange={
-                  currentConfig.interactive ? handleFilterChange : undefined
+                  currentConfig.interactive && !locked
+                    ? handleFilterChange
+                    : undefined
                 }
                 onConfigChange={
                   currentConfig.interactive && !locked
@@ -615,7 +629,7 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive
+                  currentConfig.interactive && !locked
                     ? handleShowValuesAsChange
                     : undefined
                 }
@@ -623,7 +637,7 @@ const PivotRoot: FC<PivotRootProps> = ({
                   currentConfig.interactive ? handleCollapseChange : undefined
                 }
                 menuLimit={menu_limit}
-                scrollable={isFullscreen || height != null}
+                scrollable={isFullscreen}
               />
             ) : (
               <TableRenderer
@@ -637,10 +651,14 @@ const PivotRoot: FC<PivotRootProps> = ({
                 }
                 maxRows={safeMaxRows}
                 onSortChange={
-                  currentConfig.interactive ? handleSortChange : undefined
+                  currentConfig.interactive && !locked
+                    ? handleSortChange
+                    : undefined
                 }
                 onFilterChange={
-                  currentConfig.interactive ? handleFilterChange : undefined
+                  currentConfig.interactive && !locked
+                    ? handleFilterChange
+                    : undefined
                 }
                 onConfigChange={
                   currentConfig.interactive && !locked
@@ -648,7 +666,7 @@ const PivotRoot: FC<PivotRootProps> = ({
                     : undefined
                 }
                 onShowValuesAsChange={
-                  currentConfig.interactive
+                  currentConfig.interactive && !locked
                     ? handleShowValuesAsChange
                     : undefined
                 }
@@ -656,14 +674,8 @@ const PivotRoot: FC<PivotRootProps> = ({
                   currentConfig.interactive ? handleCollapseChange : undefined
                 }
                 menuLimit={menu_limit}
-                scrollable={isFullscreen || height != null}
-                maxHeight={
-                  isFullscreen
-                    ? undefined
-                    : height == null
-                      ? (max_height ?? 500)
-                      : undefined
-                }
+                scrollable={isFullscreen}
+                maxHeight={isFullscreen ? undefined : (max_height ?? 500)}
                 onOverflowChange={setIsTableScrollable}
               />
             )
@@ -687,6 +699,8 @@ const PivotRoot: FC<PivotRootProps> = ({
           <DrilldownPanel
             pivotData={pivotData}
             payload={drilldownPayload}
+            numberFormat={currentConfig.number_format}
+            columnAlignment={currentConfig.column_alignment}
             onClose={() => {
               setDrilldownPayload(null);
               if (isHybridMode) {

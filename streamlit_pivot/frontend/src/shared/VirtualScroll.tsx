@@ -18,6 +18,7 @@
 import {
   FC,
   ReactElement,
+  Ref,
   useRef,
   useState,
   useCallback,
@@ -44,6 +45,7 @@ export interface VirtualScrollProps {
   renderHeader: (visibleColRange: [number, number]) => ReactElement[];
   renderTotalsRow?: (visibleColRange: [number, number]) => ReactElement | null;
   headerHeight: number;
+  theadRef?: Ref<HTMLTableSectionElement>;
 }
 
 /**
@@ -76,6 +78,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   renderHeader,
   renderTotalsRow,
   headerHeight,
+  theadRef,
 }): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -203,7 +206,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
             borderSpacing: 0,
           }}
         >
-          <thead>{renderHeader(colRange)}</thead>
+          <thead ref={theadRef}>{renderHeader(colRange)}</thead>
         </table>
 
         <div
