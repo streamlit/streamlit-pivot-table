@@ -72,6 +72,97 @@ def test_no_filters_allows_hybrid(pivot_module):
     assert ok is True
 
 
+def test_apply_source_filters_none_is_noop(pivot_module):
+    df = pd.DataFrame({"region": ["US", "EU"], "revenue": [100, 200]})
+    result = pivot_module._apply_source_filters(df, None)
+    pd.testing.assert_frame_equal(result, df)
+
+
+def test_apply_source_filters_empty_dict_is_noop(pivot_module):
+    df = pd.DataFrame({"region": ["US", "EU"], "revenue": [100, 200]})
+    result = pivot_module._apply_source_filters(df, {})
+    pd.testing.assert_frame_equal(result, df)
+
+
+def test_apply_source_filters_missing_column_raises_clear_error(pivot_module):
+    df = pd.DataFrame({"region": ["US", "EU"], "revenue": [100, 200]})
+    with pytest.raises(
+        ValueError, match="source_filters contains column not in DataFrame"
+    ):
+        pivot_module._apply_source_filters(df, {"missing": {"include": ["x"]}})
+
+
+def test_apply_source_filters_include_and_exclude(pivot_module):
+    df = pd.DataFrame(
+        {
+            "region": ["US", "US", "EU", "EU"],
+            "category": ["A", "B", "A", "B"],
+        }
+    )
+    include_only = pivot_module._apply_source_filters(
+        df, {"category": {"include": ["A"]}}
+    )
+    exclude_only = pivot_module._apply_source_filters(
+        df, {"category": {"exclude": ["B"]}}
+    )
+    assert list(include_only["category"]) == ["A", "A"]
+    assert list(exclude_only["category"]) == ["A", "A"]
+
+
+def test_apply_source_filters_none_matches_null_but_not_empty_string(pivot_module):
+    df = pd.DataFrame(
+        {
+            "category": ["A", "", None, np.nan],
+            "revenue": [1, 2, 3, 4],
+        }
+    )
+    null_rows = pivot_module._apply_source_filters(
+        df, {"category": {"include": [None]}}
+    )
+    empty_rows = pivot_module._apply_source_filters(df, {"category": {"include": [""]}})
+    assert sorted(null_rows["revenue"].tolist()) == [3, 4]
+    assert empty_rows["revenue"].tolist() == [2]
+
+
+def test_apply_source_filters_exclude_none_removes_null_rows(pivot_module):
+    df = pd.DataFrame(
+        {
+            "category": ["A", "", None, np.nan],
+            "revenue": [1, 2, 3, 4],
+        }
+    )
+    result = pivot_module._apply_source_filters(df, {"category": {"exclude": [None]}})
+    assert result["revenue"].tolist() == [1, 2]
+
+
+def test_apply_source_filters_include_takes_precedence_over_exclude(pivot_module):
+    df = pd.DataFrame({"region": ["US", "EU"], "revenue": [100, 200]})
+    result = pivot_module._apply_source_filters(
+        df,
+        {"region": {"include": ["US"], "exclude": ["US"]}},
+    )
+    assert result["region"].tolist() == ["US"]
+
+
+def test_apply_source_filters_do_not_coerce_types(pivot_module):
+    df = pd.DataFrame({"year": ["2023", "2024"], "revenue": [100, 200]})
+    result = pivot_module._apply_source_filters(df, {"year": {"include": [2023]}})
+    assert result.empty
+
+
+def test_apply_source_filters_and_config_filters_intersect(pivot_module):
+    df = pd.DataFrame({"region": ["US", "EU"], "revenue": [100, 200]})
+    prefiltered = pivot_module._apply_source_filters(
+        df, {"region": {"include": ["US"]}}
+    )
+    narrowed = pivot_module._resolve_and_filter(
+        prefiltered,
+        {"region": {"exclude": ["US"]}},
+        null_handling=None,
+    )
+    assert narrowed.empty
+
+
 def test_prepare_threshold_hybrid_frame_avg_matches_pandas_groupby(pivot_module):
     df = pd.DataFrame(
         {
@@ -710,6 +801,31 @@ def test_prepare_hybrid_frame_no_filters_unchanged(pivot_module):
     }
     result = pivot_module._prepare_threshold_hybrid_frame(df, cfg)
     assert len(result) == 2
+
+
+def test_prepare_hybrid_frame_source_filtered_data_supports_hidden_filters(
+    pivot_module,
+):
+    """Hidden report-level filters can be applied before hybrid pre-aggregation."""
+    df = pd.DataFrame(
+        {
+            "region": ["US", "US", "EU", "EU"],
+            "year": ["2023", "2024", "2023", "2024"],
+            "category": ["A", "B", "A", "B"],
+            "revenue": [100.0, 150.0, 200.0, 250.0],
+        }
+    )
+    filtered = pivot_module._apply_source_filters(df, {"category": {"include": ["A"]}})
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(filtered, cfg)
+    assert sorted(result["revenue"].tolist()) == [100.0, 200.0]
 
 
 # ---- Sidecar computation tests ----

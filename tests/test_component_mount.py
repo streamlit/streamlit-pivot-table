@@ -319,6 +319,28 @@ def test_threshold_hybrid_includes_source_row_count(
     assert payload["source_row_count"] == len(large_df)
 
 
+def test_threshold_hybrid_source_row_count_reflects_source_filters(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+        source_filters={"Category": {"include": ["A"]}},
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "threshold_hybrid"
+    assert payload["source_row_count"] == int((large_df["Category"] == "A").sum())
+
+
 def test_client_only_omits_source_row_count(sample_df, pivot_module, mount_recorder):
     calls = mount_recorder()
 
@@ -334,6 +356,134 @@ def test_client_only_omits_source_row_count(sample_df, pivot_module, mount_recor
 
     payload = calls[0]["data"]
     assert "source_row_count" not in payload
+
+
+def test_threshold_hybrid_allows_source_filters_on_hidden_field(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+        source_filters={"Category": {"include": ["A"]}},
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "threshold_hybrid"
+    # Hidden-field source_filters should affect the aggregated payload without
+    # forcing hybrid to fall back.
+    assert len(payload["dataframe"]) > 0
+    assert payload["source_row_count"] == int((large_df["Category"] == "A").sum())
+
+
+def test_threshold_hybrid_source_filters_exclude_nulls_from_payload_and_drilldown(
+    pivot_module, mount_recorder
+):
+    df = {
+        "Region": ["East", "East", "West", "West"],
+        "Category": ["A", None, "A", None],
+        "Year": [2023, 2023, 2023, 2023],
+        "Revenue": [100, 150, 200, 250],
+        "Profit": [10, 20, 30, 40],
+    }
+    session_state = {
+        "pivot": {"drilldown_request": {"filters": {"Year": "2023"}, "page": 0}}
+    }
+    calls = mount_recorder(session_state=session_state)
+
+    pivot_module.st_pivot_table(
+        df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+        source_filters={"Category": {"exclude": [None]}},
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "threshold_hybrid"
+    assert payload["source_row_count"] == 2
+    assert all(r["Category"] == "A" for r in payload["drilldown_records"])
+
+
+def test_hybrid_drilldown_respects_source_filters(
+    sample_df, pivot_module, mount_recorder
+):
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+    session_state = {
+        "pivot": {
+            "drilldown_request": {
+                "filters": {"Region": "East", "Year": "2023"},
+                "page": 0,
+            }
+        }
+    }
+    calls = mount_recorder(session_state=session_state)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+        source_filters={"Category": {"include": ["A"]}},
+    )
+
+    payload = calls[0]["data"]
+    assert payload["drilldown_total_count"] > 0
+    assert all(r["Category"] == "A" for r in payload["drilldown_records"])
+
+
+def test_source_filters_and_config_filters_intersect_on_same_field(
+    sample_df, pivot_module, mount_recorder
+):
+    session_state: dict[str, object] = {"_seed": True}
+    calls = mount_recorder(session_state=session_state)
+
+    # Two calls are required: the first captures the Python-sent config shape,
+    # then we inject a persisted interactive filter into session_state to
+    # verify the next render intersects it with source_filters.
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        source_filters={"Region": {"include": ["East"]}},
+        execution_mode="threshold_hybrid",
+    )
+    sent_config = calls[0]["data"]["config"]
+    session_state["pivot"] = {
+        "config": {
+            **sent_config,
+            "filters": {"Region": {"exclude": ["East"]}},
+        }
+    }
+    calls.clear()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        source_filters={"Region": {"include": ["East"]}},
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    assert len(payload["dataframe"]) == 0
 
 
 def test_non_dimension_filter_causes_client_fallback(pivot_module):

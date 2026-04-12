@@ -98,6 +98,61 @@ def test_invalid_column_alignment_raises(pivot_module, sample_df):
         )
 
 
+def test_invalid_source_filters_type_raises(pivot_module, sample_df):
+    with pytest.raises(TypeError, match="source_filters must be a dict or None"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            source_filters=["not-a-dict"],
+        )
+
+
+def test_source_filters_unknown_column_raises(pivot_module, sample_df):
+    with pytest.raises(
+        ValueError, match="source_filters contains column not in DataFrame"
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            source_filters={"Missing": {"include": ["x"]}},
+        )
+
+
+def test_source_filters_non_list_operand_raises(pivot_module, sample_df):
+    with pytest.raises(
+        TypeError, match=r"source_filters\['Region'\]\['include'\] must be a list"
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            source_filters={"Region": {"include": "East"}},
+        )
+
+
+def test_source_filters_non_scalar_value_raises(pivot_module, sample_df):
+    with pytest.raises(
+        TypeError,
+        match=r"source_filters\['Region'\]\['include'\]\[0\] must be a scalar value",
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            source_filters={"Region": {"include": [["East"]]}},
+        )
+
+
 def test_duplicate_synthetic_measure_ids_raise(pivot_module, sample_df):
     with pytest.raises(ValueError, match="duplicate synthetic_measures id"):
         pivot_module.st_pivot_table(

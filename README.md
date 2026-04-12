@@ -111,6 +111,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `null_handling` | `str \| dict[str, str] \| None` | `None` | How to treat null/NaN values. See [Null Handling](#null-handling). |
+| `source_filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Server-only report-level filters applied before any pivot processing. `include` takes precedence over `exclude`. `None` matches null-like values, `""` matches only literal empty strings, and no type coercion is performed. |
 | `hidden_attributes` | `list[str] \| None` | `None` | Column names to hide entirely from the UI. |
 | `hidden_from_aggregators` | `list[str] \| None` | `None` | Column names hidden from the values/aggregators dropdown only. |
 | `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone and cannot be reordered or moved via drag-and-drop. |

@@ -146,6 +146,54 @@ def _estimate_group_count(df: Any, fields: list[str]) -> int:
     return min(len(df), int(prod(distinct_counts)))
 
 
+def _match_source_filter_values(series: Any, values: list[Any]) -> Any:
+    """Match raw source-filter values with explicit null handling.
+
+    ``None`` in the filter list matches null-like pandas values via ``isna()``.
+    Other values use raw ``isin()`` comparison with no type coercion.
+    """
+    has_null = any(v is None for v in values)
+    non_null = [v for v in values if v is not None]
+    mask = pd.Series(False, index=series.index)
+    if non_null:
+        mask |= series.isin(non_null)
+    if has_null:
+        mask |= series.isna()
+    return mask
+
+
+def _apply_source_filters(
+    df: Any,
+    source_filters: dict[str, dict[str, list[Any]]] | None,
+) -> Any:
+    """Apply server-only raw-value filters to the source DataFrame.
+
+    Semantics intentionally differ from ``_resolve_and_filter``:
+    - raw Python values, not resolved frontend keys
+    - ``None`` matches null-like pandas values
+    - ``""`` matches only literal empty strings
+    - no type coercion is performed
+    - include takes precedence over exclude
+    """
+    if not source_filters:
+        return df
+    mask = pd.Series(True, index=df.index)
+    for field, filt in source_filters.items():
+        if field not in df.columns:
+            raise ValueError(
+                f"source_filters contains column not in DataFrame: {field!r}. "
+                f"Available columns: {sorted(df.columns.tolist())}"
+            )
+        col = df[field]
+        include = filt.get("include")
+        exclude = filt.get("exclude")
+        if include:
+            mask &= _match_source_filter_values(col, include)
+        elif exclude:
+            mask &= ~_match_source_filter_values(col, exclude)
+    return df[mask]
+
+
 def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
     if config.get("synthetic_measures"):
         return False, "threshold_hybrid currently skips synthetic measures"
@@ -998,6 +1046,8 @@ def st_pivot_table(
     enable_drilldown: bool = True,
     export_filename: str | None = None,
     execution_mode: str = "auto",
+    # Report-level filtering
+    source_filters: dict[str, dict[str, list[Any]]] | None = None,
 ) -> PivotTableResult:
     """Create a pivot table component.
 
@@ -1056,6 +1106,13 @@ def st_pivot_table(
         ``st.session_state[key]`` after the callback fires.
         If None, a no-op is supplied at mount to satisfy the CCv2 contract
         (every ``default={}`` key needs a matching ``on_<key>_change``).
+    source_filters : dict[str, dict[str, list[Any]]] or None
+        Server-only report-level filters applied to the source DataFrame
+        before any pivot processing. Unlike interactive ``config.filters``,
+        these filters are not sent to the frontend and are not tied to the
+        current row/column layout. ``include`` takes precedence over
+        ``exclude``. ``None`` matches null-like values, while ``""`` matches
+        only literal empty strings. No type coercion is performed.
     null_handling : str or dict[str, str] or None
         How to treat null/NaN values. Global mode ("exclude", "zero",
         "separate") or per-field dict mapping column names to modes.
@@ -1261,6 +1318,45 @@ def st_pivot_table(
 
     # --- Column list type + membership validation ---
     df_cols = set(data.columns)
+
+    if source_filters is not None:
+        if not isinstance(source_filters, dict):
+            raise TypeError(
+                f"source_filters must be a dict or None, got {type(source_filters).__name__}"
+            )
+        if not source_filters:
+            source_filters = None
+        else:
+            for field, filt in source_filters.items():
+                if not isinstance(field, str):
+                    raise TypeError("source_filters keys must be strings")
+                if field not in df_cols:
+                    raise ValueError(
+                        f"source_filters contains column not in DataFrame: {field!r}. "
+                        f"Available columns: {sorted(df_cols)}"
+                    )
+                if not isinstance(filt, dict):
+                    raise TypeError(f"source_filters[{field!r}] must be a dict")
+                extra_keys = [k for k in filt if k not in {"include", "exclude"}]
+                if extra_keys:
+                    raise ValueError(
+                        f"source_filters[{field!r}] contains unsupported keys: {extra_keys}. "
+                        "Only 'include' and 'exclude' are allowed."
+                    )
+                for op_name in ("include", "exclude"):
+                    vals = filt.get(op_name)
+                    if vals is None:
+                        continue
+                    if not isinstance(vals, list):
+                        raise TypeError(
+                            f"source_filters[{field!r}]['{op_name}'] must be a list"
+                        )
+                    for idx, value in enumerate(vals):
+                        if not pd.api.types.is_scalar(value):
+                            raise TypeError(
+                                f"source_filters[{field!r}]['{op_name}'][{idx}] must be a scalar value"
+                            )
+
     for param_name, col_list in [
         ("rows", rows),
         ("columns", columns),
@@ -1280,18 +1376,22 @@ def st_pivot_table(
                     f"Available columns: {sorted(df_cols)}"
                 )
 
+    filtered_data = _apply_source_filters(data, source_filters)
+
     # --- Auto-detect dimensions/measures when not specified ---
     resolved_rows = rows
     resolved_columns = columns
     resolved_values = values
 
     if resolved_rows is None and resolved_columns is None and resolved_values is None:
-        numeric_cols = data.select_dtypes(include="number").columns.tolist()
-        categorical_cols = [c for c in data.columns if c not in numeric_cols]
+        numeric_cols = filtered_data.select_dtypes(include="number").columns.tolist()
+        categorical_cols = [c for c in filtered_data.columns if c not in numeric_cols]
         # Heuristic: numeric columns with few unique values (<=20) likely
         # represent dimensions (e.g. Year) rather than measures.
-        likely_measures = [c for c in numeric_cols if data[c].nunique() > 20]
-        likely_numeric_dims = [c for c in numeric_cols if data[c].nunique() <= 20]
+        likely_measures = [c for c in numeric_cols if filtered_data[c].nunique() > 20]
+        likely_numeric_dims = [
+            c for c in numeric_cols if filtered_data[c].nunique() <= 20
+        ]
         # Treat low-cardinality numerics as dimensions alongside categoricals
         all_dims = categorical_cols + likely_numeric_dims
         resolved_rows = all_dims[:1] if all_dims else []
@@ -1484,7 +1584,7 @@ def st_pivot_table(
     # reruns, but let explicit Python config changes take precedence.
     config_to_send = _resolve_config_to_send(st.session_state, key, initial_config)
     use_threshold_hybrid, threshold_reason = _should_use_threshold_hybrid(
-        data, config_to_send, execution_mode
+        filtered_data, config_to_send, execution_mode
     )
     if use_threshold_hybrid:
         drill_note = (
@@ -1494,9 +1594,9 @@ def st_pivot_table(
         if drill_note not in threshold_reason:
             threshold_reason = f"{threshold_reason}{drill_note}"
     materialized_data = (
-        _prepare_threshold_hybrid_frame(data, config_to_send, null_handling)
+        _prepare_threshold_hybrid_frame(filtered_data, config_to_send, null_handling)
         if use_threshold_hybrid
-        else data
+        else filtered_data
     )
     effective_execution_mode = (
         "threshold_hybrid" if use_threshold_hybrid else "client_only"
@@ -1513,12 +1613,14 @@ def st_pivot_table(
     }
 
     if use_threshold_hybrid:
-        data_payload["source_row_count"] = len(data)
+        data_payload["source_row_count"] = len(filtered_data)
         agg_dict = config_to_send.get("aggregation", {})
         agg_remap = _build_hybrid_agg_remap(agg_dict)
         if agg_remap:
             data_payload["hybrid_agg_remap"] = agg_remap
-        totals_sidecar = _compute_hybrid_totals(data, config_to_send, null_handling)
+        totals_sidecar = _compute_hybrid_totals(
+            filtered_data, config_to_send, null_handling
+        )
         if totals_sidecar:
             data_payload["hybrid_totals"] = totals_sidecar
 
@@ -1568,7 +1670,7 @@ def st_pivot_table(
                 config_to_send.get("columns", [])
             )
             records, columns, total, page = _compute_hybrid_drilldown(
-                data,
+                filtered_data,
                 drilldown_request,
                 null_handling=null_handling,
                 dims=all_dims,
