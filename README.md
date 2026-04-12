@@ -437,7 +437,7 @@ Export the pivot table as Excel, CSV, TSV, or copy to clipboard. Available via t
 - **Content**: Formatted (display values with currency, percentages, etc.) or Raw (unformatted numbers)
 - **Filename**: Customizable via `export_filename`. The date (`YYYY-MM-DD`) and file extension are appended automatically. Defaults to `"pivot-table"` (e.g. `pivot-table_2026-03-09.xlsx`).
 
-Excel export produces a professionally styled workbook with merged column headers, bold totals/subtotals, number formatting, banded rows, frozen panes (headers stay visible when scrolling), and row dimension merging that matches the rendered table layout. Sort order, active filters, and show-values-as percentages are all preserved.
+Excel export produces a professionally styled workbook with merged column headers, bold totals/subtotals, number formatting, banded rows, frozen panes (headers stay visible when scrolling), and row dimension merging that matches the rendered table layout. Sort order, active filters, and show-values-as percentages are all preserved. Conditional formatting rules (color scales, data bars, and threshold highlights) are translated to native Excel conditional formatting, so the exported file renders them natively without macros.
 
 Export always outputs the full expanded table regardless of any collapsed row/column groups.
 

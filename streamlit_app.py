@@ -471,6 +471,8 @@ are supported:
 - Units cells above 250 are highlighted in **bold blue** (threshold rule).
 - Text color auto-adjusts for readability against colored backgrounds.
 - Rules are configured via the Python API (not interactive yet).
+- **Excel export** preserves these rules as native Excel conditional formatting —
+  use the Download icon (↓) to export and open in Excel or Google Sheets.
 
 **API parameter used:** `conditional_formatting`
 """
@@ -818,6 +820,9 @@ Export the pivot table data as **Excel** (.xlsx), **CSV**, **TSV**, or copy to
 Excel export produces a professionally styled workbook with merged column
 headers, bold totals/subtotals, number formatting, banded rows, and frozen
 panes — matching the quality you'd expect from BI tools like Sigma.
+Conditional formatting rules (color scales, data bars, and threshold
+highlights) are translated to native Excel conditional formatting — try
+exporting the table in **Section 6** to see this in action.
 
 **Try it:**
 - Use the top-right utility menu in the toolbar.
