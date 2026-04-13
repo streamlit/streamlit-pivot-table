@@ -944,6 +944,8 @@ const ADVANCED_AGGREGATIONS: readonly AggregationType[] = [
   "last",
 ];
 
+const FIELD_SEARCH_THRESHOLD = 8;
+
 const AggregationPicker: FC<AggregationPickerProps> = ({
   field,
   value,
@@ -1070,6 +1072,7 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
   displayLabelForField,
 }): ReactElement => {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [syntheticOpen, setSyntheticOpen] = useState(false);
   const [editingSyntheticId, setEditingSyntheticId] = useState<string | null>(
     null,
@@ -1085,12 +1088,15 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const closeDropdown = useCallback(() => {
     setOpen(false);
+    setSearchQuery("");
     setSyntheticOpen(false);
     setSyntheticError(null);
   }, []);
   useClickOutside(containerRef, closeDropdown, open || syntheticOpen);
+  const showFieldSearch = options.length > FIELD_SEARCH_THRESHOLD;
   const listboxKeyDown = useListboxKeyboard(
     panelRef,
     triggerRef,
@@ -1099,6 +1105,16 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
     '[role="option"]',
   );
   const isValuesField = label === "Values";
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const filteredOptions = useMemo(
+    () =>
+      !normalizedSearchQuery
+        ? options
+        : options.filter((col) =>
+            col.toLowerCase().includes(normalizedSearchQuery),
+          ),
+    [options, normalizedSearchQuery],
+  );
 
   // Drag-and-drop integration
   const { setNodeRef: setDroppableRef } = useDroppable({
@@ -1119,6 +1135,7 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
 
   const openCreateSynthetic = useCallback(() => {
     setOpen(false);
+    setSearchQuery("");
     setEditingSyntheticId(null);
     setSyntheticLabel("");
     setSyntheticOperation("sum_over_sum");
@@ -1131,6 +1148,7 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
 
   const openEditSynthetic = useCallback((measure: SyntheticMeasureConfig) => {
     setOpen(false);
+    setSearchQuery("");
     setEditingSyntheticId(measure.id);
     setSyntheticLabel(measure.label);
     setSyntheticOperation(measure.operation);
@@ -1243,7 +1261,10 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
               type="button"
               className={styles.dropdownToggle}
               data-testid={`${testId}-select`}
-              onClick={() => setOpen((v) => !v)}
+              onClick={() => {
+                if (open) setSearchQuery("");
+                setOpen((v) => !v);
+              }}
               aria-expanded={open}
               aria-label={`Toggle ${label} dropdown`}
             >
@@ -1258,10 +1279,38 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
                 aria-label={`${label} options`}
                 onKeyDown={listboxKeyDown}
               >
+                {showFieldSearch && (
+                  <div className={styles.fieldSearchWrapper}>
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      className={styles.fieldSearchInput}
+                      placeholder="Search fields..."
+                      data-testid={`${testId}-search`}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "ArrowDown") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        panelRef.current
+                          ?.querySelector<HTMLElement>('[role="option"]')
+                          ?.focus();
+                      }}
+                    />
+                  </div>
+                )}
                 {options.length === 0 ? (
                   <div className={styles.emptyHint}>No fields available</div>
+                ) : filteredOptions.length === 0 ? (
+                  <div
+                    className={styles.noSearchResults}
+                    data-testid={`${testId}-no-search-results`}
+                  >
+                    No matching fields
+                  </div>
                 ) : (
-                  options.map((col) => {
+                  filteredOptions.map((col) => {
                     const checked = selected.includes(col);
                     const frozen = checked && !!frozenColumns?.has(col);
                     return (

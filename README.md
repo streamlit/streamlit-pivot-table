@@ -598,6 +598,17 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 
 In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings gear remains visible, its popover shows read-only display status plus group expand/collapse actions, and header-menu sorting, filtering, and `Show Values As` stay enabled.
 
+### Toolbar Field Search
+
+When a toolbar picker has more than **8 available fields**, the `Rows`, `Columns`, or `Values` dropdown automatically shows a field search input at the top of the panel.
+
+- Typing filters the available field list in place.
+- `ArrowDown` from the search box moves focus into the first matching option.
+- `Escape` closes the dropdown, even when the current query has zero matches.
+- In the `Values` dropdown, search only filters the field checklist. Synthetic-measure actions and per-measure aggregation controls remain visible below it.
+
+This is a frontend-only convenience feature; no Python parameter is needed to enable it.
+
 ### Drag-and-Drop Field Configuration
 
 When `interactive=True`, each chip in the Rows, Columns, and Values toolbar zones has a **grip-dots drag handle** on its left side. Drag chips to:

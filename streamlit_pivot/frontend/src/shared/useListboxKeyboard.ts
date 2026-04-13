@@ -33,6 +33,7 @@ export function useListboxKeyboard(
   isOpen: boolean,
   onClose: () => void,
   itemSelector = '[role="option"], button',
+  initialFocusRef?: RefObject<HTMLElement | null>,
 ): (e: React.KeyboardEvent) => void {
   const getItems = useCallback((): HTMLElement[] => {
     if (!panelRef.current) return [];
@@ -53,12 +54,25 @@ export function useListboxKeyboard(
 
   useEffect(() => {
     if (isOpen) {
-      requestAnimationFrame(() => focusItemAt(0));
+      requestAnimationFrame(() => {
+        if (initialFocusRef?.current) {
+          initialFocusRef.current.focus();
+        } else {
+          focusItemAt(0);
+        }
+      });
     }
-  }, [isOpen, focusItemAt]);
+  }, [isOpen, focusItemAt, initialFocusRef]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        triggerRef.current?.focus();
+        return;
+      }
+
       const items = getItems();
       if (items.length === 0) return;
 
@@ -82,11 +96,6 @@ export function useListboxKeyboard(
         case "End":
           e.preventDefault();
           focusItemAt(items.length - 1);
-          break;
-        case "Escape":
-          e.preventDefault();
-          onClose();
-          triggerRef.current?.focus();
           break;
         case "Tab":
           e.preventDefault();

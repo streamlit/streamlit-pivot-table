@@ -694,7 +694,7 @@ export function renderColumnHeaders(
           showColDimToggle ? (
             <th
               key={`col-dim-label-${level}`}
-              className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel} ${styles.dimensionToggleCell}`}
+              className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel} ${level === 0 ? styles.columnHeaderPrimary : styles.columnHeaderSecondary} ${styles.dimensionToggleCell}`}
               colSpan={numRowDims}
               rowSpan={cornerRowSpan > 1 ? cornerRowSpan : undefined}
               style={stickyTop}
@@ -722,7 +722,7 @@ export function renderColumnHeaders(
           ) : (
             <th
               key={`col-dim-label-${level}`}
-              className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel}`}
+              className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel} ${level === 0 ? styles.columnHeaderPrimary : styles.columnHeaderSecondary}`}
               colSpan={numRowDims}
               rowSpan={cornerRowSpan > 1 ? cornerRowSpan : undefined}
               style={stickyTop}
@@ -810,6 +810,8 @@ export function renderColumnHeaders(
             config.rows.length >= 2 &&
             !isInnermost &&
             rowLevel.isLeaf;
+          const isPrimaryRowHierarchy =
+            rowLevel.dimIndex === 0 && rowLevel.hierarchyOffset === 0;
 
           const rowDimResizeIdx = -(rowHeaderIdx + 1);
           const rowDimResizeWidth = columnWidthMap?.get(rowDimResizeIdx);
@@ -826,7 +828,7 @@ export function renderColumnHeaders(
           cells.push(
             <th
               key={`row-dim-${rowHeaderIdx}`}
-              className={`${styles.headerCell} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
+              className={`${styles.headerCell} ${isPrimaryRowHierarchy ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
               rowSpan={cornerFullRowSpan}
               style={rowDimCellStyle}
               data-testid={
@@ -961,7 +963,7 @@ export function renderColumnHeaders(
               <th
                 key={`col-tp-${level}-${group.collapseKey}`}
                 scope="col"
-                className={`${styles.headerCell} ${group.isCollapsed ? styles.totalsCol : ""} ${styles.groupToggleCell}`}
+                className={`${styles.headerCell} ${level === 0 ? styles.columnHeaderPrimary : styles.columnHeaderSecondary} ${group.isCollapsed ? styles.totalsCol : ""} ${styles.groupToggleCell}`}
                 colSpan={colSpanVal > 1 ? colSpanVal : undefined}
                 rowSpan={rowSpanVal}
                 style={stickyTop}
@@ -1110,7 +1112,7 @@ export function renderColumnHeaders(
             <th
               key={`col-${level}-${i}`}
               scope="col"
-              className={`${styles.headerCell} ${isCollapseLevel ? styles.totalsCol : ""} ${showColSortIndicator ? styles.headerSorted : ""} ${canToggle ? styles.groupToggleCell : ""}`}
+              className={`${styles.headerCell} ${level === 0 ? styles.columnHeaderPrimary : styles.columnHeaderSecondary} ${isCollapseLevel ? styles.totalsCol : ""} ${showColSortIndicator ? styles.headerSorted : ""} ${canToggle ? styles.groupToggleCell : ""}`}
               colSpan={colSpanVal > 1 ? colSpanVal : undefined}
               rowSpan={rowSpanVal}
               style={cellStyle}
@@ -1509,6 +1511,9 @@ function renderProjectedRowHeaderCells(
 
     const dimClasses = [
       styles.rowHeaderCell,
+      mapping.dimIndex === 0 && mapping.hierarchyOffset === 0
+        ? styles.rowHeaderPrimary
+        : styles.rowHeaderSecondary,
       colIdx === 0 ? styles.rowHeaderCellPinned : "",
       isGroupingDim ? styles.groupingDimCell : "",
       isLeafDim ? styles.leafDimCell : "",
@@ -1549,25 +1554,27 @@ function renderProjectedRowHeaderCells(
             }
           : {})}
       >
-        {showTemporalToggle && (
-          <button
-            type="button"
-            className={styles.temporalToggleBtn}
-            data-testid={`pivot-temporal-row-toggle-${mapping.field}-${value}`}
-            onClick={(e: MouseEvent<HTMLButtonElement>) => {
-              e.stopPropagation();
-              onTemporalToggle?.(mapping.field, temporalToggleKey!);
-            }}
-            aria-label={`${temporalCollapsed ? "Expand" : "Collapse"} ${text}`}
-            title={`${temporalCollapsed ? "Expand" : "Collapse"} ${text}`}
-          >
-            <GroupToggleIcon isCollapsed={temporalCollapsed} />
-          </button>
-        )}
-        {!showTemporalToggle && showGroupToggle && (
-          <GroupToggleIcon isCollapsed={isCollapsed} />
-        )}
-        {text}
+        <span className={styles.rowHeaderContent}>
+          {showTemporalToggle && (
+            <button
+              type="button"
+              className={styles.temporalToggleBtn}
+              data-testid={`pivot-temporal-row-toggle-${mapping.field}-${value}`}
+              onClick={(e: MouseEvent<HTMLButtonElement>) => {
+                e.stopPropagation();
+                onTemporalToggle?.(mapping.field, temporalToggleKey!);
+              }}
+              aria-label={`${temporalCollapsed ? "Expand" : "Collapse"} ${text}`}
+              title={`${temporalCollapsed ? "Expand" : "Collapse"} ${text}`}
+            >
+              <GroupToggleIcon isCollapsed={temporalCollapsed} />
+            </button>
+          )}
+          {!showTemporalToggle && showGroupToggle && (
+            <GroupToggleIcon isCollapsed={isCollapsed} />
+          )}
+          <span>{text}</span>
+        </span>
       </th>,
     );
   }
@@ -1659,6 +1666,9 @@ export function renderDataRow(
               : false;
             const dimClasses = [
               styles.rowHeaderCell,
+              dimIdx === 0
+                ? styles.rowHeaderPrimary
+                : styles.rowHeaderSecondary,
               dimIdx === 0 ? styles.rowHeaderCellPinned : "",
               isGroupingDim ? styles.groupingDimCell : "",
               isLeafDim ? styles.leafDimCell : "",
@@ -1693,17 +1703,24 @@ export function renderDataRow(
                     }
                   : {})}
               >
-                {showToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
-                {(part
-                  ? pivotData.formatDimLabel(config.rows[dimIdx] ?? "", part)
-                  : "") || "(empty)"}
+                <span className={styles.rowHeaderContent}>
+                  {showToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
+                  <span>
+                    {(part
+                      ? pivotData.formatDimLabel(
+                          config.rows[dimIdx] ?? "",
+                          part,
+                        )
+                      : "") || "(empty)"}
+                  </span>
+                </span>
               </th>
             );
           })}
       {rowKey.length === 0 && (
         <th
           scope="row"
-          className={`${styles.rowHeaderCell} ${styles.rowHeaderCellPinned}`}
+          className={`${styles.rowHeaderCell} ${styles.rowHeaderPrimary} ${styles.rowHeaderCellPinned}`}
         >
           Total
         </th>
@@ -2035,7 +2052,7 @@ export function renderSubtotalRow(
                 <th
                   key={`sub-hdr-${dimIdx}`}
                   scope="row"
-                  className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.groupingDimCell}`}
+                  className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.groupingDimCell}`}
                   rowSpan={span > 1 ? span : undefined}
                   data-dim-index={dimIdx}
                 >
@@ -2049,7 +2066,7 @@ export function renderSubtotalRow(
                 <th
                   key={`sub-hdr-${dimIdx}`}
                   scope="row"
-                  className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.subtotalHeaderCell} ${canToggle ? styles.groupToggleCell : ""}`}
+                  className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.subtotalHeaderCell} ${canToggle ? styles.groupToggleCell : ""}`}
                   {...(canToggle
                     ? {
                         onClick: () => onToggleGroup(groupKeyStr),
@@ -2071,8 +2088,10 @@ export function renderSubtotalRow(
                     canToggle ? `pivot-group-toggle-${groupKeyStr}` : undefined
                   }
                 >
-                  {canToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
-                  <span className={styles.subtotalLabel}>{label} Total</span>
+                  <span className={styles.rowHeaderContent}>
+                    {canToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
+                    <span className={styles.subtotalLabel}>{label} Total</span>
+                  </span>
                 </th>
               );
             }
@@ -2081,7 +2100,7 @@ export function renderSubtotalRow(
               <th
                 key={`sub-hdr-${dimIdx}`}
                 scope="row"
-                className={styles.rowHeaderCell}
+                className={`${styles.rowHeaderCell} ${styles.rowHeaderSecondary}`}
               />
             );
           })}

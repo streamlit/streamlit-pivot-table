@@ -47,6 +47,16 @@
   z-index: 2;
 }
 
+.columnHeaderPrimary {
+  font-weight: 600;
+  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+}
+
+.columnHeaderSecondary {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--st-text-color) 72%, transparent);
+}
+
 /* Opt out of sticky positioning */
 .noSticky .headerCell,
 .noSticky .valueLabel,
@@ -63,6 +73,24 @@
   border-right: 1px solid var(--st-dataframe-border-color);
   border-bottom: 1px solid var(--st-dataframe-border-color);
   white-space: nowrap;
+}
+
+.rowHeaderPrimary {
+  font-weight: 600;
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 68%,
+    var(--st-background-color)
+  );
+}
+
+.rowHeaderSecondary {
+  font-weight: 500;
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 60%,
+    var(--st-background-color)
+  );
 }
 
 .rowHeaderCellPinned {
@@ -138,9 +166,26 @@
   );
 }
 
-/* Row header stripe: drop from the default 92% toward background so the
-   band is visible against the slightly lighter odd-row headers. */
+/* Row header stripe: drop from the default toward background so the
+   band is visible against the slightly lighter odd-row headers.
+   Primary/secondary overrides preserve hierarchy contrast on even rows. */
 .pivotTable tbody .evenDataRow th.rowHeaderCell:not(.groupingDimCell) {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 48%,
+    var(--st-background-color)
+  );
+}
+
+.pivotTable tbody .evenDataRow th.rowHeaderPrimary:not(.groupingDimCell) {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 56%,
+    var(--st-background-color)
+  );
+}
+
+.pivotTable tbody .evenDataRow th.rowHeaderSecondary:not(.groupingDimCell) {
   background-color: color-mix(
     in srgb,
     var(--st-secondary-background-color) 48%,
@@ -219,6 +264,12 @@
   justify-content: center;
   gap: 4px;
   position: relative;
+}
+
+.rowHeaderContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .headerCellInner:has(.headerMenuBtn) {

@@ -815,6 +815,62 @@ describe("TableRenderer - row header spanning", () => {
   });
 });
 
+describe("TableRenderer - header hierarchy styling hooks", () => {
+  it("marks top-level and nested column headers with distinct hierarchy classes", () => {
+    const config = makeConfig({
+      rows: ["category"],
+      columns: ["region", "year"],
+      values: ["revenue"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    expect(
+      headerCells.some((cell) =>
+        cell.className.includes("columnHeaderPrimary"),
+      ),
+    ).toBe(true);
+    expect(
+      headerCells.some((cell) =>
+        cell.className.includes("columnHeaderSecondary"),
+      ),
+    ).toBe(true);
+  });
+
+  it("marks top-level and nested row headers with distinct hierarchy classes", () => {
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    const firstDataRow = screen.getAllByTestId("pivot-data-row")[0];
+    const rowHeaders = firstDataRow.querySelectorAll("th[scope='row']");
+    expect(rowHeaders[0]?.className).toContain("rowHeaderPrimary");
+    expect(rowHeaders[1]?.className).toContain("rowHeaderSecondary");
+  });
+
+  it("preserves subtotal header hooks while applying hierarchy classes", () => {
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+
+    const subtotalHeader = container.querySelector("th.subtotalHeaderCell");
+    expect(subtotalHeader).toBeInTheDocument();
+    expect(subtotalHeader?.className).toMatch(/rowHeader(Primary|Secondary)/);
+  });
+});
+
 describe("TableRenderer - border fix (Total header with multiple values)", () => {
   it("renders value labels under Total header when hasMultipleValues", () => {
     const config = makeConfig({ values: ["revenue", "profit"] });

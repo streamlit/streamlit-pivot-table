@@ -16,13 +16,36 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Toolbar, { applyDragMove } from "./Toolbar";
 import { PivotData, type DataRecord } from "../engine/PivotData";
 import { makeConfig } from "../test-utils";
 
 const ALL_COLUMNS = ["region", "year", "revenue", "profit", "category"];
 const NUMERIC_COLUMNS = ["revenue", "profit"];
+const MANY_FIELDS = [
+  "region",
+  "year",
+  "category",
+  "segment",
+  "state",
+  "city",
+  "country",
+  "quarter",
+  "month",
+  "channel",
+];
+const MANY_NUMERIC_COLUMNS = [
+  "revenue",
+  "profit",
+  "cost",
+  "margin",
+  "units",
+  "discount",
+  "tax",
+  "freight",
+  "returns",
+];
 
 describe("Toolbar - rendering", () => {
   it("renders toolbar with data-testid", () => {
@@ -463,6 +486,162 @@ describe("Toolbar - interactions", () => {
     const readdedConfig = handleChange.mock.calls[1][0];
     expect(readdedConfig.columns).toEqual(["order_date"]);
     expect(readdedConfig.date_grains).toEqual({ order_date: "quarter" });
+  });
+});
+
+describe("Toolbar - field search", () => {
+  it("does not render search input when options are at or below the threshold", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
+    expect(screen.queryByTestId("toolbar-rows-search")).not.toBeInTheDocument();
+  });
+
+  it("renders search input above threshold and filters options", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [] })}
+        allColumns={MANY_FIELDS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
+    const search = screen.getByTestId("toolbar-rows-search");
+    expect(search).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "cat" } });
+    expect(
+      screen.getByTestId("toolbar-rows-option-category"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("toolbar-rows-option-region"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(
+      screen.getByTestId("toolbar-rows-option-region"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not move focus into the search input when the dropdown opens", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [] })}
+        allColumns={MANY_FIELDS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByTestId("toolbar-rows-select");
+    trigger.focus();
+    fireEvent.click(trigger);
+    const search = screen.getByTestId("toolbar-rows-search");
+
+    expect(trigger).toHaveFocus();
+    expect(search).not.toHaveFocus();
+  });
+
+  it("closes the dropdown on Escape even when search yields zero results", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [] })}
+        allColumns={MANY_FIELDS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
+    const search = screen.getByTestId("toolbar-rows-search");
+    fireEvent.change(search, { target: { value: "zzz" } });
+
+    expect(
+      screen.getByTestId("toolbar-rows-no-search-results"),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(screen.queryByTestId("toolbar-rows-panel")).not.toBeInTheDocument();
+  });
+
+  it("moves focus to the first option on ArrowDown from the search input", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [] })}
+        allColumns={MANY_FIELDS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
+    const search = screen.getByTestId("toolbar-rows-search");
+    const firstOption = screen.getByTestId("toolbar-rows-option-region");
+
+    search.focus();
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(firstOption).toHaveFocus();
+  });
+
+  it("filters value-field options without hiding synthetic or aggregation controls", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ values: ["revenue", "profit"] })}
+        allColumns={[...MANY_FIELDS, ...MANY_NUMERIC_COLUMNS]}
+        numericColumns={MANY_NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-values-select"));
+    const search = screen.getByTestId("toolbar-values-search");
+    fireEvent.change(search, { target: { value: "tax" } });
+
+    expect(screen.getByTestId("toolbar-values-option-tax")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("toolbar-values-option-revenue"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("toolbar-values-add-synthetic"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("toolbar-values-aggregation-controls"),
+    ).toBeInTheDocument();
+  });
+
+  it("clears the values search when opening the synthetic measure builder", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ values: ["revenue", "profit"] })}
+        allColumns={[...MANY_FIELDS, ...MANY_NUMERIC_COLUMNS]}
+        numericColumns={MANY_NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-values-select"));
+    fireEvent.change(screen.getByTestId("toolbar-values-search"), {
+      target: { value: "tax" },
+    });
+    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
+
+    expect(
+      screen.queryByTestId("toolbar-values-panel"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("toolbar-values-select"));
+    expect(screen.getByTestId("toolbar-values-search")).toHaveValue("");
+    expect(
+      screen.getByTestId("toolbar-values-option-revenue"),
+    ).toBeInTheDocument();
   });
 });
 

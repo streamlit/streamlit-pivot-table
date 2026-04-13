@@ -39,6 +39,12 @@ st.caption(
 _DATA_DIR = Path(__file__).parent / "tests" / "golden_data"
 df = pd.read_csv(_DATA_DIR / "small.csv")
 df_medium = pd.read_csv(_DATA_DIR / "medium.csv")
+df_field_search = df_medium.assign(
+    Cost=(df_medium["Revenue"] - df_medium["Profit"]).round(2),
+    RevenuePerUnit=(df_medium["Revenue"] / df_medium["Units"]).round(2),
+    DiscountAmount=(df_medium["Revenue"] * df_medium["Discount"]).round(2),
+    ProfitMargin=(df_medium["Profit"] / df_medium["Revenue"]).round(3),
+)
 
 _rnd.seed(42)
 _date_regions = ["US", "EU", "APAC"]
@@ -139,6 +145,29 @@ want a sensible starting layout without pre-configuring the pivot.
 st_pivot_table(
     df,
     key="basic_auto_detect",
+)
+
+st.markdown("#### Toolbar Field Search")
+st.markdown(
+    """
+The toolbar adds a **field search input** automatically when a picker has more than
+8 available fields. This wider demo includes enough dimensions and numeric measures
+to surface search in the **Rows**, **Columns**, and **Values** dropdowns.
+
+**Try it:**
+- Open **Rows**, **Columns**, or **Values** and type part of a field name.
+- Press **ArrowDown** from the search box to jump into the filtered list.
+- Press **Escape** to close the dropdown.
+"""
+)
+st_pivot_table(
+    df_field_search,
+    key="basic_field_search",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    interactive=True,
+    show_totals=True,
 )
 
 

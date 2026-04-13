@@ -132,11 +132,13 @@
   z-index: 20;
   max-height: 240px;
   overflow: auto;
-  padding: 4px;
+  padding: 6px 0;
   background: var(--st-background-color);
   border: 1px solid var(--st-border-color);
   border-radius: var(--st-base-radius);
   box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+  font-family: var(--st-font);
+  font-size: 0.75rem;
 }
 
 .valuesDropdownPanel {
@@ -149,10 +151,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 3px 7px;
   border-radius: calc(var(--st-base-radius) - 2px);
   cursor: pointer;
-  font-size: 0.75em;
+  font-size: 1em;
   white-space: nowrap;
   color: var(--st-text-color);
   border: none;
@@ -210,6 +212,40 @@
   padding: 8px;
   font-size: 0.78em;
   opacity: 0.5;
+  text-align: center;
+}
+
+.fieldSearchWrapper {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 0 4px;
+  padding: 2px 6px;
+  background: var(--st-background-color);
+}
+
+.fieldSearchInput {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 1em;
+  outline: none;
+}
+
+.fieldSearchInput:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.noSearchResults {
+  padding: 8px;
+  font-size: 0.78em;
+  opacity: 0.55;
   text-align: center;
 }
 

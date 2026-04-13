@@ -306,7 +306,9 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.get_by_test_id("header-menu-trigger-order_date").first,
+        container.locator("th")
+        .filter(has_text="2024-W01")
+        .get_by_test_id("header-menu-trigger-order_date"),
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
