@@ -21,6 +21,9 @@ import {
   AGGREGATOR_CLASS,
   CONFIG_SCHEMA_VERSION,
   DEFAULT_CONFIG,
+  getDrilledDateGrain,
+  getEffectiveDateGrain,
+  getTemporalGroupingMode,
   type AggregationConfig,
   getAggregationForField,
   normalizeAggregationConfig,
@@ -32,6 +35,7 @@ import {
   showRowTotals,
   showSubtotalForDim,
   showTotalForMeasure,
+  validatePivotConfigRuntime,
   validatePivotConfigV1,
   type AggregatorClass,
   type AggregationType,
@@ -72,6 +76,7 @@ describe("Config schema v1", () => {
     expect(DEFAULT_CONFIG).toMatchInlineSnapshot(`
       {
         "aggregation": {},
+        "auto_date_hierarchy": true,
         "columns": [],
         "empty_cell_value": "-",
         "interactive": true,
@@ -218,7 +223,7 @@ describe("validatePivotConfigV1", () => {
     ).toThrow("'aggregation' must be one of");
   });
 
-  it("rejects period comparison modes without a grouped comparison axis", () => {
+  it("keeps config import validation shape-only for period comparison modes", () => {
     expect(() =>
       validatePivotConfigV1({
         version: 1,
@@ -226,11 +231,22 @@ describe("validatePivotConfigV1", () => {
         columns: ["Year"],
         values: ["Revenue"],
         aggregation: "sum",
+        auto_date_hierarchy: false,
         show_values_as: { Revenue: "diff_from_prev" },
       }),
-    ).toThrow(
-      "period comparison show_values_as modes require at least one date_grains field on rows or columns",
-    );
+    ).not.toThrow();
+  });
+
+  it("accepts null date_grains entries as explicit Original opt-outs", () => {
+    const result = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: ["Revenue"],
+      aggregation: "sum",
+      date_grains: { order_date: null },
+    });
+    expect(result.date_grains).toEqual({ order_date: null });
   });
 
   it("normalizes scalar aggregation input to a per-value map", () => {
@@ -706,6 +722,113 @@ describe("Synthetic measures", () => {
   });
 });
 
+describe("date hierarchy helpers", () => {
+  it("auto-defaults temporal axis fields to month", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+    });
+    expect(getEffectiveDateGrain(config, "order_date", "date")).toBe("month");
+    expect(getTemporalGroupingMode(config, "order_date", "date")).toBe("auto");
+  });
+
+  it("supports explicit Original opt-out", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+      date_grains: { order_date: null },
+    });
+    expect(getEffectiveDateGrain(config, "order_date", "date")).toBeUndefined();
+    expect(getTemporalGroupingMode(config, "order_date", "date")).toBe(
+      "original",
+    );
+  });
+
+  it("disables auto hierarchy when requested", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+      auto_date_hierarchy: false,
+    });
+    expect(getEffectiveDateGrain(config, "order_date", "date")).toBeUndefined();
+    expect(getTemporalGroupingMode(config, "order_date", "date")).toBe("none");
+  });
+
+  it("still honors explicit grain overrides when auto hierarchy is off", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+      auto_date_hierarchy: false,
+      date_grains: { order_date: "quarter" },
+    });
+    expect(getEffectiveDateGrain(config, "order_date", "date")).toBe("quarter");
+    expect(getTemporalGroupingMode(config, "order_date", "date")).toBe(
+      "explicit",
+    );
+  });
+
+  it("uses the default drill ladder and excludes week", () => {
+    expect(getDrilledDateGrain("month", "up")).toBe("quarter");
+    expect(getDrilledDateGrain("month", "down")).toBe("day");
+    expect(getDrilledDateGrain("week", "up")).toBeUndefined();
+    expect(getDrilledDateGrain("week", "down")).toBeUndefined();
+  });
+
+  it("runtime-validates period comparisons against temporal column types", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["Region"],
+      columns: ["Year"],
+      values: ["Revenue"],
+      aggregation: "sum",
+      show_values_as: { Revenue: "diff_from_prev" },
+    });
+    expect(() =>
+      validatePivotConfigRuntime(
+        config,
+        new Map([
+          ["Region", "string"],
+          ["Year", "integer"],
+        ]),
+      ),
+    ).toThrow(
+      "period comparison show_values_as modes require a grouped date/datetime field on rows or columns",
+    );
+  });
+
+  it("runtime-allows period comparisons when auto hierarchy targets a temporal axis", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["Region"],
+      columns: ["order_date"],
+      values: ["Revenue"],
+      aggregation: "sum",
+      show_values_as: { Revenue: "diff_from_prev" },
+    });
+    expect(() =>
+      validatePivotConfigRuntime(
+        config,
+        new Map([
+          ["Region", "string"],
+          ["order_date", "date"],
+        ]),
+      ),
+    ).not.toThrow();
+  });
+});
+
 describe("getAggregationForField", () => {
   it("returns the configured aggregation for a raw value field", () => {
     const config = makeConfig({
@@ -731,5 +854,78 @@ describe("getAggregationForField", () => {
     });
     expect(getAggregationForField("Revenue", config)).toBe("sum");
     expect(getAggregationForField("Cost", config)).toBe("sum");
+  });
+});
+
+describe("getEffectiveDateGrain with adaptiveGrain", () => {
+  it("returns adaptive grain instead of default when auto-hierarchy applies", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+    });
+    expect(getEffectiveDateGrain(config, "order_date", "date", "year")).toBe(
+      "year",
+    );
+    expect(getEffectiveDateGrain(config, "order_date", "date", "quarter")).toBe(
+      "quarter",
+    );
+  });
+
+  it("explicit date_grains override still takes precedence", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+      date_grains: { order_date: "week" },
+    });
+    expect(getEffectiveDateGrain(config, "order_date", "date", "year")).toBe(
+      "week",
+    );
+  });
+
+  it("null opt-out still returns undefined regardless of adaptive grain", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+      date_grains: { order_date: null },
+    });
+    expect(
+      getEffectiveDateGrain(config, "order_date", "date", "year"),
+    ).toBeUndefined();
+  });
+
+  it("auto_date_hierarchy=false ignores adaptive grain", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+      auto_date_hierarchy: false,
+    });
+    expect(
+      getEffectiveDateGrain(config, "order_date", "date", "year"),
+    ).toBeUndefined();
+  });
+
+  it("falls back to default when adaptiveGrain is undefined", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["order_date"],
+      columns: [],
+      values: [],
+      aggregation: {},
+    });
+    expect(getEffectiveDateGrain(config, "order_date", "date", undefined)).toBe(
+      "month",
+    );
   });
 });

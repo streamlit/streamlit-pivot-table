@@ -1111,3 +1111,27 @@ class TestComputeHybridTotals:
         sc_last = pivot_module._compute_hybrid_totals(df, cfg_last, None)
         assert sc_first["grand"]["revenue"] == 10.0
         assert sc_last["grand"]["revenue"] == 30.0
+
+
+class TestAdaptiveGrainFingerprint:
+    """Changing adaptive grains alone invalidates the sidecar fingerprint."""
+
+    def test_different_adaptive_grains_different_fingerprint(self, pivot_module):
+        cfg = {
+            "version": pivot_module.CONFIG_SCHEMA_VERSION,
+            "rows": ["d"],
+            "columns": [],
+            "values": ["v"],
+            "aggregation": {"v": "avg"},
+        }
+        fp1 = pivot_module._build_sidecar_fingerprint(
+            cfg,
+            None,
+            adaptive_date_grains={"d": "month"},
+        )
+        fp2 = pivot_module._build_sidecar_fingerprint(
+            cfg,
+            None,
+            adaptive_date_grains={"d": "year"},
+        )
+        assert fp1 != fp2

@@ -42,8 +42,10 @@ export interface PivotConfigV1 {
   rows: string[];
   columns: string[];
   values: string[];
-  /** Per-field temporal grain for date/datetime dimensions. */
-  date_grains?: Record<string, DateGrain>;
+  /** Auto-apply a default hierarchy to temporal fields placed on rows/columns. */
+  auto_date_hierarchy?: boolean;
+  /** Per-field temporal grain override. Null explicitly opts out to Original/raw values. */
+  date_grains?: Record<string, DateGrain | null>;
   synthetic_measures?: SyntheticMeasureConfig[];
   aggregation: AggregationConfig;
   show_totals: boolean;
@@ -272,7 +274,15 @@ export function getAggregationForField(
 export function stringifyPivotConfig(config: PivotConfigV1): string {
   return JSON.stringify({
     ...config,
+    auto_date_hierarchy: config.auto_date_hierarchy !== false,
     aggregation: normalizeAggregationConfig(config.aggregation, config.values),
+    date_grains: config.date_grains
+      ? Object.fromEntries(
+          Object.entries(config.date_grains).sort(([a], [b]) =>
+            a.localeCompare(b),
+          ),
+        )
+      : undefined,
   });
 }
 
@@ -297,6 +307,8 @@ export type PeriodComparisonMode =
   | "pct_diff_from_prev_year";
 
 export type DateGrain = "year" | "quarter" | "month" | "week" | "day";
+export type DateGrainOverride = DateGrain | null;
+export type TemporalGroupingMode = "auto" | "explicit" | "original" | "none";
 
 export const DATE_GRAINS: readonly DateGrain[] = [
   "year",
@@ -313,6 +325,15 @@ export const DATE_GRAIN_LABELS: Record<DateGrain, string> = {
   week: "Week",
   day: "Day",
 };
+
+export const AUTO_DATE_HIERARCHY_DEFAULT = true;
+export const DEFAULT_AUTO_DATE_GRAIN: DateGrain = "month";
+export const DEFAULT_DATE_DRILL_SEQUENCE: readonly DateGrain[] = [
+  "year",
+  "quarter",
+  "month",
+  "day",
+] as const;
 
 // ---------------------------------------------------------------------------
 // Conditional formatting (Phase 3c)
@@ -358,6 +379,7 @@ export const DEFAULT_CONFIG: PivotConfigV1 = {
   rows: [],
   columns: [],
   values: [],
+  auto_date_hierarchy: AUTO_DATE_HIERARCHY_DEFAULT,
   synthetic_measures: [],
   aggregation: {},
   show_totals: true,
@@ -500,10 +522,87 @@ export function isSyntheticMeasure(
 export function getDimensionLabel(
   config: PivotConfigV1,
   field: string,
+  columnType?: ColumnType,
+  adaptiveGrain?: DateGrain,
 ): string {
-  const grain = config.date_grains?.[field];
+  const grain = getEffectiveDateGrain(config, field, columnType, adaptiveGrain);
   if (!grain) return field;
   return `${field} (${DATE_GRAIN_LABELS[grain]})`;
+}
+
+export function getExplicitDateGrain(
+  config: PivotConfigV1,
+  field: string,
+): DateGrainOverride | undefined {
+  return config.date_grains?.[field];
+}
+
+export function isTemporalAxisField(
+  config: PivotConfigV1,
+  field: string,
+): boolean {
+  return config.rows.includes(field) || config.columns.includes(field);
+}
+
+export function getTemporalGroupingMode(
+  config: PivotConfigV1,
+  field: string,
+  columnType?: ColumnType,
+): TemporalGroupingMode {
+  const explicit = getExplicitDateGrain(config, field);
+  if (explicit === null) return "original";
+  if (explicit !== undefined) return "explicit";
+  if (
+    config.auto_date_hierarchy !== false &&
+    isTemporalAxisField(config, field) &&
+    (columnType === "date" || columnType === "datetime")
+  ) {
+    return "auto";
+  }
+  return "none";
+}
+
+export function getEffectiveDateGrain(
+  config: PivotConfigV1,
+  field: string,
+  columnType?: ColumnType,
+  adaptiveGrain?: DateGrain,
+): DateGrain | undefined {
+  const explicit = getExplicitDateGrain(config, field);
+  if (explicit === null) return undefined;
+  if (explicit !== undefined) return explicit;
+  if (
+    config.auto_date_hierarchy !== false &&
+    isTemporalAxisField(config, field) &&
+    (columnType === "date" || columnType === "datetime")
+  ) {
+    return adaptiveGrain ?? DEFAULT_AUTO_DATE_GRAIN;
+  }
+  return undefined;
+}
+
+export function getDateDrillSequence(
+  grain: DateGrain | undefined,
+): readonly DateGrain[] | undefined {
+  if (!grain) return DEFAULT_DATE_DRILL_SEQUENCE;
+  return DEFAULT_DATE_DRILL_SEQUENCE.includes(grain)
+    ? DEFAULT_DATE_DRILL_SEQUENCE
+    : undefined;
+}
+
+export function getDrilledDateGrain(
+  grain: DateGrain | undefined,
+  direction: "up" | "down",
+): DateGrain | undefined {
+  const sequence = getDateDrillSequence(grain);
+  if (!sequence) return undefined;
+  const current = grain ?? DEFAULT_AUTO_DATE_GRAIN;
+  const idx = sequence.indexOf(current);
+  if (idx === -1) return undefined;
+  const nextIdx = direction === "up" ? idx - 1 : idx + 1;
+  return nextIdx >= 0 && nextIdx < sequence.length
+    ? sequence[nextIdx]
+    : undefined;
 }
 
 export function isPeriodComparisonMode(
@@ -525,11 +624,42 @@ export function getPeriodComparisonMode(
   return isPeriodComparisonMode(mode) ? mode : undefined;
 }
 
-function hasGroupedComparisonAxis(config: PivotConfigV1): boolean {
-  const groupedFields = new Set(Object.keys(config.date_grains ?? {}));
-  return [...config.rows, ...config.columns].some((field) =>
-    groupedFields.has(field),
+function hasGroupedTemporalComparisonAxis(
+  config: PivotConfigV1,
+  columnTypes?: ColumnTypeMap,
+  adaptiveDateGrains?: Record<string, DateGrain>,
+): boolean {
+  return [...config.rows, ...config.columns].some((field) => {
+    const columnType = columnTypes?.get(field);
+    return (
+      (columnType === "date" || columnType === "datetime") &&
+      !!getEffectiveDateGrain(
+        config,
+        field,
+        columnType,
+        adaptiveDateGrains?.[field],
+      )
+    );
+  });
+}
+
+export function validatePivotConfigRuntime(
+  config: PivotConfigV1,
+  columnTypes?: ColumnTypeMap,
+  adaptiveDateGrains?: Record<string, DateGrain>,
+): PivotConfigV1 {
+  const hasPeriodMode = Object.values(config.show_values_as ?? {}).some(
+    (mode) => isPeriodComparisonMode(mode),
   );
+  if (
+    hasPeriodMode &&
+    !hasGroupedTemporalComparisonAxis(config, columnTypes, adaptiveDateGrains)
+  ) {
+    throw new Error(
+      "period comparison show_values_as modes require a grouped date/datetime field on rows or columns",
+    );
+  }
+  return config;
 }
 
 export function getSyntheticMeasureFormat(
@@ -563,6 +693,12 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
   }
   if (o.interactive !== undefined && typeof o.interactive !== "boolean") {
     throw new Error("'interactive' must be a boolean");
+  }
+  if (
+    o.auto_date_hierarchy !== undefined &&
+    typeof o.auto_date_hierarchy !== "boolean"
+  ) {
+    throw new Error("'auto_date_hierarchy' must be a boolean");
   }
   if (
     o.empty_cell_value !== undefined &&
@@ -599,6 +735,10 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     rows,
     columns,
     values,
+    auto_date_hierarchy:
+      typeof o.auto_date_hierarchy === "boolean"
+        ? o.auto_date_hierarchy
+        : AUTO_DATE_HIERARCHY_DEFAULT,
     synthetic_measures: syntheticMeasures,
     aggregation: normalizeAggregationConfig(o.aggregation, values),
     show_totals: showTotals,
@@ -631,13 +771,16 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       if (typeof field !== "string") {
         throw new Error("'date_grains' keys must be strings");
       }
-      if (!DATE_GRAINS.includes(grain as DateGrain)) {
+      if (grain !== null && !DATE_GRAINS.includes(grain as DateGrain)) {
         throw new Error(
-          `'date_grains["${field}"]' must be one of: ${DATE_GRAINS.join(", ")}`,
+          `'date_grains["${field}"]' must be one of: ${DATE_GRAINS.join(", ")}, or null`,
         );
       }
     }
-    result.date_grains = normalizedDateGrains as Record<string, DateGrain>;
+    result.date_grains = normalizedDateGrains as Record<
+      string,
+      DateGrain | null
+    >;
   }
   if (o.filters !== undefined)
     result.filters = o.filters as Record<string, DimensionFilter>;
@@ -687,14 +830,6 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     result.show_values_as = Object.fromEntries(
       Object.entries(sva).filter(([k]) => !syntheticIds.has(k)),
     ) as Record<string, ShowValuesAs>;
-    const hasPeriodMode = Object.values(result.show_values_as).some((mode) =>
-      isPeriodComparisonMode(mode),
-    );
-    if (hasPeriodMode && !hasGroupedComparisonAxis(result)) {
-      throw new Error(
-        "period comparison show_values_as modes require at least one date_grains field on rows or columns",
-      );
-    }
   }
   if (Array.isArray(o.conditional_formatting)) {
     const VALID_CF_TYPES = new Set<string>([
@@ -1020,6 +1155,8 @@ export interface PivotTableData {
   source_row_count?: number;
   /** Python-detected column types (covers drilldown-only and object-dtype temporal columns). */
   original_column_types?: Record<string, ColumnType>;
+  /** Per-field adaptive date grain computed from the source-filtered DataFrame's date range. */
+  adaptive_date_grains?: Record<string, DateGrain>;
 }
 
 // ---------------------------------------------------------------------------

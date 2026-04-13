@@ -75,7 +75,7 @@ def test_invalid_show_values_as_raises(pivot_module, sample_df):
 def test_period_comparison_requires_grouped_temporal_axis(pivot_module, sample_df):
     with pytest.raises(
         ValueError,
-        match="period comparison show_values_as modes require at least one date_grains entry",
+        match="period comparison show_values_as modes require either auto_date_hierarchy=True",
     ):
         pivot_module.st_pivot_table(
             sample_df,
@@ -83,6 +83,7 @@ def test_period_comparison_requires_grouped_temporal_axis(pivot_module, sample_d
             rows=["Region"],
             columns=["Year"],
             values=["Revenue"],
+            auto_date_hierarchy=False,
             show_values_as={"Revenue": "diff_from_prev"},
         )
 

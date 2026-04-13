@@ -72,6 +72,7 @@ const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
         hybrid_agg_remap={data?.hybrid_agg_remap}
         source_row_count={data?.source_row_count}
         original_column_types={data?.original_column_types}
+        adaptive_date_grains={data?.adaptive_date_grains}
         setStateValue={setStateValue}
         setTriggerValue={setTriggerValue}
       />

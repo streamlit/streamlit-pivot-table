@@ -15,6 +15,8 @@
 
 """Python-side mount/payload tests for st_pivot_table()."""
 
+import pandas as pd
+
 
 def test_mount_normalizes_partial_aggregation_map(
     sample_df, pivot_module, mount_recorder
@@ -160,6 +162,45 @@ def test_mount_includes_perf_metrics_state_and_callback(
     mount_kwargs = calls[0]
     assert mount_kwargs["default"]["perf_metrics"] is None
     assert mount_kwargs["on_perf_metrics_change"] is pivot_module._noop_callback
+
+
+def test_mount_defaults_auto_date_hierarchy_on(sample_df, pivot_module, mount_recorder):
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config["auto_date_hierarchy"] is True
+    assert calls[0]["default"]["config"]["auto_date_hierarchy"] is True
+
+
+def test_mount_preserves_explicit_original_date_opt_out(pivot_module, mount_recorder):
+    calls = mount_recorder()
+    df = pd.DataFrame(
+        {
+            "Region": ["East", "East"],
+            "order_date": pd.to_datetime(["2024-01-03", "2024-02-10"]),
+            "Revenue": [100, 150],
+        }
+    )
+
+    pivot_module.st_pivot_table(
+        df,
+        key="pivot",
+        rows=["Region"],
+        columns=["order_date"],
+        values=["Revenue"],
+        date_grains={"order_date": None},
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config["date_grains"] == {"order_date": None}
 
 
 def test_threshold_hybrid_preaggregates_compatible_large_configs(
@@ -498,3 +539,48 @@ def test_non_dimension_filter_causes_client_fallback(pivot_module):
     ok, msg = pivot_module._can_use_threshold_hybrid(cfg)
     assert ok is False
     assert "Category" in msg
+
+
+def test_adaptive_date_grains_in_payload(pivot_module, mount_recorder):
+    """adaptive_date_grains appears in data_payload for temporal columns."""
+    df = pd.DataFrame(
+        {
+            "order_date": pd.to_datetime(["2019-01-01", "2024-06-15"]),
+            "revenue": [100, 200],
+        }
+    )
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        df,
+        key="adg",
+        rows=["order_date"],
+        values=["revenue"],
+    )
+    data = calls[0]["data"]
+    assert "adaptive_date_grains" in data
+    assert data["adaptive_date_grains"]["order_date"] == "year"
+
+
+def test_adaptive_grains_computed_from_source_filtered_data(
+    pivot_module, mount_recorder
+):
+    """adaptive_date_grains reflects source_filters, not raw data."""
+    df = pd.DataFrame(
+        {
+            "order_date": pd.to_datetime(
+                ["2019-01-01", "2020-01-01", "2024-06-01", "2024-06-10"]
+            ),
+            "year_col": [2019, 2020, 2024, 2024],
+            "revenue": [100, 200, 300, 400],
+        }
+    )
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        df,
+        key="adg_sf",
+        rows=["order_date"],
+        values=["revenue"],
+        source_filters={"year_col": {"include": [2024]}},
+    )
+    data = calls[0]["data"]
+    assert data["adaptive_date_grains"]["order_date"] == "day"

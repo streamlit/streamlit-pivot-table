@@ -30,6 +30,7 @@ import {
   isSyntheticMeasure,
   showColumnTotals,
   type CellClickPayload,
+  type DateGrain,
   type DimensionFilter,
   type PivotConfigV1,
   type ShowValuesAs,
@@ -64,6 +65,7 @@ export interface VirtualizedTableRendererProps {
   onConfigChange?: (config: PivotConfigV1) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
+  adaptiveDateGrains?: Record<string, DateGrain>;
   menuLimit?: number;
   /** When true, the wrapper becomes a flex item that fills remaining space. */
   scrollable?: boolean;
@@ -88,6 +90,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   onConfigChange,
   onShowValuesAsChange,
   onCollapseChange,
+  adaptiveDateGrains,
   menuLimit,
   scrollable,
 }): ReactElement => {
@@ -383,6 +386,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     onCellClick,
     onShowValuesAsChange,
     onConfigChange,
+    adaptiveDateGrains,
   });
 
   const totalVirtualRows = groupedRows ? groupedRows.length : allRowKeys.length;
@@ -532,6 +536,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         columnWidthMap,
         headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
         handleResizeDoubleClick,
+        adaptiveDateGrains,
       );
     },
     [
@@ -549,6 +554,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       handleResizeMouseDown,
       handleResizeDoubleClick,
       headerRowOffsets,
+      adaptiveDateGrains,
     ],
   );
 

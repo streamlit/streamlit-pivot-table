@@ -1916,6 +1916,27 @@ describe("PivotData - buildSidecarFingerprint", () => {
     expect(parsed.aggregation).toEqual({ revenue: "median" });
     expect(parsed.rows).toEqual(["region"]);
   });
+
+  it("differs when adaptive_date_grains changes", () => {
+    const cfg = makeConfig();
+    const fp1 = buildSidecarFingerprint(cfg, undefined, { d: "month" });
+    const fp2 = buildSidecarFingerprint(cfg, undefined, { d: "year" });
+    expect(fp1).not.toBe(fp2);
+  });
+
+  it("same adaptive_date_grains produce same fingerprint", () => {
+    const cfg = makeConfig();
+    const fp1 = buildSidecarFingerprint(cfg, undefined, { d: "year" });
+    const fp2 = buildSidecarFingerprint(cfg, undefined, { d: "year" });
+    expect(fp1).toBe(fp2);
+  });
+
+  it("includes adaptive_date_grains key in fingerprint JSON", () => {
+    const cfg = makeConfig();
+    const fp = buildSidecarFingerprint(cfg, undefined, { d: "year" });
+    const parsed = JSON.parse(fp);
+    expect(parsed.adaptive_date_grains).toEqual({ d: "year" });
+  });
 });
 
 describe("PivotData - filter/null-handling fix", () => {

@@ -382,6 +382,36 @@ describe("date-grain period comparisons", () => {
     ).toBeCloseTo(0.5, 6);
   });
 
+  it("auto-detects temporal axes for period comparisons without explicit date_grains", () => {
+    const pd = new PivotData(
+      DATE_SAMPLE,
+      makeConfig({
+        rows: ["region"],
+        columns: ["order_date"],
+        values: ["revenue"],
+        show_values_as: { revenue: "diff_from_prev" },
+      }),
+      {
+        columnTypes: new Map([["order_date", "date"]]),
+      },
+    );
+    expect(pd.getPeriodComparisonAxis()).toEqual({
+      axis: "col",
+      field: "order_date",
+      index: 0,
+      grain: "month",
+    });
+    expect(pd.getColKeys()).toEqual([["2024-01"], ["2024-02"], ["2025-01"]]);
+    expect(
+      pd.getCellComparisonValue(
+        ["US"],
+        ["2024-02"],
+        "revenue",
+        "diff_from_prev",
+      ),
+    ).toBe(50);
+  });
+
   it("supports period comparisons when the grouped temporal axis is on rows", () => {
     const rowAxisData: DataRecord[] = [
       { order_date: "2024-01-03", region: "US", revenue: 100 },

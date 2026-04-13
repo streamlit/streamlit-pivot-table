@@ -57,6 +57,8 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `values` | `list[str] \| None` | `None` | Column names to aggregate as measures. |
 | `synthetic_measures` | `list[dict] \| None` | `None` | Derived measures computed from source-field sums (for example, ratio of sums). See [Synthetic Measures](#synthetic-measures-v1). |
 | `aggregation` | `str \| dict[str, str]` | `"sum"` | Aggregation setting for raw value fields. A single string applies to every raw measure; a dict enables per-measure aggregation. See [Aggregation Functions](#aggregation-functions). |
+| `auto_date_hierarchy` | `bool` | `True` | Auto-group typed date/datetime fields placed on rows or columns. Default grain is adaptive based on the source data's date range (year for >2 years, quarter for >1 year, month for >2 months, day for shorter ranges). |
+| `date_grains` | `dict[str, str \| None] \| None` | `None` | Per-field temporal overrides. Use `"year"`, `"quarter"`, `"month"`, `"week"`, or `"day"`. Use `None` for an explicit `Original` opt-out. |
 | `interactive` | `bool` | `True` | Enable end-user config controls. When `False`, the toolbar is hidden and header-menu sort/filter/show-values-as actions are disabled. |
 
 #### Totals and Subtotals
@@ -240,6 +242,10 @@ Display measures as percentages instead of raw numbers.
 | % of Grand Total | `"pct_of_total"` | Cell / Grand Total |
 | % of Row Total | `"pct_of_row"` | Cell / Row Total |
 | % of Column Total | `"pct_of_col"` | Cell / Column Total |
+| Diff vs Previous Period | `"diff_from_prev"` | Current bucket minus previous bucket on the active temporal hierarchy |
+| % Diff vs Previous Period | `"pct_diff_from_prev"` | Percent change vs previous bucket |
+| Diff vs Previous Year | `"diff_from_prev_year"` | Current bucket minus same bucket in the prior year |
+| % Diff vs Previous Year | `"pct_diff_from_prev_year"` | Percent change vs same bucket in the prior year |
 
 ```python
 st_pivot_table(
@@ -254,6 +260,72 @@ st_pivot_table(
 
 Users can also change this interactively via the value header menu (**&#8942;** icon on a value label header).
 Synthetic measures are always rendered as raw derived values (`show_values_as` does not apply to them).
+Period-comparison modes appear only when there is an active grouped temporal axis, whether that grouping came from auto hierarchy or an explicit `date_grains` override.
+
+### Date Hierarchy and Time Comparisons
+
+Typed `date` and `datetime` fields are treated as hierarchy-capable dimensions when they are placed on `rows` or `columns`.
+
+- **Adaptive default grain**: with `auto_date_hierarchy=True`, temporal axis fields auto-group based on the date range of the source data (after `source_filters`):
+  - **>2 years** → `year`
+  - **>1 year** → `quarter`
+  - **>2 months** → `month`
+  - **≤2 months** → `day`
+- Default drill ladder: `Year -> Quarter -> Month -> Day`.
+- Alternate grouping: `Week` is available from the header menu, but it is not part of the default drill path.
+- Explicit override precedence: explicit `date_grains[field]` beats interactive state, which beats the adaptive auto default.
+- Explicit opt-out: `date_grains[field] = None` preserves the raw/original date values for that field.
+
+```python
+# Adaptive date hierarchy: grain chosen from the data's date range
+st_pivot_table(
+    df,
+    key="date_auto",
+    rows=["region"],
+    columns=["order_date"],
+    values=["Revenue"],
+    show_values_as={"Revenue": "diff_from_prev"},
+)
+
+# Deterministic starting grain from Python
+st_pivot_table(
+    df,
+    key="date_quarter",
+    rows=["region"],
+    columns=["order_date"],
+    values=["Revenue"],
+    date_grains={"order_date": "quarter"},
+    show_values_as={"Revenue": "diff_from_prev_year"},
+)
+
+# Disable auto hierarchy globally
+st_pivot_table(
+    df,
+    key="date_off",
+    rows=["region"],
+    columns=["order_date"],
+    values=["Revenue"],
+    auto_date_hierarchy=False,
+)
+
+# Explicit Original/raw opt-out for one field
+st_pivot_table(
+    df,
+    key="date_original",
+    rows=["region"],
+    columns=["ship_date"],
+    values=["Revenue"],
+    date_grains={"ship_date": None},
+)
+```
+
+Once a temporal field is active on an axis, open its header menu to:
+
+- drill up or down through the default hierarchy,
+- switch directly to `Week`,
+- choose `Original` to persist a raw-date opt-out for that field.
+
+Grouped buckets export as grouped labels such as `Jan 2024`, `Q1 2024`, or `2024-W03`; they are intentionally not exported as fake raw Excel dates.
 
 ### Number Format Patterns
 

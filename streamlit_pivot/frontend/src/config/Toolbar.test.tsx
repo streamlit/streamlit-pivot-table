@@ -422,6 +422,48 @@ describe("Toolbar - interactions", () => {
         .synthetic_measures,
     ).toEqual([]);
   });
+
+  it("preserves explicit date_grains overrides when removing and re-adding a field", () => {
+    const handleChange = vi.fn();
+    const allColumns = [...ALL_COLUMNS, "order_date"];
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      date_grains: { order_date: "quarter" },
+    });
+    const { rerender } = render(
+      <Toolbar
+        config={config}
+        allColumns={allColumns}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={handleChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-columns-remove-order_date"));
+    const removedConfig = handleChange.mock.calls[0][0];
+    expect(removedConfig.columns).toEqual([]);
+    expect(removedConfig.date_grains).toEqual({ order_date: "quarter" });
+
+    rerender(
+      <Toolbar
+        config={removedConfig}
+        allColumns={allColumns}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={handleChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-columns-select"));
+    const checkbox = screen
+      .getByTestId("toolbar-columns-option-order_date")
+      .querySelector("input")!;
+    fireEvent.click(checkbox);
+
+    const readdedConfig = handleChange.mock.calls[1][0];
+    expect(readdedConfig.columns).toEqual(["order_date"]);
+    expect(readdedConfig.date_grains).toEqual({ order_date: "quarter" });
+  });
 });
 
 describe("Toolbar - reset", () => {
@@ -705,6 +747,42 @@ describe("Toolbar - config import/export", () => {
     fireEvent.click(screen.getByTestId("toolbar-import-apply"));
     expect(screen.getByTestId("toolbar-import-error")).toHaveTextContent(
       "version must be 1",
+    );
+  });
+
+  it("shows error for period comparisons on non-temporal imported configs", () => {
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        columnTypes={
+          new Map([
+            ["region", "string"],
+            ["year", "integer"],
+            ["revenue", "float"],
+            ["profit", "float"],
+            ["category", "string"],
+          ])
+        }
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-import-toggle"));
+    fireEvent.change(screen.getByTestId("toolbar-import-textarea"), {
+      target: {
+        value: JSON.stringify(
+          makeConfig({
+            rows: ["region"],
+            columns: ["year"],
+            show_values_as: { revenue: "diff_from_prev" },
+          }),
+        ),
+      },
+    });
+    fireEvent.click(screen.getByTestId("toolbar-import-apply"));
+    expect(screen.getByTestId("toolbar-import-error")).toHaveTextContent(
+      "period comparison show_values_as modes require a grouped date/datetime field on rows or columns",
     );
   });
 });

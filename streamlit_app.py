@@ -19,6 +19,8 @@ Community Cloud entry point. Also runnable locally:
     streamlit run streamlit_app.py
 """
 
+import datetime as _dt
+import random as _rnd
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +39,31 @@ st.caption(
 _DATA_DIR = Path(__file__).parent / "tests" / "golden_data"
 df = pd.read_csv(_DATA_DIR / "small.csv")
 df_medium = pd.read_csv(_DATA_DIR / "medium.csv")
+
+_rnd.seed(42)
+_date_regions = ["US", "EU", "APAC"]
+_date_base = {
+    "US": [120, 110, 135, 150, 160, 175, 190, 185, 170, 155, 140, 130],
+    "EU": [90, 85, 100, 115, 125, 140, 150, 145, 130, 120, 105, 95],
+    "APAC": [70, 65, 80, 95, 105, 120, 130, 125, 110, 100, 85, 75],
+}
+_date_records = []
+for year in [2023, 2024]:
+    for month_idx in range(12):
+        for region in _date_regions:
+            base = _date_base[region][month_idx]
+            growth = 1.08 if year == 2024 else 1.0
+            rev = int(base * growth + _rnd.randint(-10, 10))
+            d = _dt.date(year, month_idx + 1, 1)
+            _date_records.append(
+                {
+                    "region": region,
+                    "order_date": d,
+                    "ship_date": d + _dt.timedelta(days=3),
+                    "Revenue": rev,
+                }
+            )
+df_dates = pd.DataFrame(_date_records)
 
 # ---------------------------------------------------------------------------
 # Section 1: Getting Started — Basic Pivot
@@ -1413,6 +1440,178 @@ st_pivot_table(
 )
 # Click the expand icon in the toolbar to go fullscreen.
 # Press Escape to exit.
+""",
+        language="python",
+    )
+
+# ---------------------------------------------------------------------------
+# Section 18: Date Hierarchy and Time Comparisons
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("18. Date Hierarchy and Time Comparisons")
+
+st.markdown(
+    """
+Typed date and datetime fields now auto-behave like BI-style time hierarchies.
+When a temporal field is placed on rows or columns, the pivot **adapts the
+default grouping grain** to the date range in the source data:
+
+| Date Span | Default Grain |
+|---|---|
+| >2 years | Year |
+| >1 year | Quarter |
+| >2 months | Month |
+| ≤2 months | Day |
+
+This means a 5-year dataset starts at Year, while a 2-month dataset starts at
+Day — no configuration needed.  The default is still overridable via
+`date_grains` or the interactive header menu.
+
+Drill controls expose **Year → Quarter → Month → Day**, and **Week** is
+available as an alternate grouping. Period-over-period display modes
+(previous-period, previous-year) are unlocked automatically.
+
+**Try it:**
+- In the first table, notice the adaptive default grain based on the data range.
+- Open the `order_date` header menu to drill up/down, switch to Week, or choose Original.
+- Open the `Revenue` value header menu to switch between raw values and period comparisons.
+- Compare the other tables for explicit override, global opt-out, and per-field opt-out.
+
+**API parameters used:** `auto_date_hierarchy`, `date_grains`, `show_values_as`
+"""
+)
+
+_short_records = []
+for day in range(1, 15):
+    for region in ["US", "EU"]:
+        base = 80 if region == "EU" else 120
+        _short_records.append(
+            {
+                "region": region,
+                "order_date": _dt.date(2024, 3, day),
+                "Revenue": base + _rnd.randint(-15, 25),
+            }
+        )
+df_dates_short = pd.DataFrame(_short_records)
+
+date_col_1, date_col_2 = st.columns(2)
+
+with date_col_1:
+    st.caption("2-year span → adaptive default: Quarter")
+    st_pivot_table(
+        df_dates,
+        key="date_hierarchy_auto",
+        rows=["region"],
+        columns=["order_date"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+    )
+
+with date_col_2:
+    st.caption("2-week span → adaptive default: Day")
+    st_pivot_table(
+        df_dates_short,
+        key="date_hierarchy_adaptive_day",
+        rows=["region"],
+        columns=["order_date"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+    )
+
+date_col_3, date_col_4 = st.columns(2)
+
+with date_col_3:
+    st.caption("Explicit override: Month + MoM comparison")
+    st_pivot_table(
+        df_dates,
+        key="date_hierarchy_quarter",
+        rows=["region"],
+        columns=["order_date"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+        date_grains={"order_date": "month"},
+        show_values_as={"Revenue": "diff_from_prev"},
+    )
+
+with date_col_4:
+    st.caption("Global auto hierarchy off")
+    st_pivot_table(
+        df_dates,
+        key="date_hierarchy_auto_off",
+        rows=["region"],
+        columns=["ship_date"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+        auto_date_hierarchy=False,
+    )
+
+date_col_5, _ = st.columns(2)
+
+with date_col_5:
+    st.caption("Per-field Original opt-out")
+    st_pivot_table(
+        df_dates,
+        key="date_hierarchy_original",
+        rows=["region"],
+        columns=["ship_date"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+        date_grains={"ship_date": None},
+    )
+
+with st.expander("View Code"):
+    st.code(
+        """
+# Adaptive default: 2-year span → Quarter
+st_pivot_table(
+    df_dates,  # spans 2023-2024
+    key="date_hierarchy_auto",
+    rows=["region"],
+    columns=["order_date"],
+    values=["Revenue"],
+)
+
+# Adaptive default: 2-week span → Day
+st_pivot_table(
+    df_dates_short,  # spans Mar 1-14
+    key="date_hierarchy_adaptive_day",
+    rows=["region"],
+    columns=["order_date"],
+    values=["Revenue"],
+)
+
+# Explicit override: month grain + month-over-month comparison
+st_pivot_table(
+    df_dates,
+    rows=["region"],
+    columns=["order_date"],
+    values=["Revenue"],
+    date_grains={"order_date": "month"},
+    show_values_as={"Revenue": "diff_from_prev"},
+)
+
+st_pivot_table(
+    df_dates,
+    key="date_hierarchy_auto_off",
+    rows=["region"],
+    columns=["ship_date"],
+    values=["Revenue"],
+    auto_date_hierarchy=False,
+)
+
+st_pivot_table(
+    df_dates,
+    key="date_hierarchy_original",
+    rows=["region"],
+    columns=["ship_date"],
+    values=["Revenue"],
+    date_grains={"ship_date": None},
+)
 """,
         language="python",
     )

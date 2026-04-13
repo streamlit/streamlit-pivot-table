@@ -30,13 +30,18 @@ import {
   type CellClickPayload,
   type ColumnType,
   type ColumnTypeMap,
+  type DateGrain,
   type DimensionFilter,
   DEFAULT_CONFIG,
+  getEffectiveDateGrain,
+  getExplicitDateGrain,
   getRenderedValueFields,
+  isPeriodComparisonMode,
   isSyntheticMeasure,
   type PivotPerfMetrics,
   stringifyPivotConfig,
   validatePivotConfigV1,
+  validatePivotConfigRuntime,
   type PivotConfigV1,
   type PivotTableData,
   type ShowValuesAs,
@@ -104,6 +109,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   hybrid_agg_remap,
   source_row_count,
   original_column_types,
+  adaptive_date_grains,
   setStateValue,
   setTriggerValue,
 }): ReactElement => {
@@ -132,21 +138,13 @@ const PivotRoot: FC<PivotRootProps> = ({
     }
   }
 
-  const currentConfig = localConfig ?? normalizedPropConfig;
+  const rawCurrentConfig = localConfig ?? normalizedPropConfig;
   const [isTableScrollable, setIsTableScrollable] = useState(false);
   const [drilldownPayload, setDrilldownPayload] =
     useState<CellClickPayload | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [windowHeight, setWindowHeight] = useState(
     typeof window !== "undefined" ? window.innerHeight : 800,
-  );
-
-  const initialConfigRef = useRef<PivotConfigV1>(currentConfig);
-  const initialConfig = initialConfigRef.current;
-
-  const currentConfigJson = useMemo(
-    () => stringifyPivotConfig(currentConfig),
-    [currentConfig],
   );
 
   const { pivotInput, parseMs } = useMemo(() => {
@@ -227,6 +225,128 @@ const PivotRoot: FC<PivotRootProps> = ({
     return result;
   }, [pivotInput, original_column_types]);
 
+  const typedAdaptiveGrains = adaptive_date_grains as
+    | Record<string, DateGrain>
+    | undefined;
+
+  const currentConfig = useMemo(
+    () =>
+      validatePivotConfigRuntime(
+        rawCurrentConfig,
+        mergedColumnTypes,
+        typedAdaptiveGrains,
+      ),
+    [rawCurrentConfig, mergedColumnTypes, typedAdaptiveGrains],
+  );
+
+  const initialConfigRef = useRef<PivotConfigV1>(currentConfig);
+  const initialConfig = initialConfigRef.current;
+
+  // Invalidate key-derived state when adaptive grains shift between renders.
+  // Runs as an effect (not during render) to avoid duplicate state writes and
+  // render-loop issues in Strict Mode / concurrent rendering.
+  const prevAdaptiveGrainsRef = useRef(typedAdaptiveGrains);
+  useEffect(() => {
+    const prev = prevAdaptiveGrainsRef.current;
+    if (typedAdaptiveGrains === prev) return;
+    prevAdaptiveGrainsRef.current = typedAdaptiveGrains;
+
+    const cfg = rawCurrentConfig;
+    const affectedRows: string[] = [];
+    const affectedCols: string[] = [];
+    for (const field of [...cfg.rows, ...cfg.columns]) {
+      const explicit = getExplicitDateGrain(cfg, field);
+      if (explicit !== undefined) continue;
+      const colType = mergedColumnTypes.get(field);
+      const prevGrain = getEffectiveDateGrain(
+        cfg,
+        field,
+        colType,
+        prev?.[field],
+      );
+      const nextGrain = getEffectiveDateGrain(
+        cfg,
+        field,
+        colType,
+        typedAdaptiveGrains?.[field],
+      );
+      if (prevGrain !== nextGrain) {
+        if (cfg.rows.includes(field)) affectedRows.push(field);
+        if (cfg.columns.includes(field)) affectedCols.push(field);
+      }
+    }
+
+    if (affectedRows.length > 0 || affectedCols.length > 0) {
+      const allAffected = new Set([...affectedRows, ...affectedCols]);
+      const nextFilters = cfg.filters
+        ? Object.fromEntries(
+            Object.entries(cfg.filters).filter(([f]) => !allAffected.has(f)),
+          )
+        : undefined;
+
+      // Only strip period-comparison show_values_as modes when the field
+      // that serves as the period comparison axis is itself affected.
+      // The comparison axis is the first grouped temporal field on columns,
+      // falling back to the first grouped temporal field on rows.
+      let comparisonAxisAffected = false;
+      const compField =
+        cfg.columns.find(
+          (f) =>
+            (mergedColumnTypes.get(f) === "date" ||
+              mergedColumnTypes.get(f) === "datetime") &&
+            getEffectiveDateGrain(
+              cfg,
+              f,
+              mergedColumnTypes.get(f),
+              typedAdaptiveGrains?.[f],
+            ),
+        ) ??
+        cfg.rows.find(
+          (f) =>
+            (mergedColumnTypes.get(f) === "date" ||
+              mergedColumnTypes.get(f) === "datetime") &&
+            getEffectiveDateGrain(
+              cfg,
+              f,
+              mergedColumnTypes.get(f),
+              typedAdaptiveGrains?.[f],
+            ),
+        );
+      if (compField && allAffected.has(compField)) {
+        comparisonAxisAffected = true;
+      }
+      const nextSVA =
+        comparisonAxisAffected && cfg.show_values_as
+          ? Object.fromEntries(
+              Object.entries(cfg.show_values_as).filter(
+                ([, mode]) => !isPeriodComparisonMode(mode),
+              ),
+            )
+          : cfg.show_values_as;
+
+      const patched: PivotConfigV1 = {
+        ...cfg,
+        filters:
+          nextFilters && Object.keys(nextFilters).length > 0
+            ? nextFilters
+            : undefined,
+        show_values_as:
+          nextSVA && Object.keys(nextSVA).length > 0 ? nextSVA : undefined,
+        collapsed_groups:
+          affectedRows.length > 0 ? undefined : cfg.collapsed_groups,
+        collapsed_col_groups:
+          affectedCols.length > 0 ? undefined : cfg.collapsed_col_groups,
+      };
+      setLocalConfig(patched);
+      setStateValue("config", patched);
+    }
+  }, [typedAdaptiveGrains, rawCurrentConfig, mergedColumnTypes, setStateValue]);
+
+  const currentConfigJson = useMemo(
+    () => stringifyPivotConfig(currentConfig),
+    [currentConfig],
+  );
+
   const pivotOptions: PivotDataOptions = useMemo(
     () => ({
       nullHandling: null_handling,
@@ -234,6 +354,7 @@ const PivotRoot: FC<PivotRootProps> = ({
       hybridTotals: hybrid_totals,
       hybridAggRemap: hybrid_agg_remap,
       columnTypes: mergedColumnTypes,
+      adaptiveDateGrains: typedAdaptiveGrains,
     }),
     [
       null_handling,
@@ -241,6 +362,7 @@ const PivotRoot: FC<PivotRootProps> = ({
       hybrid_totals,
       hybrid_agg_remap,
       mergedColumnTypes,
+      typedAdaptiveGrains,
     ],
   );
 
@@ -617,6 +739,8 @@ const PivotRoot: FC<PivotRootProps> = ({
             allColumns={allColumns}
             numericColumns={numericColumns}
             syntheticSourceColumns={syntheticSourceColumns}
+            columnTypes={mergedColumnTypes}
+            adaptiveDateGrains={typedAdaptiveGrains}
             onConfigChange={!locked ? handleConfigChange : undefined}
             initialConfig={initialConfig}
             locked={locked}
@@ -650,6 +774,7 @@ const PivotRoot: FC<PivotRootProps> = ({
               <VirtualizedTableRenderer
                 pivotData={pivotData}
                 config={currentConfig}
+                adaptiveDateGrains={typedAdaptiveGrains}
                 onCellClick={handleCellClick}
                 maxColumns={
                   budget.columnsTruncated
@@ -685,6 +810,7 @@ const PivotRoot: FC<PivotRootProps> = ({
               <TableRenderer
                 pivotData={pivotData}
                 config={currentConfig}
+                adaptiveDateGrains={typedAdaptiveGrains}
                 onCellClick={handleCellClick}
                 maxColumns={
                   budget?.columnsTruncated

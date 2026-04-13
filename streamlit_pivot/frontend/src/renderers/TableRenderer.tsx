@@ -48,6 +48,7 @@ import {
   showSubtotalForDim,
   showTotalForMeasure,
   type CellClickPayload,
+  type DateGrain,
   type DimensionFilter,
   type PivotConfigV1,
   type ShowValuesAs,
@@ -222,6 +223,7 @@ export interface TableRendererProps {
   onConfigChange?: (config: PivotConfigV1) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
+  adaptiveDateGrains?: Record<string, DateGrain>;
   menuLimit?: number;
   /** When true, the wrapper becomes a flex item that fills remaining space
    *  in a flex-column parent, enabling a single internal scrollbar. */
@@ -536,6 +538,7 @@ export function renderColumnHeaders(
     colSlotIndex: number,
     e: React.MouseEvent<HTMLDivElement>,
   ) => void,
+  adaptiveDateGrains?: Record<string, DateGrain>,
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
   const visibleSlots = colRange
@@ -757,7 +760,7 @@ export function renderColumnHeaders(
                       }
                     },
                     "aria-expanded": !rowDimCollapsed,
-                    "aria-label": `${rowDimCollapsed ? "Expand" : "Collapse"} all ${getDimensionLabel(config, dim)} groups`,
+                    "aria-label": `${rowDimCollapsed ? "Expand" : "Collapse"} all ${getDimensionLabel(config, dim, pivotData?.getColumnType(dim), adaptiveDateGrains?.[dim])} groups`,
                   }
                 : {})}
             >
@@ -766,7 +769,12 @@ export function renderColumnHeaders(
                   <DimToggleIcon collapsed={rowDimCollapsed} />
                 )}
                 <span className={isFiltered ? styles.headerFiltered : ""}>
-                  {getDimensionLabel(config, dim)}
+                  {getDimensionLabel(
+                    config,
+                    dim,
+                    pivotData?.getColumnType(dim),
+                    adaptiveDateGrains?.[dim],
+                  )}
                 </span>
                 {rowSortDir && <SortArrowIcon direction={rowSortDir} />}
                 {hasMenu && (
@@ -1983,6 +1991,7 @@ const TableRenderer: FC<TableRendererProps> = ({
   onConfigChange,
   onShowValuesAsChange,
   onCollapseChange,
+  adaptiveDateGrains,
   menuLimit,
   scrollable,
   maxHeight,
@@ -2333,6 +2342,7 @@ const TableRenderer: FC<TableRendererProps> = ({
     onCellClick,
     onShowValuesAsChange,
     onConfigChange,
+    adaptiveDateGrains,
   });
 
   const rowKeys = flatRowKeys ?? allRowKeys;
@@ -2477,6 +2487,7 @@ const TableRenderer: FC<TableRendererProps> = ({
               columnWidthMap,
               headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
               handleResizeDoubleClick,
+              adaptiveDateGrains,
             )}
           </thead>
           <tbody>

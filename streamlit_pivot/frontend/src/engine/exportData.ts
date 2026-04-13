@@ -18,11 +18,13 @@
 import type { PivotData } from "./PivotData";
 import type {
   ColumnTypeMap,
+  DateGrain,
   PivotConfigV1,
   ShowValuesAs,
   ConditionalFormatRule,
 } from "./types";
 import {
+  getEffectiveDateGrain,
   getDimensionLabel,
   getPeriodComparisonMode,
   getRenderedValueFields,
@@ -372,6 +374,7 @@ export function buildExportIR(
   pivotData: PivotData,
   config: PivotConfigV1,
   mode: ExportContent,
+  adaptiveDateGrains?: Record<string, DateGrain>,
 ): ExportGrid {
   const columnTypes: ColumnTypeMap | undefined = pivotData.getColumnTypes();
   const rowKeys = pivotData.getRowKeys();
@@ -393,7 +396,17 @@ export function buildExportIR(
     const row: ExportCell[] = [];
     if (level === 0) {
       for (let d = 0; d < rowDims.length; d++) {
-        row.push(cell(getDimensionLabel(config, rowDims[d]!), "header"));
+        row.push(
+          cell(
+            getDimensionLabel(
+              config,
+              rowDims[d]!,
+              columnTypes?.get(rowDims[d]!),
+              adaptiveDateGrains?.[rowDims[d]!],
+            ),
+            "header",
+          ),
+        );
       }
       if (rowDims.length === 0) row.push(cell("", "header"));
     } else {
@@ -454,7 +467,17 @@ export function buildExportIR(
   if (colDims.length === 0) {
     const row: ExportCell[] = [];
     for (let d = 0; d < rowDims.length; d++) {
-      row.push(cell(getDimensionLabel(config, rowDims[d]!), "header"));
+      row.push(
+        cell(
+          getDimensionLabel(
+            config,
+            rowDims[d]!,
+            columnTypes?.get(rowDims[d]!),
+            adaptiveDateGrains?.[rowDims[d]!],
+          ),
+          "header",
+        ),
+      );
     }
     if (hasMultipleValues) {
       for (const val of values) {
@@ -580,7 +603,12 @@ export function buildExportIR(
         const display = dimKey ? pivotData.formatDimLabel(dimName, dimKey) : "";
         const colType = columnTypes?.get(dimName);
         if (colType === "datetime" || colType === "date") {
-          const grain = config.date_grains?.[dimName];
+          const grain = getEffectiveDateGrain(
+            config,
+            dimName,
+            colType,
+            adaptiveDateGrains?.[dimName],
+          );
           const rawVal = pivotData.getRawDimValue(dimName, dimKey);
           const exportDate =
             !grain && rawVal !== undefined ? toExportDate(rawVal) : null;
@@ -785,8 +813,9 @@ export function buildExportGrid(
   pivotData: PivotData,
   config: PivotConfigV1,
   mode: ExportContent,
+  adaptiveDateGrains?: Record<string, DateGrain>,
 ): string[][] {
-  const ir = buildExportIR(pivotData, config, mode);
+  const ir = buildExportIR(pivotData, config, mode, adaptiveDateGrains);
   return ir.cells.map((row) => row.map((c) => c.display));
 }
 
@@ -868,18 +897,29 @@ export async function exportPivotData(
   config: PivotConfigV1,
   options: ExportOptions,
   baseFilename?: string,
+  adaptiveDateGrains?: Record<string, DateGrain>,
 ): Promise<boolean> {
   const now = new Date();
   const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const name = `${baseFilename || "pivot-table"}_${ts}`;
 
   if (options.format === "xlsx") {
-    const ir = buildExportIR(pivotData, config, options.content);
+    const ir = buildExportIR(
+      pivotData,
+      config,
+      options.content,
+      adaptiveDateGrains,
+    );
     const { exportExcel } = await import("./exportExcel");
     return exportExcel(ir, name);
   }
 
-  const grid = buildExportGrid(pivotData, config, options.content);
+  const grid = buildExportGrid(
+    pivotData,
+    config,
+    options.content,
+    adaptiveDateGrains,
+  );
 
   switch (options.format) {
     case "csv": {

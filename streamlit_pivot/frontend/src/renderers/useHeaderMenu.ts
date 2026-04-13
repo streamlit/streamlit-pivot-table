@@ -26,9 +26,12 @@ import type {
   SortConfig,
 } from "../engine/types";
 import {
-  DATE_GRAINS,
+  getDrilledDateGrain,
+  getEffectiveDateGrain,
   getDimensionLabel,
+  isPeriodComparisonMode,
   normalizeToggleList,
+  validatePivotConfigRuntime,
 } from "../engine/types";
 import {
   buildCellClickPayload,
@@ -49,6 +52,7 @@ export interface UseHeaderMenuOptions {
   onCellClick?: (payload: CellClickPayload) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
   onConfigChange?: (config: PivotConfigV1) => void;
+  adaptiveDateGrains?: Record<string, DateGrain>;
 }
 
 export interface UseHeaderMenuResult {
@@ -105,6 +109,7 @@ export function useHeaderMenu({
   onCellClick,
   onShowValuesAsChange,
   onConfigChange,
+  adaptiveDateGrains,
 }: UseHeaderMenuOptions): UseHeaderMenuResult {
   const [menuTarget, setMenuTarget] = useState<HeaderMenuTarget | null>(null);
   const menuTargetRef = useRef<HeaderMenuTarget | null>(null);
@@ -251,41 +256,109 @@ export function useHeaderMenu({
       : undefined;
 
   const menuTitle = menuTarget
-    ? getDimensionLabel(config, menuTarget.dimension)
+    ? getDimensionLabel(
+        config,
+        menuTarget.dimension,
+        pivotData.getColumnType(menuTarget.dimension),
+        adaptiveDateGrains?.[menuTarget.dimension],
+      )
     : undefined;
 
   const menuDateGrain =
     menuTarget && menuTarget.axis !== "value"
-      ? config.date_grains?.[menuTarget.dimension]
+      ? getEffectiveDateGrain(
+          config,
+          menuTarget.dimension,
+          pivotData.getColumnType(menuTarget.dimension),
+          adaptiveDateGrains?.[menuTarget.dimension],
+        )
       : undefined;
 
   const handleDateGrainChange = useCallback(
     (grain: DateGrain | undefined) => {
       const target = menuTargetRef.current;
       if (!target || !onConfigChange || target.axis === "value") return;
+      const currentEffective = getEffectiveDateGrain(
+        config,
+        target.dimension,
+        pivotData.getColumnType(target.dimension),
+        adaptiveDateGrains?.[target.dimension],
+      );
       const next = { ...(config.date_grains ?? {}) };
       if (grain) next[target.dimension] = grain;
-      else delete next[target.dimension];
-      onConfigChange({
+      else next[target.dimension] = null;
+      const nextConfig: PivotConfigV1 = {
         ...config,
         date_grains: Object.keys(next).length > 0 ? next : undefined,
+      };
+      let sanitizedShowValuesAs = nextConfig.show_values_as;
+      try {
+        validatePivotConfigRuntime(
+          nextConfig,
+          pivotData.getColumnTypes(),
+          adaptiveDateGrains,
+        );
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes("period comparison show_values_as")
+        ) {
+          const filtered = Object.fromEntries(
+            Object.entries(nextConfig.show_values_as ?? {}).filter(
+              ([, mode]) => !isPeriodComparisonMode(mode),
+            ),
+          );
+          sanitizedShowValuesAs =
+            Object.keys(filtered).length > 0 ? filtered : undefined;
+        } else {
+          throw error;
+        }
+      }
+      const nextEffective = getEffectiveDateGrain(
+        nextConfig,
+        target.dimension,
+        pivotData.getColumnType(target.dimension),
+        adaptiveDateGrains?.[target.dimension],
+      );
+      onConfigChange({
+        ...nextConfig,
+        show_values_as: sanitizedShowValuesAs,
+        filters:
+          currentEffective !== nextEffective
+            ? Object.fromEntries(
+                Object.entries(nextConfig.filters ?? {}).filter(
+                  ([field]) => field !== target.dimension,
+                ),
+              )
+            : nextConfig.filters,
+        collapsed_groups:
+          currentEffective !== nextEffective
+            ? undefined
+            : nextConfig.collapsed_groups,
+        collapsed_col_groups:
+          currentEffective !== nextEffective
+            ? undefined
+            : nextConfig.collapsed_col_groups,
       });
     },
-    [config, onConfigChange],
+    [config, onConfigChange, pivotData, adaptiveDateGrains],
   );
 
   const handleDateDrill = useCallback(
     (direction: "up" | "down") => {
       const target = menuTargetRef.current;
       if (!target || target.axis === "value") return;
-      const current = config.date_grains?.[target.dimension];
-      if (!current) return;
-      const idx = DATE_GRAINS.indexOf(current);
-      const nextIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (nextIdx < 0 || nextIdx >= DATE_GRAINS.length) return;
-      handleDateGrainChange(DATE_GRAINS[nextIdx]);
+      const current = getEffectiveDateGrain(
+        config,
+        target.dimension,
+        pivotData.getColumnType(target.dimension),
+        adaptiveDateGrains?.[target.dimension],
+      );
+      const next = getDrilledDateGrain(current, direction);
+      if (!next) return;
+      handleDateGrainChange(next);
     },
-    [config.date_grains, handleDateGrainChange],
+    [config, handleDateGrainChange, pivotData, adaptiveDateGrains],
   );
 
   const comparisonAxis = pivotData.getPeriodComparisonAxis();

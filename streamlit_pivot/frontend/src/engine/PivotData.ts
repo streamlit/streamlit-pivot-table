@@ -26,6 +26,8 @@ import {
   type ColumnarDataSource,
   type ColumnType,
   type ColumnTypeMap,
+  type DateGrain,
+  getEffectiveDateGrain,
   getAggregationForField,
   type DimensionFilter,
   type HybridTotals,
@@ -49,7 +51,6 @@ import {
   isTemporalColumnType,
   shiftTemporalBucketKey,
 } from "./dateGrouping";
-import type { DateGrain } from "./types";
 
 export type DataRecord = Record<string, unknown>;
 
@@ -68,6 +69,7 @@ export interface PivotDataOptions {
   hybridTotals?: HybridTotals;
   hybridAggRemap?: Record<string, AggregationType>;
   columnTypes?: ColumnTypeMap;
+  adaptiveDateGrains?: Record<string, DateGrain>;
 }
 
 export function makeKeyString(parts: string[]): string {
@@ -104,13 +106,22 @@ function normalizeShowSubtotals(
 export function buildSidecarFingerprint(
   config: PivotConfigV1,
   nullHandling: NullHandlingConfig | undefined,
+  adaptiveDateGrains?: Record<string, DateGrain>,
 ): string {
   const agg = config.aggregation ?? {};
   const filters = config.filters ?? {};
   const obj = {
+    adaptive_date_grains: adaptiveDateGrains
+      ? Object.fromEntries(
+          Object.entries(adaptiveDateGrains).sort(([a], [b]) =>
+            a.localeCompare(b),
+          ),
+        )
+      : {},
     aggregation: Object.fromEntries(
       Object.entries(agg).sort(([a], [b]) => a.localeCompare(b)),
     ),
+    auto_date_hierarchy: config.auto_date_hierarchy !== false,
     columns: config.columns,
     date_grains: config.date_grains
       ? Object.fromEntries(
@@ -266,7 +277,11 @@ export class PivotData {
 
     const hybridTotals = options?.hybridTotals;
     if (hybridTotals) {
-      const localFp = buildSidecarFingerprint(config, options?.nullHandling);
+      const localFp = buildSidecarFingerprint(
+        config,
+        options?.nullHandling,
+        options?.adaptiveDateGrains,
+      );
       if (localFp === hybridTotals.sidecar_fingerprint) {
         this._hybridGrand = new Map(Object.entries(hybridTotals.grand));
 
@@ -384,7 +399,12 @@ export class PivotData {
   // ---------------------------------------------------------------------------
 
   private _dateGrainForField(field: string): DateGrain | undefined {
-    return this._config.date_grains?.[field];
+    return getEffectiveDateGrain(
+      this._config,
+      field,
+      this._columnTypes?.get(field),
+      this._options.adaptiveDateGrains?.[field],
+    );
   }
 
   private _compareDimKeys(_field: string, a: string, b: string): number {

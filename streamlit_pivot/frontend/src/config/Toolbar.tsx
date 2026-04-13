@@ -57,6 +57,8 @@ import {
   stringifyPivotConfig,
   type AggregationConfig,
   type AggregationType,
+  type ColumnTypeMap,
+  type DateGrain,
   type DimensionFilter,
   type PivotConfigV1,
   type ShowValuesAs,
@@ -64,6 +66,7 @@ import {
   type SyntheticMeasureConfig,
   showRowTotals as resolveShowRowTotals,
   showColumnTotals as resolveShowColumnTotals,
+  validatePivotConfigRuntime,
   validatePivotConfigV1,
 } from "../engine/types";
 import {
@@ -86,6 +89,8 @@ export interface ToolbarProps {
   numericColumns: string[];
   /** Numeric columns allowed as synthetic source fields (can include hidden-from-aggregators). */
   syntheticSourceColumns?: string[];
+  columnTypes?: ColumnTypeMap;
+  adaptiveDateGrains?: Record<string, DateGrain>;
   onConfigChange?: (config: PivotConfigV1) => void;
   /** Original config from Python for reset. If omitted, reset is hidden. */
   initialConfig?: PivotConfigV1;
@@ -299,6 +304,8 @@ const Toolbar: FC<ToolbarProps> = ({
   allColumns,
   numericColumns,
   syntheticSourceColumns,
+  columnTypes,
+  adaptiveDateGrains,
   onConfigChange,
   initialConfig,
   locked,
@@ -644,7 +651,14 @@ const Toolbar: FC<ToolbarProps> = ({
           isDropHighlighted={activeOverZone === "rows"}
           activeId={activeId}
           registerCloseDropdown={dropdownCloseRef}
-          displayLabelForField={(field) => getDimensionLabel(config, field)}
+          displayLabelForField={(field) =>
+            getDimensionLabel(
+              config,
+              field,
+              columnTypes?.get(field),
+              adaptiveDateGrains?.[field],
+            )
+          }
         />
         <DropdownMultiSelect
           label="Columns"
@@ -661,7 +675,14 @@ const Toolbar: FC<ToolbarProps> = ({
           isDropHighlighted={activeOverZone === "columns"}
           activeId={activeId}
           registerCloseDropdown={dropdownCloseRef}
-          displayLabelForField={(field) => getDimensionLabel(config, field)}
+          displayLabelForField={(field) =>
+            getDimensionLabel(
+              config,
+              field,
+              columnTypes?.get(field),
+              adaptiveDateGrains?.[field],
+            )
+          }
         />
         <DropdownMultiSelect
           label="Values"
@@ -690,7 +711,12 @@ const Toolbar: FC<ToolbarProps> = ({
               field={activeField.field}
               displayLabel={
                 activeField.zone === "rows" || activeField.zone === "columns"
-                  ? getDimensionLabel(config, activeField.field)
+                  ? getDimensionLabel(
+                      config,
+                      activeField.field,
+                      columnTypes?.get(activeField.field),
+                      adaptiveDateGrains?.[activeField.field],
+                    )
                   : undefined
               }
               testId={`toolbar-${activeField.zone}`}
@@ -783,13 +809,18 @@ const Toolbar: FC<ToolbarProps> = ({
           </span>
         )}
         {!locked && onConfigChange && (
-          <ConfigIOControls config={config} onConfigChange={onConfigChange} />
+          <ConfigIOControls
+            config={config}
+            columnTypes={columnTypes}
+            onConfigChange={onConfigChange}
+          />
         )}
         {pivotData && (
           <ExportDataControls
             pivotData={pivotData}
             config={config}
             exportFilename={exportFilename}
+            adaptiveDateGrains={adaptiveDateGrains}
           />
         )}
         {onToggleFullscreen && (
@@ -1666,11 +1697,13 @@ const GearIcon: FC = () => (
 
 interface ConfigIOControlsProps {
   config: PivotConfigV1;
+  columnTypes?: ColumnTypeMap;
   onConfigChange: (config: PivotConfigV1) => void;
 }
 
 const ConfigIOControls: FC<ConfigIOControlsProps> = ({
   config,
+  columnTypes,
   onConfigChange,
 }): ReactElement => {
   const [importing, setImporting] = useState(false);
@@ -1733,7 +1766,7 @@ const ConfigIOControls: FC<ConfigIOControlsProps> = ({
     try {
       const parsed = JSON.parse(importText);
       const validated = validatePivotConfigV1(parsed);
-      onConfigChange(validated);
+      onConfigChange(validatePivotConfigRuntime(validated, columnTypes));
       setImporting(false);
       setImportText("");
       setImportError(null);
@@ -1741,7 +1774,7 @@ const ConfigIOControls: FC<ConfigIOControlsProps> = ({
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Invalid JSON");
     }
-  }, [importText, onConfigChange]);
+  }, [columnTypes, importText, onConfigChange]);
 
   return (
     <>
@@ -1935,6 +1968,7 @@ interface ExportDataControlsProps {
   pivotData: PivotData;
   config: PivotConfigV1;
   exportFilename?: string;
+  adaptiveDateGrains?: Record<string, DateGrain>;
 }
 
 const FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
@@ -1953,6 +1987,7 @@ const ExportDataControls: FC<ExportDataControlsProps> = ({
   pivotData,
   config,
   exportFilename,
+  adaptiveDateGrains,
 }): ReactElement => {
   const [open, setOpen] = useState(false);
   const [format, setFormat] = useState<ExportFormat>("xlsx");
@@ -2004,6 +2039,7 @@ const ExportDataControls: FC<ExportDataControlsProps> = ({
       config,
       { format, content },
       exportFilename,
+      adaptiveDateGrains,
     );
     if (format === "clipboard") {
       setFeedback(ok ? "Copied!" : "Copy failed");
@@ -2013,7 +2049,7 @@ const ExportDataControls: FC<ExportDataControlsProps> = ({
     setTimeout(() => setFeedback(null), 2000);
     setOpen(false);
     requestAnimationFrame(() => triggerRef.current?.focus());
-  }, [pivotData, config, format, content, exportFilename]);
+  }, [pivotData, config, format, content, exportFilename, adaptiveDateGrains]);
 
   const buttonLabel = feedback ?? "Export Data";
 

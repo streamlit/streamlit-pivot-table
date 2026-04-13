@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-import pandas as pd
+import pandas as pd  # type: ignore[import-untyped]
 import streamlit as st
 
 from streamlit_pivot import st_pivot_table
@@ -41,6 +41,28 @@ def _make_drilldown_pagination_data() -> pd.DataFrame:
     for i in range(30):
         rows.append({"Region": "Beta", "Year": "2023", "Revenue": 200 + i})
     return pd.DataFrame(rows)
+
+
+def _make_date_hierarchy_data() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "region": ["US", "US", "US", "US", "EU", "EU", "EU", "EU"],
+            "order_date": pd.to_datetime(
+                [
+                    "2024-01-03",
+                    "2024-01-10",
+                    "2024-02-12",
+                    "2025-01-09",
+                    "2024-01-04",
+                    "2024-01-17",
+                    "2024-02-14",
+                    "2025-01-10",
+                ]
+            ),
+            "revenue": [100, 30, 150, 130, 80, 20, 95, 90],
+            "profit": [40, 10, 55, 45, 30, 8, 34, 32],
+        }
+    )
 
 
 def render_app(data):
@@ -225,6 +247,59 @@ def render_app(data):
         values=["Revenue"],
         aggregation="sum",
         show_totals=True,
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("Date Hierarchy Pivot")
+    st_pivot_table(
+        _make_date_hierarchy_data(),
+        key="test_pivot_date_hierarchy",
+        rows=["region"],
+        columns=["order_date"],
+        values=["revenue", "profit"],
+        aggregation="sum",
+        show_values_as={"revenue": "diff_from_prev"},
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    # Adaptive date grain: multi-year dataset -> auto-defaults to "year"
+    st.subheader("Adaptive Grain (Multi-Year)")
+    adaptive_year_df = pd.DataFrame(
+        {
+            "order_date": pd.to_datetime(
+                ["2019-03-01", "2020-06-15", "2021-09-10", "2023-01-20", "2024-11-05"]
+            ),
+            "revenue": [100, 200, 300, 400, 500],
+        }
+    )
+    st_pivot_table(
+        adaptive_year_df,
+        key="test_pivot_adaptive_year",
+        rows=["order_date"],
+        values=["revenue"],
+        aggregation="sum",
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    # Adaptive date grain: 3-month dataset -> auto-defaults to "month"
+    st.subheader("Adaptive Grain (3 Month)")
+    adaptive_month_df = pd.DataFrame(
+        {
+            "order_date": pd.to_datetime(
+                ["2024-06-01", "2024-06-15", "2024-07-10", "2024-08-05", "2024-08-28"]
+            ),
+            "revenue": [10, 20, 30, 40, 50],
+        }
+    )
+    st_pivot_table(
+        adaptive_month_df,
+        key="test_pivot_adaptive_month",
+        rows=["order_date"],
+        values=["revenue"],
+        aggregation="sum",
         interactive=True,
         on_config_change=noop,
     )

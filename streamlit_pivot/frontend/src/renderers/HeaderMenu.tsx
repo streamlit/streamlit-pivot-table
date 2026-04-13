@@ -35,6 +35,7 @@ import type {
 import {
   DATE_GRAIN_LABELS,
   DATE_GRAINS,
+  getDrilledDateGrain,
   showSubtotalForDim,
   showTotalForMeasure,
   showRowTotals,
@@ -569,7 +570,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
                   data-menu-nav
                   tabIndex={-1}
                   onClick={() => onDateDrill("up")}
-                  disabled={DATE_GRAINS.indexOf(dateGrain) === 0}
+                  disabled={!getDrilledDateGrain(dateGrain, "up")}
                   data-testid="header-date-drill-up"
                 >
                   <span className={styles.menuItemLabel}>Drill up</span>
@@ -580,9 +581,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
                   data-menu-nav
                   tabIndex={-1}
                   onClick={() => onDateDrill("down")}
-                  disabled={
-                    DATE_GRAINS.indexOf(dateGrain) === DATE_GRAINS.length - 1
-                  }
+                  disabled={!getDrilledDateGrain(dateGrain, "down")}
                   data-testid="header-date-drill-down"
                 >
                   <span className={styles.menuItemLabel}>Drill down</span>

@@ -74,6 +74,26 @@ describe("TableRenderer - rendering", () => {
     expect(rowHeaders[1]).toHaveTextContent("US");
   });
 
+  it("shows auto-grouped date labels for temporal dimensions", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+    ];
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    render(<TableRenderer pivotData={pd} config={config} />);
+    expect(screen.getByText("order_date (Month)")).toBeInTheDocument();
+    expect(screen.getAllByTestId("pivot-row-header")[0]).toHaveTextContent(
+      "Jan 2024",
+    );
+  });
+
   it("renders data cells with correct values", () => {
     const pd = createPivotData();
     render(<TableRenderer pivotData={pd} config={makeConfig()} />);

@@ -38,7 +38,10 @@ def click_menu_item(locator) -> None:
 
 def open_header_menu(page: Page, trigger_locator, menu_test_id: str):
     """Open a header menu and wait for it to become visible."""
-    trigger_locator.evaluate("el => el.click()")
+    expect(trigger_locator).to_be_visible(timeout=5000)
+    trigger_locator.evaluate(
+        "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+    )
     menu = page.get_by_test_id(menu_test_id)
     expect(menu).to_be_visible(timeout=5000)
     return menu
@@ -237,6 +240,87 @@ def test_header_menu_show_values_as_pct(page_at_app: Page):
 
     revenue_totals = container.get_by_test_id("pivot-row-total")
     expect(revenue_totals.first).to_contain_text("%", timeout=10000)
+
+
+def test_date_hierarchy_uses_adaptive_default_and_enables_comparisons(
+    page_at_app: Page,
+):
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_date_hierarchy")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.get_by_text("order_date (Quarter)")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q1 2025")).to_be_visible(timeout=5000)
+
+    menu = open_header_menu(
+        page,
+        container.get_by_test_id("header-menu-trigger-revenue").first,
+        "header-menu-revenue",
+    )
+    expect(menu.get_by_test_id("header-display-diff_from_prev")).to_be_visible(
+        timeout=5000
+    )
+    expect(menu.get_by_test_id("header-display-diff_from_prev_year")).to_be_visible(
+        timeout=5000
+    )
+    close_header_menu(page, "header-menu-revenue")
+
+
+def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_date_hierarchy")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    menu = open_header_menu(
+        page,
+        container.get_by_test_id("header-menu-trigger-order_date").first,
+        "header-menu-order_date",
+    )
+    grain_select = menu.get_by_test_id("header-date-grain")
+    expect(grain_select).to_have_value("quarter")
+
+    click_menu_item(menu.get_by_test_id("header-date-drill-up"))
+    close_header_menu(page, "header-menu-order_date")
+    expect(container.get_by_text("order_date (Year)")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("2024")).to_be_visible(timeout=5000)
+
+    menu = open_header_menu(
+        page,
+        container.get_by_test_id("header-menu-trigger-order_date").first,
+        "header-menu-order_date",
+    )
+    grain_select = menu.get_by_test_id("header-date-grain")
+    grain_select.select_option("week")
+    close_header_menu(page, "header-menu-order_date")
+    expect(container.get_by_text("order_date (Week)")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("2024-W01")).to_be_visible(timeout=5000)
+
+    menu = open_header_menu(
+        page,
+        container.get_by_test_id("header-menu-trigger-order_date").first,
+        "header-menu-order_date",
+    )
+    grain_select = menu.get_by_test_id("header-date-grain")
+    grain_select.select_option("")
+    close_header_menu(page, "header-menu-order_date")
+    expect(container.get_by_text("order_date")).to_be_visible(timeout=5000)
+
+    menu = open_header_menu(
+        page,
+        container.get_by_test_id("header-menu-trigger-revenue").first,
+        "header-menu-revenue",
+    )
+    expect(menu.get_by_test_id("header-display-diff_from_prev")).to_have_count(0)
+    close_header_menu(page, "header-menu-revenue")
 
 
 def test_drilldown_opens_on_cell_click(page_at_app: Page):
@@ -901,3 +985,34 @@ def test_drilldown_hybrid_pagination_navigates(page_at_app: Page):
     panel = page.get_by_test_id("drilldown-panel")
     expect(panel).to_be_visible(timeout=30000)
     expect(panel.locator("text=Page 1 of 2")).to_be_visible(timeout=30000)
+
+
+# ---------------------------------------------------------------------------
+# Adaptive date grain e2e tests
+# ---------------------------------------------------------------------------
+
+
+def test_adaptive_grain_multi_year_defaults_to_year(page_at_app: Page):
+    """Multi-year dataset auto-defaults to year-level bucketing."""
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_adaptive_year")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    header = container.locator("th").filter(has_text="order_date (Year)")
+    expect(header).to_be_visible(timeout=10000)
+
+
+def test_adaptive_grain_3month_defaults_to_month(page_at_app: Page):
+    """3-month dataset auto-defaults to month-level bucketing."""
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_adaptive_month")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    header = container.locator("th").filter(has_text="order_date (Month)")
+    expect(header).to_be_visible(timeout=10000)

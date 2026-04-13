@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, act } from "@testing-library/react";
 import { tableToIPC, tableFromArrays } from "apache-arrow";
 import PivotRoot from "./PivotRoot";
+import type { PivotRootProps } from "./PivotRoot";
 import { makeConfig } from "./test-utils";
 
 function makeArrowBytes(data: Record<string, unknown[]>): Uint8Array {
@@ -104,5 +105,256 @@ describe("PivotRoot - source_row_count metric", () => {
       perfEl!.getAttribute("data-perf-metrics") ?? "{}",
     );
     expect(metrics.sourceRows).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Adaptive grain invalidation effect
+// ---------------------------------------------------------------------------
+
+function makeTemporalArrowBytes() {
+  return makeArrowBytes({
+    region: ["US", "EU"],
+    order_date: ["2024-01-01", "2024-06-01"],
+    ship_date: ["2024-01-05", "2024-06-05"],
+    revenue: [100, 200],
+  });
+}
+
+function makeBaseProps(
+  overrides: Partial<PivotRootProps> = {},
+): PivotRootProps {
+  return {
+    config: makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+    }),
+    dataframe: makeTemporalArrowBytes(),
+    height: null,
+    max_height: 500,
+    execution_mode: "client_only" as const,
+    original_column_types: { order_date: "date", ship_date: "date" },
+    setStateValue: vi.fn(),
+    setTriggerValue: vi.fn(),
+    ...overrides,
+  };
+}
+
+async function flush() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
+}
+
+function findConfigCall(
+  setStateValue: ReturnType<typeof vi.fn>,
+): Record<string, unknown> | undefined {
+  const call = setStateValue.mock.calls.find(
+    (args: unknown[]) => args[0] === "config",
+  );
+  return call ? (call[1] as Record<string, unknown>) : undefined;
+}
+
+describe("PivotRoot - adaptive grain invalidation", () => {
+  it("clears filters for affected auto field when adaptive grain changes", async () => {
+    const setStateValue = vi.fn();
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      filters: {
+        order_date: { include: ["2024-Q1"] },
+        region: { include: ["US"] },
+      },
+    });
+    const props = makeBaseProps({
+      config,
+      adaptive_date_grains: { order_date: "quarter" },
+      setStateValue,
+    });
+
+    const { rerender } = render(<PivotRoot {...props} />);
+    await flush();
+    setStateValue.mockClear();
+
+    rerender(
+      <PivotRoot {...props} adaptive_date_grains={{ order_date: "year" }} />,
+    );
+    await flush();
+
+    const patched = findConfigCall(setStateValue);
+    expect(patched).toBeDefined();
+    expect(patched!.filters).toBeDefined();
+    const filters = patched!.filters as Record<string, unknown>;
+    expect(filters["region"]).toBeDefined();
+    expect(filters["order_date"]).toBeUndefined();
+  });
+
+  it("clears collapsed_col_groups (not collapsed_groups) when column field affected", async () => {
+    const setStateValue = vi.fn();
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      collapsed_groups: ["region:US"],
+      collapsed_col_groups: ["order_date:2024-Q1"],
+    });
+    const props = makeBaseProps({
+      config,
+      adaptive_date_grains: { order_date: "quarter" },
+      setStateValue,
+    });
+
+    const { rerender } = render(<PivotRoot {...props} />);
+    await flush();
+    setStateValue.mockClear();
+
+    rerender(
+      <PivotRoot {...props} adaptive_date_grains={{ order_date: "year" }} />,
+    );
+    await flush();
+
+    const patched = findConfigCall(setStateValue);
+    expect(patched).toBeDefined();
+    expect(patched!.collapsed_groups).toEqual(["region:US"]);
+    expect(patched!.collapsed_col_groups).toBeUndefined();
+  });
+
+  it("clears collapsed_groups (not collapsed_col_groups) when row field affected", async () => {
+    const setStateValue = vi.fn();
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+      collapsed_groups: ["order_date:2024-Q1"],
+      collapsed_col_groups: ["region:US"],
+    });
+    const props = makeBaseProps({
+      config,
+      adaptive_date_grains: { order_date: "quarter" },
+      setStateValue,
+    });
+
+    const { rerender } = render(<PivotRoot {...props} />);
+    await flush();
+    setStateValue.mockClear();
+
+    rerender(
+      <PivotRoot {...props} adaptive_date_grains={{ order_date: "year" }} />,
+    );
+    await flush();
+
+    const patched = findConfigCall(setStateValue);
+    expect(patched).toBeDefined();
+    expect(patched!.collapsed_groups).toBeUndefined();
+    expect(patched!.collapsed_col_groups).toEqual(["region:US"]);
+  });
+
+  it("strips period comparison show_values_as when comparison axis field is affected", async () => {
+    const setStateValue = vi.fn();
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      show_values_as: { revenue: "diff_from_prev" },
+    });
+    const props = makeBaseProps({
+      config,
+      adaptive_date_grains: { order_date: "quarter" },
+      setStateValue,
+    });
+
+    const { rerender } = render(<PivotRoot {...props} />);
+    await flush();
+    setStateValue.mockClear();
+
+    rerender(
+      <PivotRoot {...props} adaptive_date_grains={{ order_date: "year" }} />,
+    );
+    await flush();
+
+    const patched = findConfigCall(setStateValue);
+    expect(patched).toBeDefined();
+    expect(patched!.show_values_as).toBeUndefined();
+  });
+
+  it("preserves period comparison show_values_as when comparison axis field is NOT affected", async () => {
+    const setStateValue = vi.fn();
+    // order_date on columns is the comparison axis; ship_date on rows is affected
+    const config = makeConfig({
+      rows: ["ship_date"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      show_values_as: { revenue: "diff_from_prev" },
+    });
+    const props = makeBaseProps({
+      config,
+      adaptive_date_grains: { order_date: "quarter", ship_date: "quarter" },
+      setStateValue,
+    });
+
+    const { rerender } = render(<PivotRoot {...props} />);
+    await flush();
+    setStateValue.mockClear();
+
+    // Only ship_date grain changes; order_date (comparison axis) is stable
+    rerender(
+      <PivotRoot
+        {...props}
+        adaptive_date_grains={{ order_date: "quarter", ship_date: "year" }}
+      />,
+    );
+    await flush();
+
+    const patched = findConfigCall(setStateValue);
+    expect(patched).toBeDefined();
+    expect(patched!.show_values_as).toEqual({ revenue: "diff_from_prev" });
+  });
+
+  it("skips fields with explicit date_grains overrides", async () => {
+    const setStateValue = vi.fn();
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      date_grains: { order_date: "month" },
+      filters: { order_date: { include: ["2024-01"] } },
+    });
+    const props = makeBaseProps({
+      config,
+      adaptive_date_grains: { order_date: "quarter" },
+      setStateValue,
+    });
+
+    const { rerender } = render(<PivotRoot {...props} />);
+    await flush();
+    setStateValue.mockClear();
+
+    rerender(
+      <PivotRoot {...props} adaptive_date_grains={{ order_date: "year" }} />,
+    );
+    await flush();
+
+    expect(findConfigCall(setStateValue)).toBeUndefined();
+  });
+
+  it("does not fire when adaptive grains are unchanged", async () => {
+    const setStateValue = vi.fn();
+    const grains = { order_date: "quarter" as const };
+    const props = makeBaseProps({
+      adaptive_date_grains: grains,
+      setStateValue,
+    });
+
+    const { rerender } = render(<PivotRoot {...props} />);
+    await flush();
+    setStateValue.mockClear();
+
+    // Same object reference — no change
+    rerender(<PivotRoot {...props} adaptive_date_grains={grains} />);
+    await flush();
+
+    expect(findConfigCall(setStateValue)).toBeUndefined();
   });
 });

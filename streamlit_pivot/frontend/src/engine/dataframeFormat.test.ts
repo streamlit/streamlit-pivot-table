@@ -37,6 +37,7 @@ function makeConfig(overrides: Partial<PivotConfigV1> = {}): PivotConfigV1 {
     rows: ["region"],
     columns: ["year"],
     values,
+    auto_date_hierarchy: false,
     show_totals: true,
     empty_cell_value: "-",
     interactive: true,
