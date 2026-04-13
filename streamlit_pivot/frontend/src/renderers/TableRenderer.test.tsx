@@ -320,6 +320,113 @@ describe("TableRenderer - corner cell / row dimension labels", () => {
     expect(screen.queryByTestId("sort-row-toggle")).not.toBeInTheDocument();
     expect(screen.queryByTestId("sort-col-toggle")).not.toBeInTheDocument();
   });
+
+  it("single temporal column: row dim label spans all header levels, no colDimLabel", () => {
+    const data = [
+      { region: "US", order_date: "2024-Q1", revenue: 100 },
+      { region: "US", order_date: "2024-Q2", revenue: 150 },
+      { region: "EU", order_date: "2024-Q1", revenue: 200 },
+    ];
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      date_grains: { order_date: "quarter" },
+      auto_date_hierarchy: true,
+    });
+    const columnTypes = new Map<string, import("../engine/types").ColumnType>([
+      ["order_date", "date"],
+      ["region", "string"],
+      ["revenue", "float"],
+    ]);
+    const pd = new PivotData(data, config, { columnTypes });
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    const cornerLabel = screen.getByTestId("pivot-row-dim-label-region");
+    expect(cornerLabel).toHaveTextContent("region");
+    // rowSpan should cover year + quarter levels = 2
+    expect(cornerLabel).toHaveAttribute("rowspan", "2");
+    // No colDimLabel corner cell with "order_date"
+    const colDimLabels = container.querySelectorAll("[class*='colDimLabel']");
+    expect(colDimLabels).toHaveLength(0);
+  });
+
+  it("multi-column with temporal: colDimLabel still present for non-temporal column", () => {
+    const data = [
+      { region: "US", category: "A", order_date: "2024-Q1", revenue: 100 },
+      { region: "US", category: "B", order_date: "2024-Q2", revenue: 150 },
+    ];
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category", "order_date"],
+      values: ["revenue"],
+      date_grains: { order_date: "quarter" },
+      auto_date_hierarchy: true,
+    });
+    const columnTypes = new Map<string, import("../engine/types").ColumnType>([
+      ["order_date", "date"],
+      ["category", "string"],
+      ["region", "string"],
+      ["revenue", "float"],
+    ]);
+    const pd = new PivotData(data, config, { columnTypes });
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    // "category" colDimLabel should still be present
+    const colDimLabels = container.querySelectorAll("[class*='colDimLabel']");
+    expect(colDimLabels.length).toBeGreaterThanOrEqual(1);
+    expect(colDimLabels[0]).toHaveTextContent("category");
+    // Row dim label on last row
+    expect(screen.getByTestId("pivot-row-dim-label-region")).toHaveTextContent(
+      "region",
+    );
+  });
+
+  it("multi-column temporal: outer header spans across collapsed and expanded siblings", () => {
+    // columns=["region", "order_date"] with quarter grain → hierarchy [year, quarter].
+    // Collapse key must include the outer sibling context:
+    // makeKeyString(["US", "tp:order_date:2024"]) = "US\x00tp:order_date:2024"
+    const data = [
+      { region: "US", order_date: "2024-Q1", revenue: 100 },
+      { region: "US", order_date: "2024-Q2", revenue: 150 },
+      { region: "US", order_date: "2025-Q1", revenue: 200 },
+    ];
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["region", "order_date"],
+      values: ["revenue"],
+      date_grains: { order_date: "quarter" },
+      auto_date_hierarchy: true,
+      collapsed_temporal_groups: {
+        order_date: ["US\x00tp:order_date:2024"],
+      },
+    });
+    const columnTypes = new Map<string, import("../engine/types").ColumnType>([
+      ["order_date", "date"],
+      ["region", "string"],
+      ["revenue", "float"],
+    ]);
+    const pd = new PivotData(data, config, { columnTypes });
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    // Verify collapse actually happened: the collapsed parent header should
+    // have aria-expanded="false".
+    const collapsedHeader = container.querySelector("[aria-expanded='false']");
+    expect(collapsedHeader).not.toBeNull();
+
+    // The "region" header row (non-temporal, level 0) should have a single
+    // "US" cell spanning both the collapsed 2024 and expanded 2025 slots,
+    // not two separate "US" cells.
+    const thead = container.querySelector("thead")!;
+    const firstHeaderRow = thead.querySelectorAll("tr")[0]!;
+    const usCells = Array.from(firstHeaderRow.querySelectorAll("th")).filter(
+      (th) => th.textContent?.includes("US"),
+    );
+    expect(usCells).toHaveLength(1);
+  });
 });
 
 describe("TableRenderer - header menu triggers", () => {

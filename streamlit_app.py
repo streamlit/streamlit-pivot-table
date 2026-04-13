@@ -1471,9 +1471,14 @@ Drill controls expose **Year → Quarter → Month → Day**, and **Week** is
 available as an alternate grouping. Period-over-period display modes
 (previous-period, previous-year) are unlocked automatically.
 
+For this release, the Excel/Power BI-style parent header collapse/expand UI is
+available on the **column axis**. Exports still keep the full leaf-level date
+columns even when a parent date header is collapsed in the view.
+
 **Try it:**
 - In the first table, notice the adaptive default grain based on the data range.
 - Open the `order_date` header menu to drill up/down, switch to Week, or choose Original.
+- Use the +/- toggle on a parent date header to collapse a year/quarter group on the column axis.
 - Open the `Revenue` value header menu to switch between raw values and period comparisons.
 - Compare the other tables for explicit override, global opt-out, and per-field opt-out.
 
@@ -1523,7 +1528,7 @@ with date_col_2:
 date_col_3, date_col_4 = st.columns(2)
 
 with date_col_3:
-    st.caption("Explicit override: Month + MoM comparison")
+    st.caption("Explicit override: Month grain (raw sums)")
     st_pivot_table(
         df_dates,
         key="date_hierarchy_quarter",
@@ -1533,7 +1538,6 @@ with date_col_3:
         aggregation="sum",
         show_totals=True,
         date_grains={"order_date": "month"},
-        show_values_as={"Revenue": "diff_from_prev"},
     )
 
 with date_col_4:
@@ -1585,14 +1589,13 @@ st_pivot_table(
     values=["Revenue"],
 )
 
-# Explicit override: month grain + month-over-month comparison
+# Explicit override: month grain (raw sums)
 st_pivot_table(
     df_dates,
     rows=["region"],
     columns=["order_date"],
     values=["Revenue"],
     date_grains={"order_date": "month"},
-    show_values_as={"Revenue": "diff_from_prev"},
 )
 
 st_pivot_table(

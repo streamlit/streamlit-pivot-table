@@ -47,6 +47,8 @@ import {
 } from "./formatters";
 import {
   bucketTemporalKey,
+  buildModifiedColKey,
+  extractParentBuckets,
   formatTemporalBucketLabel,
   isTemporalColumnType,
   shiftTemporalBucketKey,
@@ -233,6 +235,8 @@ export class PivotData {
   private _hybridColPrefixGrand: Map<string, number | null> | null = null;
   private _hybridSubtotals: Map<string, number | null> | null = null;
   private _hybridCrossSubtotals: Map<string, number | null> | null = null;
+  private _hybridTemporalParent: Map<string, number | null> | null = null;
+  private _hybridTemporalParentGrand: Map<string, number | null> | null = null;
 
   constructor(
     input: DataRecord[] | ColumnarDataSource,
@@ -343,6 +347,30 @@ export class PivotData {
                 `${parentStr}\x01${cpStr}\x01${f}`,
                 v,
               );
+            }
+          }
+        }
+
+        if (hybridTotals.temporal_parent) {
+          this._hybridTemporalParent = new Map();
+          for (const entry of hybridTotals.temporal_parent) {
+            const rowKeyStr = makeKeyString(entry.row ?? []);
+            const colStr = makeKeyString(entry.col);
+            for (const [f, v] of Object.entries(entry.values)) {
+              this._hybridTemporalParent.set(
+                `${rowKeyStr}\x01${colStr}\x01${f}`,
+                v,
+              );
+            }
+          }
+        }
+
+        if (hybridTotals.temporal_parent_grand) {
+          this._hybridTemporalParentGrand = new Map();
+          for (const entry of hybridTotals.temporal_parent_grand) {
+            const colStr = makeKeyString(entry.col);
+            for (const [f, v] of Object.entries(entry.values)) {
+              this._hybridTemporalParentGrand.set(`${colStr}\x01${f}`, v);
             }
           }
         }
@@ -470,7 +498,12 @@ export class PivotData {
       const rawVal = this._rawValueMap.get(field)?.get(key);
       label = formatDateValue(rawVal ?? key);
     } else if (colType === "integer") {
-      label = formatIntegerLabel(key);
+      const looksLikeYearField = /(^|[_\s])years?($|[_\s])/i.test(field);
+      const looksLikeYearValue = /^\d{4}$/.test(key);
+      label =
+        looksLikeYearField && looksLikeYearValue
+          ? key
+          : formatIntegerLabel(key);
     }
 
     // Cache the label
@@ -1347,6 +1380,8 @@ export class PivotData {
   /** Row-group × col-group cross-section subtotals (for subtotal rows with collapsed columns). */
   private _crossSubtotalAggs: Map<string, Aggregator> | null = null;
   private _crossSubtotalSumAggs: Map<string, Aggregator> | null = null;
+  /** Temporal parent aggregators (rowKey × modifiedColKey × valField). */
+  private _temporalSubtotalAggs: Map<string, Aggregator> | null = null;
 
   /**
    * Build column-group subtotal aggregators lazily from raw records.
@@ -1532,6 +1567,141 @@ export class PivotData {
       this._crossSubtotalAggs!.get(lookupKey) ??
       this._factoryForField(field).create()
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Temporal hierarchy subtotals (collapsed parent aggregation)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build temporal subtotal aggregators lazily from raw records.
+   * Uses modified column keys (sibling segments preserved, temporal segment
+   * replaced with "tp:{field}:{parentBucket}") for correct per-instance
+   * aggregation in multi-dimension column layouts.
+   */
+  private _buildTemporalSubtotalAggs(): Map<string, Aggregator> {
+    if (this._temporalSubtotalAggs) return this._temporalSubtotalAggs;
+    this._temporalSubtotalAggs = new Map();
+
+    const colDims = this._config.columns;
+    const rowDims = this._config.rows;
+    if (colDims.length === 0) return this._temporalSubtotalAggs;
+
+    const temporalCols: {
+      index: number;
+      field: string;
+      grain: DateGrain;
+    }[] = [];
+    for (let i = 0; i < colDims.length; i++) {
+      const f = colDims[i]!;
+      const ct = this._columnTypes?.get(f);
+      if (!ct || !isTemporalColumnType(ct)) continue;
+      const grain = getEffectiveDateGrain(
+        this._config,
+        f,
+        ct,
+        this._options.adaptiveDateGrains?.[f],
+      );
+      if (!grain || grain === "year") continue;
+      temporalCols.push({ index: i, field: f, grain });
+    }
+    if (temporalCols.length === 0) return this._temporalSubtotalAggs;
+
+    const emptyRowKeyStr = makeKeyString([]);
+    const valueArrays = this._getValueArrays();
+    const numRows = this._dataSource.numRows;
+
+    for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
+      if (!this._shouldIncludeRow(recordIndex)) continue;
+
+      const rowKey = rowDims.map((r) =>
+        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+      );
+      const fullColKey = colDims.map((c) =>
+        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+      );
+      const rowKeyStr = makeKeyString(rowKey);
+
+      for (const tc of temporalCols) {
+        const leafKey = fullColKey[tc.index]!;
+        const parentBuckets = extractParentBuckets(leafKey, tc.grain);
+
+        for (const parentBucket of parentBuckets) {
+          const modifiedColKey = buildModifiedColKey(
+            fullColKey,
+            tc.index,
+            tc.field,
+            parentBucket,
+          );
+          const modifiedColKeyStr = makeKeyString(modifiedColKey);
+
+          for (const valField of this._allAggregatedFields) {
+            const rawVal = this._rawAggValue(
+              recordIndex,
+              valField,
+              valueArrays,
+            );
+
+            const cellKey = `${rowKeyStr}\x01${modifiedColKeyStr}\x01${valField}`;
+            let cellAgg = this._temporalSubtotalAggs.get(cellKey);
+            if (!cellAgg) {
+              cellAgg = this._factoryForField(valField).create();
+              this._temporalSubtotalAggs.set(cellKey, cellAgg);
+            }
+            this._pushAggValue(cellAgg, valField, rawVal);
+
+            const grandKey = `${emptyRowKeyStr}\x01${modifiedColKeyStr}\x01${valField}`;
+            let grandAgg = this._temporalSubtotalAggs.get(grandKey);
+            if (!grandAgg) {
+              grandAgg = this._factoryForField(valField).create();
+              this._temporalSubtotalAggs.set(grandKey, grandAgg);
+            }
+            this._pushAggValue(grandAgg, valField, rawVal);
+          }
+        }
+      }
+    }
+    return this._temporalSubtotalAggs;
+  }
+
+  /**
+   * Get the temporal parent aggregate for a specific row and modified column key.
+   * Prioritizes hybrid (Python-precomputed) values, falls back to client-side.
+   */
+  getTemporalColSubtotal(
+    rowKey: string[],
+    modifiedColKey: string[],
+    valField: string,
+  ): Aggregator {
+    const rowKeyStr = makeKeyString(rowKey);
+    const modifiedColKeyStr = makeKeyString(modifiedColKey);
+    const lookupKey = `${rowKeyStr}\x01${modifiedColKeyStr}\x01${valField}`;
+
+    if (this._hybridTemporalParent?.has(lookupKey)) {
+      return this._fixedAggregator(this._hybridTemporalParent.get(lookupKey)!);
+    }
+    const aggs = this._buildTemporalSubtotalAggs();
+    return aggs.get(lookupKey) ?? this._factoryForField(valField).create();
+  }
+
+  /**
+   * Get the temporal parent aggregate for the grand total row.
+   */
+  getTemporalColSubtotalGrand(
+    modifiedColKey: string[],
+    valField: string,
+  ): Aggregator {
+    const modifiedColKeyStr = makeKeyString(modifiedColKey);
+    const lookupKey = `${modifiedColKeyStr}\x01${valField}`;
+
+    if (this._hybridTemporalParentGrand?.has(lookupKey)) {
+      return this._fixedAggregator(
+        this._hybridTemporalParentGrand.get(lookupKey)!,
+      );
+    }
+    const aggs = this._buildTemporalSubtotalAggs();
+    const key = `${makeKeyString([])}\x01${modifiedColKeyStr}\x01${valField}`;
+    return aggs.get(key) ?? this._factoryForField(valField).create();
   }
 
   // ---------------------------------------------------------------------------

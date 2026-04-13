@@ -534,16 +534,15 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
 
       {onDateGrainChange && (
         <>
-          <div className={styles.divider} />
           <div
-            className={styles.sortSection}
+            className={styles.dateSection}
             role="group"
             aria-label={`Date grouping for ${dimension}`}
           >
-            <label className={styles.sortValueLabel}>
-              <span>Group by:</span>
+            <label className={styles.grainLabel}>
+              <span className={styles.grainLabelText}>Group by</span>
               <select
-                className={styles.sortValueSelect}
+                className={styles.grainSelect}
                 data-menu-nav
                 tabIndex={-1}
                 value={dateGrain ?? ""}
@@ -563,39 +562,68 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
               </select>
             </label>
             {dateGrain && onDateDrill && (
-              <div className={styles.sortValueConfig}>
+              <div className={styles.drillRow}>
                 <button
                   type="button"
-                  className={styles.menuItem}
+                  className={styles.actionButton}
                   data-menu-nav
                   tabIndex={-1}
                   onClick={() => onDateDrill("up")}
                   disabled={!getDrilledDateGrain(dateGrain, "up")}
                   data-testid="header-date-drill-up"
                 >
-                  <span className={styles.menuItemLabel}>Drill up</span>
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 10 10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ marginRight: 2 }}
+                  >
+                    <polyline points="2,6 5,3 8,6" />
+                  </svg>
+                  Drill Up
                 </button>
                 <button
                   type="button"
-                  className={styles.menuItem}
+                  className={styles.actionButton}
                   data-menu-nav
                   tabIndex={-1}
                   onClick={() => onDateDrill("down")}
                   disabled={!getDrilledDateGrain(dateGrain, "down")}
                   data-testid="header-date-drill-down"
                 >
-                  <span className={styles.menuItemLabel}>Drill down</span>
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 10 10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ marginRight: 2 }}
+                  >
+                    <polyline points="2,4 5,7 8,4" />
+                  </svg>
+                  Drill Down
                 </button>
               </div>
             )}
           </div>
+          <div className={styles.divider} />
         </>
       )}
 
       {/* Totals section (value headers only) */}
       {onTotalToggle && config && (
         <>
-          <div className={styles.divider} />
+          {!showSort && !onSubtotalToggle && !onDateGrainChange && (
+            <div className={styles.divider} />
+          )}
           <div
             className={styles.sortSection}
             data-testid="header-menu-totals"

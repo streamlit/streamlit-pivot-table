@@ -73,6 +73,8 @@ export interface PivotConfigV1 {
   conditional_formatting?: ConditionalFormatRule[];
   /** Phase 3a: serialized column group keys currently collapsed. */
   collapsed_col_groups?: string[];
+  /** Per-field collapsed temporal parent groups (stringified modified column keys). */
+  collapsed_temporal_groups?: Record<string, string[]>;
   /** Phase 3d: toggle sticky (fixed) headers on/off. Default true. */
   sticky_headers?: boolean;
   /** Phase 3d: per-field number format patterns (e.g. {"Revenue": "$,.0f"}). */
@@ -283,6 +285,13 @@ export function stringifyPivotConfig(config: PivotConfigV1): string {
           ),
         )
       : undefined,
+    collapsed_temporal_groups: config.collapsed_temporal_groups
+      ? Object.fromEntries(
+          Object.entries(config.collapsed_temporal_groups)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => [k, [...v].sort()]),
+        )
+      : undefined,
   });
 }
 
@@ -334,6 +343,28 @@ export const DEFAULT_DATE_DRILL_SEQUENCE: readonly DateGrain[] = [
   "month",
   "day",
 ] as const;
+
+/**
+ * Returns the hierarchy levels (outermost to leaf) for a given effective grain.
+ * Year grain produces a flat [year] (no hierarchy).
+ * Quarter skipped for day grain to cap at 3 levels.
+ */
+export function getTemporalHierarchyLevels(grain: DateGrain): DateGrain[] {
+  switch (grain) {
+    case "year":
+      return ["year"];
+    case "quarter":
+      return ["year", "quarter"];
+    case "month":
+      return ["year", "quarter", "month"];
+    case "day":
+      return ["year", "month", "day"];
+    case "week":
+      return ["year", "week"];
+    default:
+      return [grain];
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Conditional formatting (Phase 3c)
@@ -798,6 +829,15 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     result.collapsed_groups = o.collapsed_groups as string[];
   if (Array.isArray(o.collapsed_col_groups))
     result.collapsed_col_groups = o.collapsed_col_groups as string[];
+  if (
+    o.collapsed_temporal_groups &&
+    typeof o.collapsed_temporal_groups === "object" &&
+    !Array.isArray(o.collapsed_temporal_groups)
+  )
+    result.collapsed_temporal_groups = o.collapsed_temporal_groups as Record<
+      string,
+      string[]
+    >;
   if (typeof o.sticky_headers === "boolean")
     result.sticky_headers = o.sticky_headers;
   if (
@@ -1091,6 +1131,14 @@ export interface HybridTotalEntry {
   values: Record<string, number | null>;
 }
 
+export interface TemporalParentEntry {
+  row?: string[];
+  col: string[];
+  field: string;
+  grain: string;
+  values: Record<string, number | null>;
+}
+
 export interface HybridTotals {
   sidecar_fingerprint: string;
   grand: Record<string, number | null>;
@@ -1100,6 +1148,8 @@ export interface HybridTotals {
   col_prefix_grand?: HybridTotalEntry[];
   subtotals?: HybridTotalEntry[];
   cross_subtotals?: HybridTotalEntry[];
+  temporal_parent?: TemporalParentEntry[];
+  temporal_parent_grand?: TemporalParentEntry[];
 }
 
 // ---------------------------------------------------------------------------

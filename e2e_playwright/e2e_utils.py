@@ -88,6 +88,7 @@ INTERACTIONS_PIVOT_KEYS = [
     "test_pivot_subtotals",
     "test_pivot_cond_fmt",
     "test_pivot_date_hierarchy",
+    "test_pivot_date_hierarchy_multidim",
     "test_pivot_adaptive_year",
     "test_pivot_adaptive_month",
     "test_pivot_locked",

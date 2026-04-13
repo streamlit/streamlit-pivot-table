@@ -46,21 +46,34 @@ def _make_drilldown_pagination_data() -> pd.DataFrame:
 def _make_date_hierarchy_data() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "region": ["US", "US", "US", "US", "EU", "EU", "EU", "EU"],
+            "region": [
+                "US",
+                "US",
+                "US",
+                "US",
+                "US",
+                "EU",
+                "EU",
+                "EU",
+                "EU",
+                "EU",
+            ],
             "order_date": pd.to_datetime(
                 [
                     "2024-01-03",
-                    "2024-01-10",
-                    "2024-02-12",
+                    "2024-04-10",
+                    "2024-07-12",
+                    "2024-10-05",
                     "2025-01-09",
                     "2024-01-04",
-                    "2024-01-17",
-                    "2024-02-14",
+                    "2024-04-17",
+                    "2024-07-14",
+                    "2024-10-08",
                     "2025-01-10",
                 ]
             ),
-            "revenue": [100, 30, 150, 130, 80, 20, 95, 90],
-            "profit": [40, 10, 55, 45, 30, 8, 34, 32],
+            "revenue": [100, 200, 150, 180, 130, 80, 160, 95, 140, 90],
+            "profit": [40, 80, 55, 65, 45, 30, 60, 34, 50, 32],
         }
     )
 
@@ -260,6 +273,18 @@ def render_app(data):
         values=["revenue", "profit"],
         aggregation="sum",
         show_values_as={"revenue": "diff_from_prev"},
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("Date Hierarchy Multi-Dim Columns Pivot")
+    st_pivot_table(
+        _make_date_hierarchy_data(),
+        key="test_pivot_date_hierarchy_multidim",
+        rows=["profit"],
+        columns=["region", "order_date"],
+        values=["revenue"],
+        aggregation="sum",
         interactive=True,
         on_config_change=noop,
     )

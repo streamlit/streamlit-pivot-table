@@ -17,6 +17,7 @@
 
 import { formatDateValue, normalizeToUTC } from "./formatters";
 import type { ColumnType, DateGrain } from "./types";
+import { getTemporalHierarchyLevels } from "./types";
 
 const MONTH_SHORT = [
   "Jan",
@@ -270,4 +271,89 @@ export function shiftTemporalBucketKey(
   if (mode === "previous_year") d.setUTCFullYear(d.getUTCFullYear() - 1);
   else d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Temporal hierarchy helpers
+// ---------------------------------------------------------------------------
+
+export function monthToQuarter(month: number): number {
+  return Math.floor((month - 1) / 3) + 1;
+}
+
+/**
+ * Derive parent bucket keys from a leaf bucket key, outermost to innermost
+ * (excluding the leaf itself). Returns [] for year grain (no parents).
+ */
+export function extractParentBuckets(
+  leafKey: string,
+  leafGrain: DateGrain,
+): string[] {
+  const levels = getTemporalHierarchyLevels(leafGrain);
+  if (levels.length <= 1) return [];
+
+  const parents: string[] = [];
+  for (let i = 0; i < levels.length - 1; i++) {
+    const parentGrain = levels[i]!;
+    const bucket = deriveParentBucket(leafKey, leafGrain, parentGrain);
+    if (bucket !== null) parents.push(bucket);
+  }
+  return parents;
+}
+
+function deriveParentBucket(
+  leafKey: string,
+  leafGrain: DateGrain,
+  parentGrain: DateGrain,
+): string | null {
+  if (parentGrain === "year") {
+    const match = leafKey.match(/^(\d{4})/);
+    return match ? match[1]! : null;
+  }
+  if (parentGrain === "quarter") {
+    if (leafGrain === "month") {
+      const match = leafKey.match(/^(\d{4})-(\d{2})$/);
+      if (!match) return null;
+      const q = monthToQuarter(Number(match[2]));
+      return `${match[1]}-Q${q}`;
+    }
+    if (leafGrain === "quarter") {
+      return leafKey;
+    }
+    return null;
+  }
+  if (parentGrain === "month") {
+    if (leafGrain === "day") {
+      const match = leafKey.match(/^(\d{4}-\d{2})/);
+      return match ? match[1]! : null;
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Human-readable label for a parent header cell.
+ */
+export function formatTemporalParentLabel(
+  parentKey: string,
+  parentGrain: DateGrain,
+  pattern?: string,
+): string {
+  return formatTemporalBucketLabel(parentKey, parentGrain, pattern);
+}
+
+/**
+ * Build a modified column key by replacing the temporal field's segment
+ * with a "tp:{fieldName}:{parentBucket}" token.
+ */
+export function buildModifiedColKey(
+  fullColKey: string[],
+  temporalFieldIndex: number,
+  fieldName: string,
+  parentBucket: string,
+): string[] {
+  const modified = [...fullColKey];
+  modified[temporalFieldIndex] = `tp:${fieldName}:${parentBucket}`;
+  return modified;
 }

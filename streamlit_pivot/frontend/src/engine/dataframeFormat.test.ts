@@ -371,6 +371,17 @@ describe("PivotData - key/display separation", () => {
     expect(label).toContain("345");
   });
 
+  it("formatDimLabel preserves raw 4-digit year labels", () => {
+    const data: DataRecord[] = [{ year: "2022", revenue: 100 }];
+    const columnTypes: ColumnTypeMap = new Map([["year", "integer"]]);
+    const pd = new PivotData(
+      data,
+      makeConfig({ rows: ["year"], columns: [], values: ["revenue"] }),
+      { columnTypes },
+    );
+    expect(pd.formatDimLabel("year", "2022")).toBe("2022");
+  });
+
   it("formatDimLabel returns raw key for string type", () => {
     const data: DataRecord[] = [{ region: "US", revenue: 100 }];
     const pd = new PivotData(

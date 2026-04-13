@@ -89,6 +89,7 @@ class PivotConfig(TypedDict, total=False):
     repeat_row_labels: bool
     collapsed_groups: list[str]
     collapsed_col_groups: list[str]
+    collapsed_temporal_groups: dict[str, list[str]]
     sticky_headers: bool
     show_values_as: dict[str, str]
     conditional_formatting: list[dict[str, Any]]
@@ -163,6 +164,48 @@ _warned_keys: set[str] = set()
 _PYTHON_CONFIG_STATE_PREFIX = "__streamlit_pivot_python_config__:"
 _DRILLDOWN_PAGE_SIZE = 500
 _DEFAULT_AUTO_DATE_GRAIN = "month"
+
+
+def _get_temporal_hierarchy_levels(grain: str) -> list[str]:
+    """Return the hierarchy levels (outermost to leaf) for a given grain."""
+    if grain == "year":
+        return ["year"]
+    if grain == "quarter":
+        return ["year", "quarter"]
+    if grain == "month":
+        return ["year", "quarter", "month"]
+    if grain == "day":
+        return ["year", "month", "day"]
+    if grain == "week":
+        return ["year", "week"]
+    return [grain]
+
+
+def _rebucket_temporal_string(leaf_bucket: str, parent_grain: str) -> str:
+    """Derive a parent-grain bucket from an already-bucketed leaf string.
+
+    Works on the canonical bucket strings produced by ``_bucket_temporal_key``
+    (e.g. "2024-03", "2024-Q2", "2024-03-15", "2024-W12") rather than raw
+    datetime values, so it is safe to call after dimension stringification.
+    Returns "" for null/empty sentinels.
+    """
+    if not leaf_bucket or leaf_bucket in ("(null)", ""):
+        return ""
+    if parent_grain == "year":
+        return leaf_bucket[:4]
+    if parent_grain == "quarter":
+        # Leaf could be month ("2024-03") or day ("2024-03-15")
+        month_str = leaf_bucket[5:7]
+        try:
+            month = int(month_str)
+        except (ValueError, IndexError):
+            return leaf_bucket[:4]
+        q = (month - 1) // 3 + 1
+        return f"{leaf_bucket[:4]}-Q{q}"
+    if parent_grain == "month":
+        # Leaf is day ("2024-03-15") → "2024-03"
+        return leaf_bucket[:7]
+    return leaf_bucket
 
 
 def _compute_adaptive_date_grain(series: "pd.Series[Any]") -> str:
@@ -1072,6 +1115,102 @@ def _compute_hybrid_totals(
 
         result["col_prefix"] = col_prefix_entries
         result["col_prefix_grand"] = col_prefix_grand_entries
+
+    # Temporal parent sidecar entries for collapsed hierarchy aggregation.
+    # For each temporal column field with hierarchy (grain finer than year),
+    # compute parent-bucket aggregates preserving sibling column dimensions.
+    if columns:
+        temporal_parent_entries: list[dict[str, Any]] = []
+        temporal_parent_grand_entries: list[dict[str, Any]] = []
+        for temporal_idx, col_field in enumerate(columns):
+            col_type = (column_types or {}).get(col_field)
+            if col_type not in ("date", "datetime"):
+                continue
+            effective_grain = _get_effective_date_grain(
+                col_field,
+                rows,
+                columns,
+                date_grains,
+                auto_date_hierarchy,
+                column_types,
+                adaptive_grains,
+            )
+            if not effective_grain or effective_grain == "year":
+                continue
+            hierarchy_levels = _get_temporal_hierarchy_levels(effective_grain)
+            for parent_grain in hierarchy_levels[:-1]:
+                groupby_cols = list(columns)
+                parent_series = working[col_field].apply(
+                    lambda v, _pg=parent_grain: _rebucket_temporal_string(
+                        str(v) if not pd.isna(v) else "",
+                        _pg,
+                    )
+                )
+                tp_col_name = f"__tp_{col_field}_{parent_grain}__"
+                working[tp_col_name] = parent_series
+                groupby_cols[temporal_idx] = tp_col_name
+
+                if rows:
+                    grouped_tp = working.groupby(
+                        rows + groupby_cols, dropna=False, observed=True, sort=False
+                    )
+                    for key_tuple, group_df in grouped_tp:
+                        parts = (
+                            list(key_tuple)
+                            if isinstance(key_tuple, tuple)
+                            else [key_tuple]
+                        )
+                        parts = [str(p) for p in parts]
+                        row_key = parts[: len(rows)]
+                        col_key = parts[len(rows) :]
+                        col_key[temporal_idx] = (
+                            f"tp:{col_field}:{col_key[temporal_idx]}"
+                        )
+                        vals_tp: dict[str, int | float | None] = {}
+                        for field, agg in sidecar_fields.items():
+                            v = _sidecar_agg_func(agg, group_df[field])
+                            vals_tp[field] = _normalize_sidecar_value(v)
+                        temporal_parent_entries.append(
+                            {
+                                "row": row_key,
+                                "col": col_key,
+                                "field": col_field,
+                                "grain": parent_grain,
+                                "values": vals_tp,
+                            }
+                        )
+
+                grouped_tp_grand = working.groupby(
+                    groupby_cols, dropna=False, observed=True, sort=False
+                )
+                for key_tuple, group_df in grouped_tp_grand:
+                    parts = (
+                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                    )
+                    parts = [str(p) for p in parts]
+                    col_key_g = list(parts)
+                    col_key_g[temporal_idx] = (
+                        f"tp:{col_field}:{col_key_g[temporal_idx]}"
+                    )
+                    vals_tp_g: dict[str, int | float | None] = {}
+                    for field, agg in sidecar_fields.items():
+                        v = _sidecar_agg_func(agg, group_df[field])
+                        vals_tp_g[field] = _normalize_sidecar_value(v)
+                    temporal_parent_grand_entries.append(
+                        {
+                            "col": col_key_g,
+                            "field": col_field,
+                            "grain": parent_grain,
+                            "values": vals_tp_g,
+                        }
+                    )
+
+                working.drop(columns=[tp_col_name], inplace=True)
+
+        if temporal_parent_entries:
+            result["temporal_parent"] = temporal_parent_entries
+        if temporal_parent_grand_entries:
+            result["temporal_parent_grand"] = temporal_parent_grand_entries
 
     if show_subtotals and len(rows) >= 2:
         subtotal_entries: list[dict[str, Any]] = []

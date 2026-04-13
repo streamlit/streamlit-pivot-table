@@ -57,6 +57,22 @@ import {
 import { computeCellStyle } from "./ConditionalFormat";
 import HeaderMenu from "./HeaderMenu";
 import { useHeaderMenu } from "./useHeaderMenu";
+import {
+  computeTemporalColInfos,
+  computeHeaderLevels,
+  computeNumHeaderLevels,
+  computeParentGroups,
+  computeTemporalColSlots,
+  toggleTemporalCollapse,
+  type TemporalColSlot,
+  type TemporalColInfo,
+  type HeaderLevelMapping,
+} from "./temporalHierarchy";
+import {
+  buildModifiedColKey,
+  formatTemporalParentLabel,
+} from "../engine/dateGrouping";
+import { getEffectiveDateGrain, type ColumnTypeMap } from "../engine/types";
 import styles from "./TableRenderer.module.css";
 
 export type MenuAxis = "row" | "col" | "value";
@@ -539,6 +555,10 @@ export function renderColumnHeaders(
     e: React.MouseEvent<HTMLDivElement>,
   ) => void,
   adaptiveDateGrains?: Record<string, DateGrain>,
+  temporalInfos?: TemporalColInfo[],
+  headerLevels?: HeaderLevelMapping[],
+  onTemporalToggle?: (field: string, collapseKey: string) => void,
+  columnTypes?: ColumnTypeMap,
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
   const visibleSlots = colRange
@@ -546,7 +566,13 @@ export function renderColumnHeaders(
     : colSlots;
   const slotOffset = colRange?.[0] ?? 0;
   const rows: ReactElement[] = [];
-  const numColLevels = Math.max(config.columns.length, 1);
+  const effectiveHeaderLevels = headerLevels ?? [];
+  const hasTemporalHierarchy =
+    effectiveHeaderLevels.length > 0 &&
+    effectiveHeaderLevels.some((l) => l.isTemporal && !l.isLeaf);
+  const numColLevels = hasTemporalHierarchy
+    ? effectiveHeaderLevels.length
+    : Math.max(config.columns.length, 1);
   const hasMenu = !!onOpenMenu;
 
   const elevateCell = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -591,6 +617,12 @@ export function renderColumnHeaders(
   for (let level = 0; level < numColLevels; level++) {
     const cells: ReactElement[] = [];
 
+    // Map physical header row to column dimension
+    const hlMapping = hasTemporalHierarchy
+      ? effectiveHeaderLevels[level]
+      : undefined;
+    const effectiveDimIndex = hlMapping?.dimIndex ?? level;
+
     const isLastColLevel = level === numColLevels - 1;
     const dimCellRowSpan = 1 + (hasMultipleValues ? 1 : 0);
     const stickyTop =
@@ -600,63 +632,93 @@ export function renderColumnHeaders(
           ? { top: level * HEADER_ROW_HEIGHT }
           : undefined;
 
-    if (numColLevels > 1 && !isLastColLevel) {
-      const colDimName = config.columns[level];
-      const colDimCollapsed = pivotData
-        ? isDimCollapsed(
-            config.collapsed_col_groups ?? [],
-            pivotData.getColKeys(),
-            level,
-          )
-        : false;
-      const showColDimToggle = canDimToggle && config.columns.length >= 2;
-      cells.push(
-        showColDimToggle ? (
-          <th
-            key={`col-dim-label-${level}`}
-            className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel} ${styles.dimensionToggleCell}`}
-            colSpan={numRowDims}
-            style={stickyTop}
-            onClick={() => handleDimToggle("col", level)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                handleDimToggle("col", level);
-              }
-            }}
-            aria-expanded={!colDimCollapsed}
-            aria-label={`${colDimCollapsed ? "Expand" : "Collapse"} all ${colDimName} groups`}
-            data-testid={`pivot-dim-toggle-col-${level}-${slugify(colDimName)}`}
-          >
-            <div
-              className={styles.headerCellInner}
-              style={{ justifyContent: "flex-start" }}
+    // When a single temporal column expands into multiple header rows,
+    // render row dim labels at level 0 spanning all levels (matching
+    // Excel / Power BI), and skip corner cells on subsequent levels.
+    const singleTemporalColumn =
+      hasTemporalHierarchy && config.columns.length === 1;
+
+    const renderRowDimCorner =
+      (singleTemporalColumn && level === 0) ||
+      (isLastColLevel && !singleTemporalColumn);
+    const skipCorner = singleTemporalColumn && level > 0;
+
+    if (!skipCorner && numColLevels > 1 && !renderRowDimCorner) {
+      // Column-dimension label corner cell (multi-column layouts only)
+      const isTemporalParentCorner =
+        hasTemporalHierarchy &&
+        hlMapping?.isTemporal &&
+        hlMapping.hierarchyOffset > 0;
+
+      if (!isTemporalParentCorner) {
+        const colDimName = config.columns[effectiveDimIndex];
+        const cornerRowSpan =
+          hasTemporalHierarchy && hlMapping?.isTemporal
+            ? (temporalInfos?.find((t) => t.field === hlMapping.field)
+                ?.hierarchyLevels.length ?? 1)
+            : 1;
+        const colDimCollapsed = pivotData
+          ? isDimCollapsed(
+              config.collapsed_col_groups ?? [],
+              pivotData.getColKeys(),
+              effectiveDimIndex,
+            )
+          : false;
+        const showColDimToggle =
+          canDimToggle && config.columns.length >= 2 && !hasTemporalHierarchy;
+        cells.push(
+          showColDimToggle ? (
+            <th
+              key={`col-dim-label-${level}`}
+              className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel} ${styles.dimensionToggleCell}`}
+              colSpan={numRowDims}
+              rowSpan={cornerRowSpan > 1 ? cornerRowSpan : undefined}
+              style={stickyTop}
+              onClick={() => handleDimToggle("col", effectiveDimIndex)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleDimToggle("col", effectiveDimIndex);
+                }
+              }}
+              aria-expanded={!colDimCollapsed}
+              aria-label={`${colDimCollapsed ? "Expand" : "Collapse"} all ${colDimName} groups`}
+              data-testid={`pivot-dim-toggle-col-${level}-${slugify(colDimName)}`}
             >
-              <DimToggleIcon collapsed={colDimCollapsed} />
-              <span>{colDimName}</span>
-            </div>
-          </th>
-        ) : (
-          <th
-            key={`col-dim-label-${level}`}
-            className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel}`}
-            colSpan={numRowDims}
-            style={stickyTop}
-          >
-            <div
-              className={styles.headerCellInner}
-              style={{ justifyContent: "flex-start" }}
+              <div
+                className={styles.headerCellInner}
+                style={{ justifyContent: "flex-start" }}
+              >
+                <DimToggleIcon collapsed={colDimCollapsed} />
+                <span>{colDimName}</span>
+              </div>
+            </th>
+          ) : (
+            <th
+              key={`col-dim-label-${level}`}
+              className={`${styles.emptyCorner} ${styles.headerCell} ${styles.colDimLabel}`}
+              colSpan={numRowDims}
+              rowSpan={cornerRowSpan > 1 ? cornerRowSpan : undefined}
+              style={stickyTop}
             >
-              <span>{colDimName}</span>
-            </div>
-          </th>
-        ),
-      );
+              <div
+                className={styles.headerCellInner}
+                style={{ justifyContent: "flex-start" }}
+              >
+                <span>{colDimName}</span>
+              </div>
+            </th>
+          ),
+        );
+      }
     }
 
-    if (isLastColLevel) {
+    if (renderRowDimCorner) {
+      const cornerFullRowSpan = singleTemporalColumn
+        ? numColLevels + (hasMultipleValues ? 1 : 0)
+        : dimCellRowSpan;
       if (config.rows.length > 0) {
         const showRowDimToggle =
           canDimToggle && config.rows.length >= 2 && !!config.show_subtotals;
@@ -721,7 +783,7 @@ export function renderColumnHeaders(
             <th
               key={`row-dim-${dimIdx}`}
               className={`${styles.headerCell} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
-              rowSpan={dimCellRowSpan}
+              rowSpan={cornerFullRowSpan}
               style={rowDimCellStyle}
               data-testid={
                 canToggleThisDim
@@ -811,7 +873,7 @@ export function renderColumnHeaders(
           <th
             key="corner-empty"
             className={styles.emptyCorner}
-            rowSpan={dimCellRowSpan}
+            rowSpan={cornerFullRowSpan}
             style={stickyTop}
           />,
         );
@@ -819,187 +881,291 @@ export function renderColumnHeaders(
     }
 
     if (config.columns.length > 0) {
-      const dimName = config.columns[level];
-      const isFirstColLevel = level === 0;
-      const colSortDir =
-        isFirstColLevel && config.col_sort
-          ? config.col_sort.direction
-          : undefined;
-      let i = 0;
-      while (i < visibleSlots.length) {
-        const slotIdx = slotOffset + i;
-        const slot = visibleSlots[i];
-        const isCollapsedSlot = slot.collapsedLevel !== undefined;
-        const collapsedAtOrAbove =
-          isCollapsedSlot && slot.collapsedLevel! <= level;
+      const dimName = config.columns[effectiveDimIndex];
+      const isTemporalParent = hlMapping?.isTemporal && !hlMapping.isLeaf;
 
-        // Skip sub-level headers for slots collapsed at a higher level
-        if (isCollapsedSlot && level > slot.collapsedLevel!) {
-          i++;
-          continue;
-        }
+      // Render temporal parent header row
+      if (isTemporalParent && hlMapping && (temporalInfos?.length ?? 0) > 0) {
+        const tInfo = temporalInfos!.find((t) => t.field === hlMapping.field);
+        if (tInfo) {
+          const parentGroups = computeParentGroups(
+            colSlots,
+            slotOffset,
+            visibleSlots.length,
+            tInfo,
+            hlMapping.grain,
+            hlMapping.hierarchyOffset,
+            config,
+            config.dimension_format?.[hlMapping.field],
+          );
 
-        const val = slot.key[level] ?? "";
-        let span = 1;
-        // Group consecutive slots with the same value at this level (only for non-collapsed)
-        if (!collapsedAtOrAbove) {
-          while (
-            i + span < visibleSlots.length &&
-            visibleSlots[i + span].collapsedLevel === undefined &&
-            visibleSlots[i + span].key[level] === val &&
-            (level === 0 ||
-              visibleSlots[i + span].key
-                .slice(0, level)
-                .every((v, idx) => v === slot.key[idx]))
-          ) {
-            span++;
+          for (const group of parentGroups) {
+            const span = group.endIdx - group.startIdx;
+            const colSpanVal = hasMultipleValues
+              ? span * renderedValueFields.length
+              : span;
+            const remainingLevels = numColLevels - level;
+            const rowSpanVal = group.isCollapsed
+              ? remainingLevels + (hasMultipleValues ? 1 : 0)
+              : undefined;
+
+            cells.push(
+              <th
+                key={`col-tp-${level}-${group.collapseKey}`}
+                scope="col"
+                className={`${styles.headerCell} ${group.isCollapsed ? styles.totalsCol : ""} ${styles.groupToggleCell}`}
+                colSpan={colSpanVal > 1 ? colSpanVal : undefined}
+                rowSpan={rowSpanVal}
+                style={stickyTop}
+                data-testid={`pivot-temporal-header-${slugify(hlMapping.field)}-${group.parentBucket}`}
+                aria-expanded={!group.isCollapsed}
+              >
+                <div className={styles.headerCellInner}>
+                  <button
+                    type="button"
+                    className={styles.temporalToggleBtn}
+                    data-testid={`temporal-toggle-${slugify(hlMapping.field)}-${group.parentBucket}`}
+                    onClick={(e: MouseEvent) => {
+                      e.stopPropagation();
+                      onTemporalToggle?.(hlMapping.field, group.collapseKey);
+                    }}
+                    aria-label={`${group.isCollapsed ? "Expand" : "Collapse"} ${group.label}`}
+                    title={`${group.isCollapsed ? "Expand" : "Collapse"} ${group.label}`}
+                  >
+                    <svg
+                      className={styles.groupToggleIcon}
+                      width="8"
+                      height="8"
+                      viewBox="0 0 10 10"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    >
+                      {group.isCollapsed ? (
+                        <>
+                          <line x1="5" y1="1" x2="5" y2="9" />
+                          <line x1="1" y1="5" x2="9" y2="5" />
+                        </>
+                      ) : (
+                        <line x1="1" y1="5" x2="9" y2="5" />
+                      )}
+                    </svg>
+                  </button>
+                  <span>{group.label}</span>
+                  {hasMenu && (
+                    <MenuTriggerButton
+                      dimension={dimName}
+                      axis="col"
+                      isOpen={activeMenuDimension === dimName}
+                      onOpen={onOpenMenu}
+                    />
+                  )}
+                </div>
+              </th>,
+            );
           }
         }
-
-        const colSpanVal = hasMultipleValues
-          ? span * renderedValueFields.length
-          : span;
-
-        const isFiltered = !!config.filters?.[dimName];
-        const showColSortIndicator = !!colSortDir && isFirstColLevel && i === 0;
-
-        // Collapsed groups at their collapse level get a rowSpan to cover remaining levels + value row
-        const isCollapseLevel =
-          isCollapsedSlot && slot.collapsedLevel === level;
-        const remainingLevels = numColLevels - level;
-        const rowSpanVal = isCollapseLevel
-          ? remainingLevels + (hasMultipleValues ? 1 : 0)
-          : undefined;
-
-        const canToggle =
-          isCollapseLevel ||
-          (!isCollapsedSlot &&
-            config.columns.length >= 2 &&
-            level < config.columns.length - 1 &&
-            onToggleColGroup);
-        const groupKeyStr = makeKeyString(slot.key.slice(0, level + 1));
-
-        const resizeWidth =
-          columnWidthMap && (level === numColLevels - 1 || isCollapseLevel)
-            ? columnWidthMap.get(slotIdx)
+      } else {
+        // Original non-temporal / leaf column header rendering.
+        // keyIndex maps the physical header row to the column key index.
+        // With temporal hierarchy, multiple physical rows can map to the
+        // same key dimension, so keyIndex may differ from level.
+        const keyIndex = effectiveDimIndex;
+        const isFirstColLevel = level === 0;
+        const colSortDir =
+          isFirstColLevel && config.col_sort
+            ? config.col_sort.direction
             : undefined;
-        const cellStyle: React.CSSProperties | undefined =
-          resizeWidth != null
-            ? {
-                ...stickyTop,
-                width: resizeWidth,
-                minWidth: resizeWidth,
-                maxWidth: resizeWidth,
-              }
-            : stickyTop;
+        let i = 0;
+        while (i < visibleSlots.length) {
+          const slotIdx = slotOffset + i;
+          const slot = visibleSlots[i];
+          const isCollapsedSlot = slot.collapsedLevel !== undefined;
+          const collapsedAtOrAbove =
+            isCollapsedSlot && slot.collapsedLevel! <= level;
 
-        cells.push(
-          <th
-            key={`col-${level}-${i}`}
-            scope="col"
-            className={`${styles.headerCell} ${isCollapseLevel ? styles.totalsCol : ""} ${showColSortIndicator ? styles.headerSorted : ""} ${canToggle ? styles.groupToggleCell : ""}`}
-            colSpan={colSpanVal > 1 ? colSpanVal : undefined}
-            rowSpan={rowSpanVal}
-            style={cellStyle}
-            data-testid={
-              canToggle && onToggleColGroup
-                ? `pivot-col-group-toggle-${groupKeyStr}`
-                : "pivot-header-cell"
+          // Skip sub-level headers for slots collapsed at a higher level
+          if (isCollapsedSlot && level > slot.collapsedLevel!) {
+            i++;
+            continue;
+          }
+
+          // Skip temporal-collapsed slots only on temporal header rows — the
+          // collapsed parent's rowSpan covers them.  On non-temporal rows
+          // (e.g. "region" before the date field), the slot still carries a
+          // valid key value that must participate in header grouping.
+          const tSlotHeader = slot as TemporalColSlot;
+          if (tSlotHeader.temporalCollapse && hlMapping?.isTemporal) {
+            i++;
+            continue;
+          }
+
+          const val = slot.key[keyIndex] ?? "";
+          let span = 1;
+          // Group consecutive slots with the same value at this level (only for non-collapsed)
+          if (!collapsedAtOrAbove) {
+            while (
+              i + span < visibleSlots.length &&
+              visibleSlots[i + span].collapsedLevel === undefined &&
+              (!(visibleSlots[i + span] as TemporalColSlot).temporalCollapse ||
+                !hlMapping?.isTemporal) &&
+              visibleSlots[i + span].key[keyIndex] === val &&
+              (keyIndex === 0 ||
+                visibleSlots[i + span].key
+                  .slice(0, keyIndex)
+                  .every((v, idx) => v === slot.key[idx]))
+            ) {
+              span++;
             }
-            aria-sort={
-              showColSortIndicator
-                ? colSortDir === "asc"
-                  ? "ascending"
-                  : "descending"
-                : undefined
-            }
-            {...(canToggle && onToggleColGroup
+          }
+
+          const colSpanVal = hasMultipleValues
+            ? span * renderedValueFields.length
+            : span;
+
+          const isFiltered = !!config.filters?.[dimName];
+          const showColSortIndicator =
+            !!colSortDir && isFirstColLevel && i === 0;
+
+          // Collapsed groups at their collapse level get a rowSpan to cover remaining levels + value row
+          const isCollapseLevel =
+            isCollapsedSlot && slot.collapsedLevel === level;
+          const remainingLevels = numColLevels - level;
+          const rowSpanVal = isCollapseLevel
+            ? remainingLevels + (hasMultipleValues ? 1 : 0)
+            : undefined;
+
+          const canToggle =
+            isCollapseLevel ||
+            (!isCollapsedSlot &&
+              config.columns.length >= 2 &&
+              keyIndex < config.columns.length - 1 &&
+              onToggleColGroup);
+          const groupKeyStr = makeKeyString(slot.key.slice(0, keyIndex + 1));
+
+          const resizeWidth =
+            columnWidthMap && (level === numColLevels - 1 || isCollapseLevel)
+              ? columnWidthMap.get(slotIdx)
+              : undefined;
+          const cellStyle: React.CSSProperties | undefined =
+            resizeWidth != null
               ? {
-                  onClick: (e: MouseEvent) => {
-                    if (
-                      (e.target as HTMLElement).closest(
-                        `.${styles.headerMenuBtn}`,
-                      )
-                    )
-                      return;
-                    onToggleColGroup(groupKeyStr);
-                  },
-                  role: "button",
-                  tabIndex: 0,
-                  onKeyDown: (e: KeyboardEvent) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onToggleColGroup!(groupKeyStr);
-                    }
-                  },
-                  "aria-expanded": !isCollapseLevel,
-                  "aria-label": isCollapseLevel
-                    ? `Expand ${val}`
-                    : `Collapse ${val}`,
+                  ...stickyTop,
+                  width: resizeWidth,
+                  minWidth: resizeWidth,
+                  maxWidth: resizeWidth,
                 }
-              : {})}
-          >
-            <div className={styles.headerCellInner}>
-              {canToggle && onToggleColGroup && (
-                <svg
-                  className={styles.groupToggleIcon}
-                  width="8"
-                  height="8"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                >
-                  {isCollapseLevel ? (
-                    <>
-                      <line x1="5" y1="1" x2="5" y2="9" />
-                      <line x1="1" y1="5" x2="9" y2="5" />
-                    </>
-                  ) : (
-                    <line x1="1" y1="5" x2="9" y2="5" />
-                  )}
-                </svg>
-              )}
-              <span className={isFiltered ? styles.headerFiltered : ""}>
-                {(val
-                  ? (pivotData?.formatDimLabel(dimName, val) ?? val)
-                  : "") || "(empty)"}
-              </span>
-              {showColSortIndicator && (
-                <SortArrowIcon direction={colSortDir!} />
-              )}
-              {hasMenu && (
-                <MenuTriggerButton
-                  dimension={dimName}
-                  axis="col"
-                  isOpen={activeMenuDimension === dimName}
-                  onOpen={onOpenMenu}
-                />
-              )}
-            </div>
-            {onResizeMouseDown &&
-              (level === numColLevels - 1 || isCollapseLevel) && (
-                <div
-                  className={styles.resizeHandle}
-                  data-testid={`resize-handle-${slotIdx}`}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    onResizeMouseDown(slotIdx, e);
-                  }}
-                  onDoubleClick={
-                    onResizeDoubleClick
-                      ? (e) => onResizeDoubleClick(slotIdx, e)
-                      : undefined
+              : stickyTop;
+
+          cells.push(
+            <th
+              key={`col-${level}-${i}`}
+              scope="col"
+              className={`${styles.headerCell} ${isCollapseLevel ? styles.totalsCol : ""} ${showColSortIndicator ? styles.headerSorted : ""} ${canToggle ? styles.groupToggleCell : ""}`}
+              colSpan={colSpanVal > 1 ? colSpanVal : undefined}
+              rowSpan={rowSpanVal}
+              style={cellStyle}
+              data-testid={
+                canToggle && onToggleColGroup
+                  ? `pivot-col-group-toggle-${groupKeyStr}`
+                  : "pivot-header-cell"
+              }
+              aria-sort={
+                showColSortIndicator
+                  ? colSortDir === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : undefined
+              }
+              {...(canToggle && onToggleColGroup
+                ? {
+                    onClick: (e: MouseEvent) => {
+                      if (
+                        (e.target as HTMLElement).closest(
+                          `.${styles.headerMenuBtn}`,
+                        )
+                      )
+                        return;
+                      onToggleColGroup(groupKeyStr);
+                    },
+                    role: "button",
+                    tabIndex: 0,
+                    onKeyDown: (e: KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onToggleColGroup!(groupKeyStr);
+                      }
+                    },
+                    "aria-expanded": !isCollapseLevel,
+                    "aria-label": isCollapseLevel
+                      ? `Expand ${val}`
+                      : `Collapse ${val}`,
                   }
-                  onMouseEnter={elevateCell}
-                  onMouseLeave={resetCell}
-                />
-              )}
-          </th>,
-        );
-        i += span;
-      }
+                : {})}
+            >
+              <div className={styles.headerCellInner}>
+                {canToggle && onToggleColGroup && (
+                  <svg
+                    className={styles.groupToggleIcon}
+                    width="8"
+                    height="8"
+                    viewBox="0 0 10 10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  >
+                    {isCollapseLevel ? (
+                      <>
+                        <line x1="5" y1="1" x2="5" y2="9" />
+                        <line x1="1" y1="5" x2="9" y2="5" />
+                      </>
+                    ) : (
+                      <line x1="1" y1="5" x2="9" y2="5" />
+                    )}
+                  </svg>
+                )}
+                <span className={isFiltered ? styles.headerFiltered : ""}>
+                  {(val
+                    ? (pivotData?.formatDimLabel(dimName, val) ?? val)
+                    : "") || "(empty)"}
+                </span>
+                {showColSortIndicator && (
+                  <SortArrowIcon direction={colSortDir!} />
+                )}
+                {hasMenu && (
+                  <MenuTriggerButton
+                    dimension={dimName}
+                    axis="col"
+                    isOpen={activeMenuDimension === dimName}
+                    onOpen={onOpenMenu}
+                  />
+                )}
+              </div>
+              {onResizeMouseDown &&
+                (level === numColLevels - 1 || isCollapseLevel) && (
+                  <div
+                    className={styles.resizeHandle}
+                    data-testid={`resize-handle-${slotIdx}`}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      onResizeMouseDown(slotIdx, e);
+                    }}
+                    onDoubleClick={
+                      onResizeDoubleClick
+                        ? (e) => onResizeDoubleClick(slotIdx, e)
+                        : undefined
+                    }
+                    onMouseEnter={elevateCell}
+                    onMouseLeave={resetCell}
+                  />
+                )}
+            </th>,
+          );
+          i += span;
+        }
+      } // close temporal parent else
     } else {
       const colSpanVal = hasMultipleValues ? renderedValueFields.length : 1;
       const headerLabel = hasMultipleValues
@@ -1046,9 +1212,9 @@ export function renderColumnHeaders(
     for (let si = 0; si < visibleSlots.length; si++) {
       const slot = visibleSlots[si];
       if (slot.collapsedLevel !== undefined) continue;
+      if ((slot as TemporalColSlot).temporalCollapse) continue;
       for (let vfi = 0; vfi < renderedValueFields.length; vfi++) {
         const valField = renderedValueFields[vfi];
-        const isLastVal = vfi === renderedValueFields.length - 1;
         valueCells.push(
           <th
             key={`val-${slot.key.join("\x00")}-${valField}`}
@@ -1301,6 +1467,45 @@ export function renderDataRow(
         </th>
       )}
       {visibleSlots.map((slot) => {
+        const tSlot = slot as TemporalColSlot;
+        if (tSlot.temporalCollapse) {
+          const tc = tSlot.temporalCollapse;
+          return valueFields.map((valField) => {
+            const agg = pivotData.getTemporalColSubtotal(
+              rowKey,
+              tc.modifiedColKey,
+              valField,
+            );
+            const cellValue = agg.value();
+            const text = formatTotalCellValue(
+              agg,
+              valField,
+              config,
+              pivotData,
+              null,
+              undefined,
+              undefined,
+            );
+            const cellStyle = buildTotalCellStyle(
+              cellValue,
+              valField,
+              config,
+              pivotData,
+            );
+            const hasCondFmt =
+              cellStyle && cellStyle.backgroundColor !== undefined;
+            return (
+              <td
+                key={`tc-${makeKeyString(tc.modifiedColKey)}\x01${valField}`}
+                className={`${styles.dataCell} ${styles.totalsCol}${hasCondFmt ? ` ${styles.condFormatted}` : ""}`}
+                data-testid="pivot-temporal-collapse-cell"
+                style={cellStyle}
+              >
+                {text}
+              </td>
+            );
+          });
+        }
         if (slot.collapsedLevel !== undefined) {
           return valueFields.map((valField) => {
             const agg = pivotData.getColGroupSubtotal(
@@ -1626,9 +1831,17 @@ export function renderSubtotalRow(
       {/* Data cells: subtotal values */}
       {visibleSlots.map((slot) =>
         valueFields.map((valField) => {
-          const comparisonMode = getPeriodComparisonMode(config, valField);
-          const agg =
-            slot.collapsedLevel !== undefined
+          const tSlotSub = slot as TemporalColSlot;
+          const comparisonMode = tSlotSub.temporalCollapse
+            ? undefined
+            : getPeriodComparisonMode(config, valField);
+          const agg = tSlotSub.temporalCollapse
+            ? pivotData.getTemporalColSubtotal(
+                parentKey,
+                tSlotSub.temporalCollapse.modifiedColKey,
+                valField,
+              )
+            : slot.collapsedLevel !== undefined
               ? pivotData.getSubtotalColGroupAgg(parentKey, slot.key, valField)
               : pivotData.getSubtotalAggregator(parentKey, slot.key, valField);
           const cellValue = agg.value();
@@ -1839,11 +2052,18 @@ export function renderTotalsRow(
               </td>
             );
           }
-          const agg =
-            slot.collapsedLevel !== undefined
+          const tSlot = slot as TemporalColSlot;
+          const agg = tSlot.temporalCollapse
+            ? pivotData.getTemporalColSubtotalGrand(
+                tSlot.temporalCollapse.modifiedColKey,
+                valField,
+              )
+            : slot.collapsedLevel !== undefined
               ? pivotData.getColGroupGrandSubtotal(slot.key, valField)
               : pivotData.getColTotal(slot.key, valField);
-          const comparisonMode = getPeriodComparisonMode(config, valField);
+          const comparisonMode = tSlot.temporalCollapse
+            ? undefined
+            : getPeriodComparisonMode(config, valField);
           const cellValue = agg.value();
           const text = formatTotalCellValue(
             agg,
@@ -1872,18 +2092,23 @@ export function renderTotalsRow(
             config,
             pivotData,
           );
+          const cellInteractive = onCellClick && !tSlot.temporalCollapse;
           return (
             <td
               key={`coltotal-${slot.key.join("\x00")}-${valField}`}
-              className={styles.dataCell}
-              data-testid="pivot-col-total"
+              className={`${styles.dataCell}${tSlot.temporalCollapse ? ` ${styles.totalsCol}` : ""}`}
+              data-testid={
+                tSlot.temporalCollapse
+                  ? "pivot-temporal-collapse-total"
+                  : "pivot-col-total"
+              }
               style={cellStyle}
-              {...(onCellClick
+              {...(cellInteractive
                 ? {
                     tabIndex: 0,
                     role: "gridcell",
                     onClick: () =>
-                      onCellClick(
+                      onCellClick!(
                         buildCellClickPayload(
                           TOTAL_KEY,
                           slot.key,
@@ -2189,6 +2414,38 @@ const TableRenderer: FC<TableRendererProps> = ({
     [colKeys, config.collapsed_col_groups, numColDims],
   );
 
+  const columnTypes = pivotData.getColumnTypes();
+  const temporalInfos = useMemo(
+    () => computeTemporalColInfos(config, columnTypes, adaptiveDateGrains),
+    [config, columnTypes, adaptiveDateGrains],
+  );
+  const headerLevels = useMemo(
+    () => computeHeaderLevels(config, temporalInfos),
+    [config, temporalInfos],
+  );
+
+  const effectiveColSlots: ColSlot[] = useMemo(
+    () => computeTemporalColSlots(colSlots, temporalInfos, config),
+    [colSlots, temporalInfos, config],
+  );
+
+  const handleTemporalToggle = useCallback(
+    (field: string, collapseKey: string) => {
+      if (!onConfigChange) return;
+      const updated = toggleTemporalCollapse(
+        config.collapsed_temporal_groups,
+        field,
+        collapseKey,
+      );
+      onConfigChange({
+        ...config,
+        collapsed_temporal_groups:
+          Object.keys(updated).length > 0 ? updated : undefined,
+      });
+    },
+    [config, onConfigChange],
+  );
+
   const useSubtotals = !!config.show_subtotals && config.rows.length >= 2;
   const collapsedSet = useMemo(() => {
     const raw = config.collapsed_groups ?? [];
@@ -2378,7 +2635,7 @@ const TableRenderer: FC<TableRendererProps> = ({
           return renderSubtotalRow(
             entry.key,
             entry.level,
-            colSlots,
+            effectiveColSlots,
             pivotData,
             config,
             hasMultipleValues,
@@ -2405,7 +2662,7 @@ const TableRenderer: FC<TableRendererProps> = ({
         prevDataKey = entry.key;
         return renderDataRow(
           entry.key,
-          colSlots,
+          effectiveColSlots,
           pivotData,
           config,
           hasMultipleValues,
@@ -2423,7 +2680,7 @@ const TableRenderer: FC<TableRendererProps> = ({
     return flatRowKeys!.map((rowKey, rowIdx) =>
       renderDataRow(
         rowKey,
-        colSlots,
+        effectiveColSlots,
         pivotData,
         config,
         hasMultipleValues,
@@ -2471,7 +2728,7 @@ const TableRenderer: FC<TableRendererProps> = ({
         >
           <thead ref={theadRef}>
             {renderColumnHeaders(
-              colSlots,
+              effectiveColSlots,
               config,
               numRowDims,
               hasMultipleValues,
@@ -2488,6 +2745,10 @@ const TableRenderer: FC<TableRendererProps> = ({
               headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
               handleResizeDoubleClick,
               adaptiveDateGrains,
+              temporalInfos.length > 0 ? temporalInfos : undefined,
+              temporalInfos.length > 0 ? headerLevels : undefined,
+              handleTemporalToggle,
+              columnTypes,
             )}
           </thead>
           <tbody>
@@ -2507,7 +2768,7 @@ const TableRenderer: FC<TableRendererProps> = ({
             {rowKeys.length > 0 &&
               showColumnTotals(config) &&
               renderTotalsRow(
-                colSlots,
+                effectiveColSlots,
                 pivotData,
                 config,
                 numRowDims,

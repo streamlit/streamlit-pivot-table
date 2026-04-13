@@ -275,6 +275,7 @@ Typed `date` and `datetime` fields are treated as hierarchy-capable dimensions w
 - Alternate grouping: `Week` is available from the header menu, but it is not part of the default drill path.
 - Explicit override precedence: explicit `date_grains[field]` beats interactive state, which beats the adaptive auto default.
 - Explicit opt-out: `date_grains[field] = None` preserves the raw/original date values for that field.
+- Hierarchical parent headers with +/- collapse/expand currently render on the **column axis**. Row-side temporal hierarchy parity is planned separately.
 
 ```python
 # Adaptive date hierarchy: grain chosen from the data's date range
@@ -324,6 +325,8 @@ Once a temporal field is active on an axis, open its header menu to:
 - drill up or down through the default hierarchy,
 - switch directly to `Week`,
 - choose `Original` to persist a raw-date opt-out for that field.
+
+When a temporal field is on `columns`, parent headers such as `2024` or `Q1 2024` can be collapsed with the inline +/- toggle. This is a view-only collapse: the underlying leaf buckets remain the data/export contract.
 
 Grouped buckets export as grouped labels such as `Jan 2024`, `Q1 2024`, or `2024-W03`; they are intentionally not exported as fake raw Excel dates.
 
@@ -500,7 +503,7 @@ st_pivot_table(
 )
 ```
 
-Hover over a parent column header to reveal the collapse toggle.
+Hover over a parent column header to reveal the collapse toggle. Temporal date hierarchies use the same pattern on the column axis, with inline +/- controls on parent date headers.
 
 ### Data Export
 
@@ -512,7 +515,7 @@ Export the pivot table as Excel, CSV, TSV, or copy to clipboard. Available via t
 
 Excel export produces a professionally styled workbook with merged column headers, bold totals/subtotals, number formatting, banded rows, frozen panes (headers stay visible when scrolling), and row dimension merging that matches the rendered table layout. Sort order, active filters, and show-values-as percentages are all preserved. Conditional formatting rules (color scales, data bars, and threshold highlights) are translated to native Excel conditional formatting, so the exported file renders them natively without macros.
 
-Export always outputs the full expanded table regardless of any collapsed row/column groups.
+Export always outputs the full expanded table regardless of any collapsed row/column groups, including collapsed temporal date parents.
 
 ### Drill-Down Detail Panel
 
@@ -719,7 +722,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains 17 sections covering the major features and usage patterns with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains 18 sections covering the major features and usage patterns with interactive examples and inline documentation.
 
 ### Building the frontend
 

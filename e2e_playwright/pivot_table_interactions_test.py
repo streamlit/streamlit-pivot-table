@@ -323,6 +323,140 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
     close_header_menu(page, "header-menu-revenue")
 
 
+def test_temporal_hierarchy_toggle_collapses_and_expands(page_at_app: Page):
+    """Clicking the +/- toggle collapses a year parent and re-expands it."""
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_date_hierarchy")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # With quarter grain, hierarchy is [year, quarter].
+    # Verify year parent headers are visible.
+    header_2024 = container.get_by_test_id("pivot-temporal-header-order-date-2024")
+    expect(header_2024).to_be_visible(timeout=5000)
+    header_2025 = container.get_by_test_id("pivot-temporal-header-order-date-2025")
+    expect(header_2025).to_be_visible(timeout=5000)
+
+    # Verify leaf quarter headers are visible for 2024.
+    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q2 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q3 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q4 2024")).to_be_visible(timeout=5000)
+
+    # Collapse 2024 by clicking the +/- toggle button.
+    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024.click()
+
+    # After collapse: quarter leaf headers under 2024 should be hidden,
+    # and a collapsed aggregate cell should appear.
+    expect(container.get_by_text("Q1 2024")).to_be_hidden(timeout=5000)
+    expect(container.get_by_text("Q2 2024")).to_be_hidden(timeout=5000)
+    expect(container.get_by_text("Q3 2024")).to_be_hidden(timeout=5000)
+    expect(container.get_by_text("Q4 2024")).to_be_hidden(timeout=5000)
+    expect(
+        container.get_by_test_id("pivot-temporal-collapse-cell").first
+    ).to_be_visible(timeout=5000)
+
+    # 2025 quarter should still be visible (not collapsed).
+    expect(container.get_by_text("Q1 2025")).to_be_visible(timeout=5000)
+
+    # Re-expand 2024.
+    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024.click()
+
+    # All quarter columns should be visible again.
+    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q2 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q3 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q4 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_test_id("pivot-temporal-collapse-cell")).to_have_count(0)
+
+
+def test_temporal_hierarchy_collapsed_cells_suppress_comparison(page_at_app: Page):
+    """Collapsed parent cells render raw aggregates, not period comparisons."""
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_date_hierarchy")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # The fixture has show_values_as={"revenue": "diff_from_prev"}.
+    # Leaf cells should have comparison indicators (arrows / deltas).
+    data_cells = container.get_by_test_id("pivot-data-cell")
+    expect(data_cells.first).to_be_visible(timeout=5000)
+
+    # Collapse 2024.
+    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024.click()
+
+    # The collapsed aggregate cells should NOT contain comparison indicators.
+    collapse_cells = container.get_by_test_id("pivot-temporal-collapse-cell")
+    expect(collapse_cells.first).to_be_visible(timeout=5000)
+
+    # Collapsed cells should contain a plain numeric value (the raw sum for
+    # all quarters in 2024), not a comparison arrow/delta.  A comparison
+    # indicator includes an arrow character or "▲"/"▼" or "+" prefix.
+    first_collapse_text = collapse_cells.first.inner_text()
+    assert (
+        "▲" not in first_collapse_text
+    ), f"Collapsed cell should not show comparison indicator, got: {first_collapse_text}"
+    assert (
+        "▼" not in first_collapse_text
+    ), f"Collapsed cell should not show comparison indicator, got: {first_collapse_text}"
+
+    # Re-expand to restore state for other tests.
+    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024.click()
+    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
+
+
+def test_temporal_hierarchy_multidim_per_instance_collapse(page_at_app: Page):
+    """Collapsing one parent instance in a multi-dimension column layout
+    does not collapse its sibling instance."""
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_date_hierarchy_multidim")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # With columns=["region", "order_date"], the hierarchy has region as an
+    # outer sibling.  Each region gets its own set of year parent headers.
+    # Verify both EU and US 2024 year headers are visible.
+    eu_header = container.get_by_test_id("pivot-temporal-header-order-date-2024").first
+    expect(eu_header).to_be_visible(timeout=5000)
+
+    # Collapse the first 2024 instance (should be one region only).
+    first_toggle = container.get_by_test_id("temporal-toggle-order-date-2024").first
+    first_toggle.click()
+
+    # At least one collapsed cell should appear.
+    expect(
+        container.get_by_test_id("pivot-temporal-collapse-cell").first
+    ).to_be_visible(timeout=5000)
+
+    # The other region's 2024 quarters should still have visible leaf headers.
+    # Since only one instance was collapsed, there should still be visible
+    # quarter headers under the other region's 2024 parent.
+    second_header = container.get_by_test_id(
+        "pivot-temporal-header-order-date-2024"
+    ).nth(1)
+    expect(second_header).to_have_attribute("aria-expanded", "true", timeout=5000)
+
+    # Re-expand.
+    first_toggle = container.get_by_test_id("temporal-toggle-order-date-2024").first
+    first_toggle.click()
+    expect(container.get_by_test_id("pivot-temporal-collapse-cell")).to_have_count(
+        0, timeout=5000
+    )
+
+
 def test_drilldown_opens_on_cell_click(page_at_app: Page):
     """Clicking a data cell opens the drilldown panel with a detail table."""
     page = page_at_app
