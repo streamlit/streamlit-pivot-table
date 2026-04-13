@@ -75,6 +75,8 @@ export interface PivotConfigV1 {
   collapsed_col_groups?: string[];
   /** Per-field collapsed temporal parent groups (stringified modified column keys). */
   collapsed_temporal_groups?: Record<string, string[]>;
+  /** Per-field collapsed temporal parent groups on the row axis (stringified modified row keys). */
+  collapsed_temporal_row_groups?: Record<string, string[]>;
   /** Phase 3d: toggle sticky (fixed) headers on/off. Default true. */
   sticky_headers?: boolean;
   /** Phase 3d: per-field number format patterns (e.g. {"Revenue": "$,.0f"}). */
@@ -288,6 +290,13 @@ export function stringifyPivotConfig(config: PivotConfigV1): string {
     collapsed_temporal_groups: config.collapsed_temporal_groups
       ? Object.fromEntries(
           Object.entries(config.collapsed_temporal_groups)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => [k, [...v].sort()]),
+        )
+      : undefined,
+    collapsed_temporal_row_groups: config.collapsed_temporal_row_groups
+      ? Object.fromEntries(
+          Object.entries(config.collapsed_temporal_row_groups)
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([k, v]) => [k, [...v].sort()]),
         )
@@ -838,6 +847,13 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       string,
       string[]
     >;
+  if (
+    o.collapsed_temporal_row_groups &&
+    typeof o.collapsed_temporal_row_groups === "object" &&
+    !Array.isArray(o.collapsed_temporal_row_groups)
+  )
+    result.collapsed_temporal_row_groups =
+      o.collapsed_temporal_row_groups as Record<string, string[]>;
   if (typeof o.sticky_headers === "boolean")
     result.sticky_headers = o.sticky_headers;
   if (
@@ -1139,6 +1155,14 @@ export interface TemporalParentEntry {
   values: Record<string, number | null>;
 }
 
+export interface TemporalRowParentEntry {
+  row: string[];
+  col?: string[];
+  field: string;
+  grain: string;
+  values: Record<string, number | null>;
+}
+
 export interface HybridTotals {
   sidecar_fingerprint: string;
   grand: Record<string, number | null>;
@@ -1150,6 +1174,8 @@ export interface HybridTotals {
   cross_subtotals?: HybridTotalEntry[];
   temporal_parent?: TemporalParentEntry[];
   temporal_parent_grand?: TemporalParentEntry[];
+  temporal_row_parent?: TemporalRowParentEntry[];
+  temporal_row_parent_grand?: TemporalRowParentEntry[];
 }
 
 // ---------------------------------------------------------------------------

@@ -1018,6 +1018,109 @@ class TestComputeHybridTotals:
         assert isinstance(sidecar["sidecar_fingerprint"], str)
         assert len(sidecar["sidecar_fingerprint"]) > 0
 
+    def test_emits_row_temporal_parent_sidecars(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "order_date": pd.to_datetime(
+                    ["2024-01-03", "2024-02-10", "2024-01-04"]
+                ),
+                "region": ["US", "US", "EU"],
+                "revenue": [100.0, 200.0, 80.0],
+            }
+        )
+        cfg = self._cfg(
+            "avg",
+            rows=["order_date"],
+            cols=["region"],
+            date_grains={"order_date": "month"},
+            auto_date_hierarchy=True,
+        )
+        sidecar = pivot_module._compute_hybrid_totals(
+            df,
+            cfg,
+            None,
+            column_types={"order_date": "date"},
+        )
+        assert sidecar is not None
+        entries = sidecar["temporal_row_parent"]
+        by_key = {
+            (tuple(entry["row"]), tuple(entry.get("col", []))): entry["values"][
+                "revenue"
+            ]
+            for entry in entries
+        }
+        assert by_key[(("tp:order_date:2024",), ("US",))] == 150.0
+        assert by_key[(("tp:order_date:2024",), ("EU",))] == 80.0
+        grand_entries = sidecar["temporal_row_parent_grand"]
+        grand_by_key = {
+            tuple(entry["row"]): entry["values"]["revenue"] for entry in grand_entries
+        }
+        assert grand_by_key[("tp:order_date:2024",)] == pytest.approx(
+            (100.0 + 200.0 + 80.0) / 3
+        )
+
+    def test_emits_row_temporal_parent_sidecars_for_collapsed_columns(
+        self, pivot_module
+    ):
+        df = pd.DataFrame(
+            {
+                "order_date": pd.to_datetime(
+                    ["2024-01-03", "2024-02-10", "2024-01-04"]
+                ),
+                "ship_date": pd.to_datetime(["2024-01-08", "2024-02-14", "2024-01-11"]),
+                "region": ["US", "US", "EU"],
+                "category": ["A", "B", "A"],
+                "revenue": [100.0, 200.0, 80.0],
+            }
+        )
+        cfg = self._cfg(
+            "avg",
+            rows=["order_date"],
+            cols=["region", "category"],
+            date_grains={"order_date": "month"},
+            auto_date_hierarchy=True,
+        )
+        sidecar = pivot_module._compute_hybrid_totals(
+            df,
+            cfg,
+            None,
+            column_types={"order_date": "date"},
+        )
+        assert sidecar is not None
+        entries = sidecar["temporal_row_parent"]
+        by_key = {
+            (tuple(entry["row"]), tuple(entry.get("col", []))): entry["values"][
+                "revenue"
+            ]
+            for entry in entries
+        }
+        assert by_key[(("tp:order_date:2024",), ("US",))] == 150.0
+
+        temporal_cfg = self._cfg(
+            "avg",
+            rows=["order_date"],
+            cols=["ship_date"],
+            date_grains={"order_date": "month", "ship_date": "month"},
+            auto_date_hierarchy=True,
+        )
+        temporal_sidecar = pivot_module._compute_hybrid_totals(
+            df[["order_date", "ship_date", "revenue"]],
+            temporal_cfg,
+            None,
+            column_types={"order_date": "date", "ship_date": "date"},
+        )
+        assert temporal_sidecar is not None
+        temporal_entries = temporal_sidecar["temporal_row_parent"]
+        temporal_by_key = {
+            (tuple(entry["row"]), tuple(entry.get("col", []))): entry["values"][
+                "revenue"
+            ]
+            for entry in temporal_entries
+        }
+        assert temporal_by_key[
+            (("tp:order_date:2024",), ("tp:ship_date:2024",))
+        ] == pytest.approx((100.0 + 200.0 + 80.0) / 3)
+
     def test_fingerprint_changes_with_layout(self, pivot_module, df):
         fp1 = pivot_module._build_sidecar_fingerprint(
             self._cfg("median", rows=["region"]), None

@@ -24,9 +24,10 @@ import TableRenderer, {
   renderTotalsRow,
   renderSubtotalRow,
 } from "./TableRenderer";
-import { PivotData, type DataRecord } from "../engine/PivotData";
+import { PivotData, type DataRecord, makeKeyString } from "../engine/PivotData";
 import type { PivotConfigV1 } from "../engine/types";
 import { makeConfig } from "../test-utils";
+import { buildModifiedRowKey } from "../engine/dateGrouping";
 
 const SAMPLE_DATA: DataRecord[] = [
   { region: "US", year: "2023", revenue: 100, profit: 40 },
@@ -88,10 +89,209 @@ describe("TableRenderer - rendering", () => {
       columnTypes: new Map([["order_date", "date"]]),
     });
     render(<TableRenderer pivotData={pd} config={config} />);
-    expect(screen.getByText("order_date (Month)")).toBeInTheDocument();
-    expect(screen.getAllByTestId("pivot-row-header")[0]).toHaveTextContent(
-      "Jan 2024",
-    );
+    expect(screen.getByText("Month")).toBeInTheDocument();
+    expect(screen.getByText("Jan 2024")).toBeInTheDocument();
+  });
+
+  it("expands row-side temporal hierarchy into multiple row header columns", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+    ];
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    expect(screen.getByText("Year")).toBeInTheDocument();
+    expect(screen.getByText("Quarter")).toBeInTheDocument();
+    expect(screen.getByText("Month")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pivot-temporal-row-toggle-order_date-2024"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Q1 2024")).toBeInTheDocument();
+    expect(screen.getByText("Jan 2024")).toBeInTheDocument();
+  });
+
+  it("renders a synthetic parent row when a row temporal group is collapsed", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+      { order_date: "2025-01-12", region: "US", revenue: 200 },
+    ];
+    const collapseKey = buildModifiedRowKey(
+      ["2024-01"],
+      0,
+      "order_date",
+      "2024",
+    ).join("\x00");
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    expect(screen.getByTestId("pivot-temporal-parent-row")).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId("pivot-temporal-row-collapse-cell")[0],
+    ).toHaveTextContent("250");
+    expect(screen.queryByText("Jan 2024")).not.toBeInTheDocument();
+  });
+
+  it("renders row temporal parent cells against collapsed column groups", () => {
+    const data: DataRecord[] = [
+      {
+        order_date: "2024-01-03",
+        region: "US",
+        category: "A",
+        revenue: 100,
+      },
+      {
+        order_date: "2024-02-10",
+        region: "US",
+        category: "A",
+        revenue: 150,
+      },
+      {
+        order_date: "2024-01-12",
+        region: "US",
+        category: "B",
+        revenue: 40,
+      },
+      {
+        order_date: "2024-02-14",
+        region: "US",
+        category: "B",
+        revenue: 60,
+      },
+      {
+        order_date: "2024-01-05",
+        region: "EU",
+        category: "A",
+        revenue: 80,
+      },
+    ];
+    const collapseKey = buildModifiedRowKey(
+      ["2024-01"],
+      0,
+      "order_date",
+      "2024",
+    ).join("\x00");
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region", "category"],
+      values: ["revenue"],
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+      collapsed_col_groups: [makeKeyString(["US"])],
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    expect(screen.getByTestId("pivot-temporal-parent-row")).toBeInTheDocument();
+    const texts = screen
+      .getAllByTestId("pivot-temporal-row-collapse-cell")
+      .map((cell) => cell.textContent ?? "");
+    expect(texts).toContain("350");
+  });
+
+  it("keeps row temporal parent cells raw under show_values_as", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+      { order_date: "2025-01-12", region: "US", revenue: 200 },
+    ];
+    const collapseKey = buildModifiedRowKey(
+      ["2024-01"],
+      0,
+      "order_date",
+      "2024",
+    ).join("\x00");
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+      show_values_as: { revenue: "pct_of_total" },
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    const text =
+      screen.getAllByTestId("pivot-temporal-row-collapse-cell")[0]
+        ?.textContent ?? "";
+    expect(text).toContain("250");
+    expect(text).not.toContain("%");
+  });
+
+  it("keeps row temporal parent cells raw under period comparison modes", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+      { order_date: "2025-01-12", region: "US", revenue: 200 },
+    ];
+    const collapseKey = buildModifiedRowKey(
+      ["2024-01"],
+      0,
+      "order_date",
+      "2024",
+    ).join("\x00");
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+      show_values_as: { revenue: "diff_from_prev" },
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    expect(
+      screen.getAllByTestId("pivot-temporal-row-collapse-cell")[0],
+    ).toHaveTextContent("250");
+  });
+
+  it("renders spacer cells for collapsed-away inner row hierarchy columns", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+      { order_date: "2025-01-12", region: "US", revenue: 200 },
+    ];
+    const collapseKey = buildModifiedRowKey(
+      ["2024-01"],
+      0,
+      "order_date",
+      "2024",
+    ).join("\x00");
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    expect(
+      screen.getAllByTestId("pivot-row-header-spacer").length,
+    ).toBeGreaterThan(0);
   });
 
   it("renders data cells with correct values", () => {
@@ -108,6 +308,33 @@ describe("TableRenderer - rendering", () => {
     render(<TableRenderer pivotData={pd} config={makeConfig()} />);
     expect(screen.getByTestId("pivot-totals-row")).toBeInTheDocument();
     expect(screen.getByText("Grand Total")).toBeInTheDocument();
+  });
+
+  it("preserves show_values_as formatting for non-temporal grand total row cells", () => {
+    const config = makeConfig({
+      show_values_as: { revenue: "pct_of_total" },
+    });
+    const pd = createPivotData(SAMPLE_DATA, config);
+    const colSlots = computeColSlots(
+      pd.getColKeys(),
+      config.collapsed_col_groups,
+      config.columns.length || 1,
+    );
+    render(
+      <table>
+        <tbody>
+          {renderTotalsRow(
+            colSlots,
+            pd,
+            config,
+            Math.max(config.rows.length, 1),
+            false,
+          )}
+        </tbody>
+      </table>,
+    );
+
+    expect(screen.getAllByTestId("pivot-col-total")[0]).toHaveTextContent("%");
   });
 
   it("omits totals row when show_totals is false", () => {

@@ -347,13 +347,41 @@ export function formatTemporalParentLabel(
  * Build a modified column key by replacing the temporal field's segment
  * with a "tp:{fieldName}:{parentBucket}" token.
  */
+export function buildModifiedAxisKey(
+  fullKey: string[],
+  temporalFieldIndex: number,
+  fieldName: string,
+  parentBucket: string,
+): string[] {
+  const modified = [...fullKey];
+  modified[temporalFieldIndex] = `tp:${fieldName}:${parentBucket}`;
+  return modified;
+}
+
 export function buildModifiedColKey(
   fullColKey: string[],
   temporalFieldIndex: number,
   fieldName: string,
   parentBucket: string,
 ): string[] {
-  const modified = [...fullColKey];
-  modified[temporalFieldIndex] = `tp:${fieldName}:${parentBucket}`;
-  return modified;
+  return buildModifiedAxisKey(
+    fullColKey,
+    temporalFieldIndex,
+    fieldName,
+    parentBucket,
+  );
+}
+
+export function buildModifiedRowKey(
+  fullRowKey: string[],
+  temporalFieldIndex: number,
+  fieldName: string,
+  parentBucket: string,
+): string[] {
+  return buildModifiedAxisKey(
+    fullRowKey,
+    temporalFieldIndex,
+    fieldName,
+    parentBucket,
+  );
 }

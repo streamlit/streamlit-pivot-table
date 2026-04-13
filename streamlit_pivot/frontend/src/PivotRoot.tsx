@@ -324,14 +324,15 @@ const PivotRoot: FC<PivotRootProps> = ({
             )
           : cfg.show_values_as;
 
-      const nextTemporalGroups = (() => {
-        const existing = cfg.collapsed_temporal_groups;
-        if (!existing) return undefined;
+      const clearTemporalGroups = (
+        groups: Record<string, string[]> | undefined,
+      ): Record<string, string[]> | undefined => {
+        if (!groups) return undefined;
         const cleaned = Object.fromEntries(
-          Object.entries(existing).filter(([f]) => !allAffected.has(f)),
+          Object.entries(groups).filter(([f]) => !allAffected.has(f)),
         );
         return Object.keys(cleaned).length > 0 ? cleaned : undefined;
-      })();
+      };
 
       const patched: PivotConfigV1 = {
         ...cfg,
@@ -345,7 +346,12 @@ const PivotRoot: FC<PivotRootProps> = ({
           affectedRows.length > 0 ? undefined : cfg.collapsed_groups,
         collapsed_col_groups:
           affectedCols.length > 0 ? undefined : cfg.collapsed_col_groups,
-        collapsed_temporal_groups: nextTemporalGroups,
+        collapsed_temporal_groups: clearTemporalGroups(
+          cfg.collapsed_temporal_groups,
+        ),
+        collapsed_temporal_row_groups: clearTemporalGroups(
+          cfg.collapsed_temporal_row_groups,
+        ),
       };
       setLocalConfig(patched);
       setStateValue("config", patched);

@@ -367,7 +367,8 @@ function cell(
  * with typed cells, raw values, merge spans, and number format codes.
  *
  * Export always uses the full (expanded) column and row keys, regardless
- * of any collapsed_groups / collapsed_col_groups / collapsed_temporal_groups
+ * of any collapsed_groups / collapsed_col_groups / collapsed_temporal_groups /
+ * collapsed_temporal_row_groups
  * display state. This is intentional — export provides complete data, not
  * a visual screenshot.
  */

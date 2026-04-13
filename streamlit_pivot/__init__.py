@@ -90,6 +90,7 @@ class PivotConfig(TypedDict, total=False):
     collapsed_groups: list[str]
     collapsed_col_groups: list[str]
     collapsed_temporal_groups: dict[str, list[str]]
+    collapsed_temporal_row_groups: dict[str, list[str]]
     sticky_headers: bool
     show_values_as: dict[str, str]
     conditional_formatting: list[dict[str, Any]]
@@ -1211,6 +1212,163 @@ def _compute_hybrid_totals(
             result["temporal_parent"] = temporal_parent_entries
         if temporal_parent_grand_entries:
             result["temporal_parent_grand"] = temporal_parent_grand_entries
+
+    if rows:
+        temporal_row_parent_entries: list[dict[str, Any]] = []
+        temporal_row_parent_grand_entries: list[dict[str, Any]] = []
+        for temporal_idx, row_field in enumerate(rows):
+            col_type = (column_types or {}).get(row_field)
+            if col_type not in ("date", "datetime"):
+                continue
+            effective_grain = _get_effective_date_grain(
+                row_field,
+                rows,
+                columns,
+                date_grains,
+                auto_date_hierarchy,
+                column_types,
+                adaptive_grains,
+            )
+            if not effective_grain or effective_grain == "year":
+                continue
+            hierarchy_levels = _get_temporal_hierarchy_levels(effective_grain)
+            for parent_grain in hierarchy_levels[:-1]:
+                groupby_rows = list(rows)
+                parent_series = working[row_field].apply(
+                    lambda v, _pg=parent_grain: _rebucket_temporal_string(
+                        str(v) if not pd.isna(v) else "",
+                        _pg,
+                    )
+                )
+                tp_col_name = f"__trp_{row_field}_{parent_grain}__"
+                working[tp_col_name] = parent_series
+                groupby_rows[temporal_idx] = tp_col_name
+
+                def _append_temporal_row_parent_entries(
+                    grouped_obj: Any,
+                    col_key_builder: Any,
+                ) -> None:
+                    for key_tuple, group_df in grouped_obj:
+                        parts = (
+                            list(key_tuple)
+                            if isinstance(key_tuple, tuple)
+                            else [key_tuple]
+                        )
+                        parts = [str(p) for p in parts]
+                        row_key = parts[: len(rows)]
+                        row_key[temporal_idx] = (
+                            f"tp:{row_field}:{row_key[temporal_idx]}"
+                        )
+                        col_key = col_key_builder(parts[len(rows) :])
+                        vals_trp: dict[str, int | float | None] = {}
+                        for field, agg in sidecar_fields.items():
+                            v = _sidecar_agg_func(agg, group_df[field])
+                            vals_trp[field] = _normalize_sidecar_value(v)
+                        temporal_row_parent_entries.append(
+                            {
+                                "row": row_key,
+                                "col": col_key,
+                                "field": row_field,
+                                "grain": parent_grain,
+                                "values": vals_trp,
+                            }
+                        )
+
+                grouped_trp = working.groupby(
+                    groupby_rows + columns, dropna=False, observed=True, sort=False
+                )
+                _append_temporal_row_parent_entries(
+                    grouped_trp, lambda col_parts: col_parts
+                )
+
+                if len(columns) >= 2:
+                    for depth in range(1, len(columns)):
+                        grouped_trp_prefix = working.groupby(
+                            groupby_rows + columns[:depth],
+                            dropna=False,
+                            observed=True,
+                            sort=False,
+                        )
+                        _append_temporal_row_parent_entries(
+                            grouped_trp_prefix, lambda col_parts: col_parts
+                        )
+
+                for col_temporal_idx, col_field in enumerate(columns):
+                    col_type = (column_types or {}).get(col_field)
+                    if col_type not in ("date", "datetime"):
+                        continue
+                    col_effective_grain = _get_effective_date_grain(
+                        col_field,
+                        rows,
+                        columns,
+                        date_grains,
+                        auto_date_hierarchy,
+                        column_types,
+                        adaptive_grains,
+                    )
+                    if not col_effective_grain or col_effective_grain == "year":
+                        continue
+                    col_hierarchy_levels = _get_temporal_hierarchy_levels(
+                        col_effective_grain
+                    )
+                    for col_parent_grain in col_hierarchy_levels[:-1]:
+                        groupby_cols = list(columns)
+                        parent_col_series = working[col_field].apply(
+                            lambda v, _pg=col_parent_grain: _rebucket_temporal_string(
+                                str(v) if not pd.isna(v) else "",
+                                _pg,
+                            )
+                        )
+                        col_tp_name = f"__trp_col_{col_field}_{col_parent_grain}__"
+                        working[col_tp_name] = parent_col_series
+                        groupby_cols[col_temporal_idx] = col_tp_name
+                        grouped_trp_temporal_col = working.groupby(
+                            groupby_rows + groupby_cols,
+                            dropna=False,
+                            observed=True,
+                            sort=False,
+                        )
+                        _append_temporal_row_parent_entries(
+                            grouped_trp_temporal_col,
+                            lambda col_parts, _idx=col_temporal_idx, _field=col_field: [
+                                *col_parts[:_idx],
+                                f"tp:{_field}:{col_parts[_idx]}",
+                                *col_parts[_idx + 1 :],
+                            ],
+                        )
+                        working.drop(columns=[col_tp_name], inplace=True)
+
+                grouped_trp_total = working.groupby(
+                    groupby_rows, dropna=False, observed=True, sort=False
+                )
+                for key_tuple, group_df in grouped_trp_total:
+                    parts = (
+                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                    )
+                    parts = [str(p) for p in parts]
+                    row_key_g = list(parts)
+                    row_key_g[temporal_idx] = (
+                        f"tp:{row_field}:{row_key_g[temporal_idx]}"
+                    )
+                    vals_trp_g: dict[str, int | float | None] = {}
+                    for field, agg in sidecar_fields.items():
+                        v = _sidecar_agg_func(agg, group_df[field])
+                        vals_trp_g[field] = _normalize_sidecar_value(v)
+                    temporal_row_parent_grand_entries.append(
+                        {
+                            "row": row_key_g,
+                            "field": row_field,
+                            "grain": parent_grain,
+                            "values": vals_trp_g,
+                        }
+                    )
+
+                working.drop(columns=[tp_col_name], inplace=True)
+
+        if temporal_row_parent_entries:
+            result["temporal_row_parent"] = temporal_row_parent_entries
+        if temporal_row_parent_grand_entries:
+            result["temporal_row_parent_grand"] = temporal_row_parent_grand_entries
 
     if show_subtotals and len(rows) >= 2:
         subtotal_entries: list[dict[str, Any]] = []

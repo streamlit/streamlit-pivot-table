@@ -1471,16 +1471,17 @@ Drill controls expose **Year → Quarter → Month → Day**, and **Week** is
 available as an alternate grouping. Period-over-period display modes
 (previous-period, previous-year) are unlocked automatically.
 
-For this release, the Excel/Power BI-style parent header collapse/expand UI is
-available on the **column axis**. Exports still keep the full leaf-level date
-columns even when a parent date header is collapsed in the view.
+The Excel/Power BI-style parent collapse/expand UI now works on **both axes**.
+On columns, parent headers collapse into summary columns. On rows, collapsing a
+parent replaces its visible descendants with one synthetic summary row. Exports
+still keep the full leaf-level date structure regardless of collapse state.
 
 **Try it:**
 - In the first table, notice the adaptive default grain based on the data range.
 - Open the `order_date` header menu to drill up/down, switch to Week, or choose Original.
-- Use the +/- toggle on a parent date header to collapse a year/quarter group on the column axis.
+- Use the +/- toggle on a parent date group to collapse or expand it on either axis.
 - Open the `Revenue` value header menu to switch between raw values and period comparisons.
-- Compare the other tables for explicit override, global opt-out, and per-field opt-out.
+- Compare the other tables for explicit override, global opt-out, per-field opt-out, and the row-side collapse example in the bottom-right.
 
 **API parameters used:** `auto_date_hierarchy`, `date_grains`, `show_values_as`
 """
@@ -1553,7 +1554,7 @@ with date_col_4:
         auto_date_hierarchy=False,
     )
 
-date_col_5, _ = st.columns(2)
+date_col_5, date_col_6 = st.columns(2)
 
 with date_col_5:
     st.caption("Per-field Original opt-out")
@@ -1566,6 +1567,20 @@ with date_col_5:
         aggregation="sum",
         show_totals=True,
         date_grains={"ship_date": None},
+    )
+
+with date_col_6:
+    st.caption(
+        "Row-side hierarchy with collapsible parent rows (click the +/- in the row headers)"
+    )
+    st_pivot_table(
+        df_dates,
+        key="date_hierarchy_rows",
+        rows=["order_date"],
+        columns=["region"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
     )
 
 with st.expander("View Code"):
@@ -1614,6 +1629,14 @@ st_pivot_table(
     columns=["ship_date"],
     values=["Revenue"],
     date_grains={"ship_date": None},
+)
+
+st_pivot_table(
+    df_dates,
+    key="date_hierarchy_rows",
+    rows=["order_date"],
+    columns=["region"],
+    values=["Revenue"],
 )
 """,
         language="python",

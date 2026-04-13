@@ -457,6 +457,78 @@ def test_temporal_hierarchy_multidim_per_instance_collapse(page_at_app: Page):
     )
 
 
+def test_row_temporal_hierarchy_toggle_collapses_and_expands(page_at_app: Page):
+    """Row-side temporal parents collapse into a single synthetic summary row."""
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_date_hierarchy_rows")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.locator("thead").get_by_text("Quarter", exact=True)).to_be_visible(
+        timeout=5000
+    )
+    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q4 2024")).to_be_visible(timeout=5000)
+
+    toggle_2024 = container.get_by_test_id("pivot-temporal-row-toggle-order_date-2024")
+    toggle_2024.click()
+
+    expect(container.get_by_text("Q1 2024")).to_be_hidden(timeout=5000)
+    expect(container.get_by_text("Q4 2024")).to_be_hidden(timeout=5000)
+    expect(container.get_by_test_id("pivot-temporal-parent-row")).to_be_visible(
+        timeout=5000
+    )
+    expect(
+        container.get_by_test_id("pivot-temporal-row-collapse-cell").first
+    ).to_be_visible(timeout=5000)
+
+    toggle_2024 = container.get_by_test_id("pivot-temporal-row-toggle-order_date-2024")
+    toggle_2024.click()
+    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("Q4 2024")).to_be_visible(timeout=5000)
+
+
+def test_mixed_row_dimension_collapse_preserves_temporal_state(page_at_app: Page):
+    """Outer row-group collapse hides temporal parents and restores them on expand."""
+    page = page_at_app
+    container = (
+        page.locator(".st-key-test_pivot_date_hierarchy_rows_mixed")
+        .get_by_test_id("pivot-container")
+        .first
+    )
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    us_2024_row = (
+        container.locator("tr").filter(has_text="US").filter(has_text="Q1 2024")
+    )
+    expect(us_2024_row).to_have_count(1, timeout=5000)
+    us_toggle = us_2024_row.locator(
+        '[data-testid="pivot-temporal-row-toggle-order_date-2024"]'
+    )
+    expect(us_toggle).to_be_visible(timeout=5000)
+    us_toggle.evaluate(
+        "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+    )
+    expect(container.get_by_text("Q1 2024")).to_have_count(1, timeout=10000)
+    expect(container.get_by_test_id("pivot-temporal-parent-row")).to_have_count(
+        1, timeout=10000
+    )
+
+    container.get_by_test_id("pivot-group-toggle-US").click()
+    expect(container.get_by_text("US Total")).to_be_visible(timeout=5000)
+    expect(container.get_by_test_id("pivot-temporal-parent-row")).to_have_count(
+        0, timeout=5000
+    )
+
+    container.get_by_test_id("pivot-group-toggle-US").click()
+    expect(container.get_by_test_id("pivot-temporal-parent-row")).to_have_count(
+        1, timeout=10000
+    )
+
+
 def test_drilldown_opens_on_cell_click(page_at_app: Page):
     """Clicking a data cell opens the drilldown panel with a detail table."""
     page = page_at_app
@@ -973,12 +1045,13 @@ def test_hierarchical_sort_preserves_parent_groups(page_at_app: Page):
     expect(region_headers.first).to_be_visible(timeout=5000)
     regions_before = [h.inner_text() for h in region_headers.all()]
 
-    container.get_by_test_id("header-menu-trigger-Category").click()
-    menu = container.get_by_test_id("header-menu-Category")
-    expect(menu).to_be_visible(timeout=5000)
-
-    menu.get_by_test_id("header-sort-key-asc").click()
-    page.wait_for_timeout(1500)
+    activate_sort_option(
+        page,
+        container.get_by_test_id("header-menu-trigger-Category"),
+        "header-menu-Category",
+        "header-sort-key-asc",
+    )
+    page.wait_for_timeout(500)
 
     regions_after = [h.inner_text() for h in region_headers.all()]
     assert regions_before == regions_after, (
@@ -1049,13 +1122,23 @@ def test_child_toggle_disabled_when_parent_collapsed(page_at_app: Page):
 
 
 def _open_drilldown_with_pagination(page: Page, pivot_key: str):
-    """Click the first data cell (Alpha × 2023 → 700 records) and wait for pagination."""
+    """Click the Alpha × 2023 data cell (700 raw rows) and wait for pagination."""
     container = get_pivot(page, pivot_key)
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
-    container.get_by_test_id("pivot-data-cell").first.evaluate("el => el.click()")
+    # Pin the cell by row label so DOM/column order quirks (e.g. WebKit) cannot
+    # hit a different bucket than the 700-row Alpha/2023 intersection.
+    alpha_row = container.get_by_test_id("pivot-data-row").filter(has_text="Alpha")
+    expect(alpha_row).to_have_count(1, timeout=10000)
+    cell = alpha_row.get_by_test_id("pivot-data-cell").first
+    cell.scroll_into_view_if_needed()
+    expect(cell).to_be_visible(timeout=5000)
+    cell.evaluate("el => el.click()")
     panel = page.get_by_test_id("drilldown-panel")
     expect(panel).to_be_visible(timeout=10000)
-    expect(page.get_by_test_id("drilldown-pagination")).to_be_visible(timeout=10000)
+    expect(panel).to_contain_text("700", timeout=15000)
+    pagination = page.get_by_test_id("drilldown-pagination")
+    pagination.scroll_into_view_if_needed()
+    expect(pagination).to_be_visible(timeout=10000)
     return container, panel
 
 
@@ -1135,6 +1218,8 @@ def test_adaptive_grain_multi_year_defaults_to_year(page_at_app: Page):
         .first
     )
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    # Year is the auto grain but hierarchy metadata is skipped for grain === "year",
+    # so the corner header still uses the combined dimension label.
     header = container.locator("th").filter(has_text="order_date (Year)")
     expect(header).to_be_visible(timeout=10000)
 
@@ -1148,5 +1233,7 @@ def test_adaptive_grain_3month_defaults_to_month(page_at_app: Page):
         .first
     )
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
-    header = container.locator("th").filter(has_text="order_date (Month)")
-    expect(header).to_be_visible(timeout=10000)
+    # Month grain uses hierarchy [year, quarter, month] on row headers.
+    expect(container.get_by_test_id("pivot-row-dim-label-order-date-2")).to_have_text(
+        "Month", timeout=10000
+    )

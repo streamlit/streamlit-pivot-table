@@ -320,12 +320,12 @@ export function useHeaderMenu({
         pivotData.getColumnType(target.dimension),
         adaptiveDateGrains?.[target.dimension],
       );
-      const clearTemporalGroups = (): Record<string, string[]> | undefined => {
-        if (currentEffective === nextEffective)
-          return nextConfig.collapsed_temporal_groups;
-        const existing = nextConfig.collapsed_temporal_groups;
-        if (!existing) return undefined;
-        const { [target.dimension]: _, ...rest } = existing;
+      const clearTemporalGroups = (
+        groups: Record<string, string[]> | undefined,
+      ): Record<string, string[]> | undefined => {
+        if (currentEffective === nextEffective) return groups;
+        if (!groups) return undefined;
+        const { [target.dimension]: _, ...rest } = groups;
         return Object.keys(rest).length > 0 ? rest : undefined;
       };
       onConfigChange({
@@ -347,7 +347,12 @@ export function useHeaderMenu({
           currentEffective !== nextEffective
             ? undefined
             : nextConfig.collapsed_col_groups,
-        collapsed_temporal_groups: clearTemporalGroups(),
+        collapsed_temporal_groups: clearTemporalGroups(
+          nextConfig.collapsed_temporal_groups,
+        ),
+        collapsed_temporal_row_groups: clearTemporalGroups(
+          nextConfig.collapsed_temporal_row_groups,
+        ),
       });
     },
     [config, onConfigChange, pivotData, adaptiveDateGrains],

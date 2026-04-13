@@ -23,7 +23,7 @@ import {
   buildSidecarFingerprint,
 } from "./PivotData";
 import type { ColumnType, PivotConfigV1 } from "./types";
-import { buildModifiedColKey } from "./dateGrouping";
+import { buildModifiedColKey, buildModifiedRowKey } from "./dateGrouping";
 
 function makeConfig(overrides: Partial<PivotConfigV1> = {}): PivotConfigV1 {
   const values = overrides.values ?? ["revenue"];
@@ -295,6 +295,181 @@ describe("PivotData temporal hierarchy subtotals", () => {
 
       const agg = pd.getTemporalColSubtotalGrand(modifiedColKey, "revenue");
       expect(agg.value()).toBe(8888);
+    });
+  });
+
+  describe("row-side temporal parents", () => {
+    it("aggregates row temporal parents from client records", () => {
+      const config = makeConfig({
+        rows: ["order_date"],
+        columns: ["region"],
+      });
+      const pd = new PivotData(MONTH_DATA, config, { columnTypes });
+
+      const modifiedRowKey = buildModifiedRowKey(
+        ["2024-01"],
+        0,
+        "order_date",
+        "2024",
+      ).slice(0, 1);
+      expect(
+        pd.getTemporalRowSubtotal(modifiedRowKey, ["East"], "revenue").value(),
+      ).toBe(450);
+      expect(
+        pd.getTemporalRowSubtotal(modifiedRowKey, ["West"], "revenue").value(),
+      ).toBe(700);
+      expect(
+        pd.getTemporalRowSubtotalGrand(modifiedRowKey, "revenue").value(),
+      ).toBe(1150);
+    });
+
+    it("aggregates row temporal parents against collapsed column groups", () => {
+      const config = makeConfig({
+        rows: ["order_date"],
+        columns: ["region", "category"],
+      });
+      const data: DataRecord[] = [
+        {
+          order_date: "2024-01-15",
+          region: "East",
+          category: "A",
+          revenue: 100,
+        },
+        {
+          order_date: "2024-02-10",
+          region: "East",
+          category: "A",
+          revenue: 200,
+        },
+        {
+          order_date: "2024-04-05",
+          region: "East",
+          category: "B",
+          revenue: 150,
+        },
+        {
+          order_date: "2024-01-20",
+          region: "West",
+          category: "A",
+          revenue: 300,
+        },
+      ];
+      const types = new Map([
+        ["region", "string" as ColumnType],
+        ["category", "string" as ColumnType],
+        ["order_date", "date" as ColumnType],
+        ["revenue", "number" as ColumnType],
+      ]);
+      const pd = new PivotData(data, config, { columnTypes: types });
+
+      const modifiedRowKey = buildModifiedRowKey(
+        ["2024-01"],
+        0,
+        "order_date",
+        "2024",
+      ).slice(0, 1);
+      expect(
+        pd.getTemporalRowSubtotal(modifiedRowKey, ["East"], "revenue").value(),
+      ).toBe(450);
+    });
+
+    it("aggregates row temporal parents against temporal collapsed columns", () => {
+      const config = makeConfig({
+        rows: ["order_date"],
+        columns: ["ship_date"],
+        date_grains: { order_date: "month", ship_date: "month" },
+      });
+      const data: DataRecord[] = [
+        {
+          order_date: "2024-01-15",
+          ship_date: "2024-01-20",
+          revenue: 100,
+        },
+        {
+          order_date: "2024-02-10",
+          ship_date: "2024-02-14",
+          revenue: 200,
+        },
+        {
+          order_date: "2024-04-05",
+          ship_date: "2024-04-11",
+          revenue: 150,
+        },
+      ];
+      const types = new Map([
+        ["order_date", "date" as ColumnType],
+        ["ship_date", "date" as ColumnType],
+        ["revenue", "number" as ColumnType],
+      ]);
+      const pd = new PivotData(data, config, {
+        columnTypes: types,
+      });
+
+      const modifiedRowKey = buildModifiedRowKey(
+        ["2024-01"],
+        0,
+        "order_date",
+        "2024",
+      ).slice(0, 1);
+      const modifiedColKey = buildModifiedColKey(
+        ["2024-01"],
+        0,
+        "ship_date",
+        "2024",
+      );
+
+      expect(
+        pd
+          .getTemporalRowSubtotal(modifiedRowKey, modifiedColKey, "revenue")
+          .value(),
+      ).toBe(450);
+    });
+
+    it("uses hybrid row-parent values when available", () => {
+      const config = makeConfig({
+        rows: ["order_date"],
+        columns: ["region"],
+      });
+      const fp = buildSidecarFingerprint(config, undefined);
+      const modifiedRowKey = buildModifiedRowKey(
+        ["2024-01"],
+        0,
+        "order_date",
+        "2024",
+      ).slice(0, 1);
+      const pd = new PivotData(MONTH_DATA, config, {
+        columnTypes,
+        hybridTotals: {
+          sidecar_fingerprint: fp,
+          grand: {},
+          row: [],
+          col: [],
+          temporal_row_parent: [
+            {
+              row: modifiedRowKey,
+              col: ["East"],
+              field: "order_date",
+              grain: "year",
+              values: { revenue: 999 },
+            },
+          ],
+          temporal_row_parent_grand: [
+            {
+              row: modifiedRowKey,
+              field: "order_date",
+              grain: "year",
+              values: { revenue: 1999 },
+            },
+          ],
+        },
+      });
+
+      expect(
+        pd.getTemporalRowSubtotal(modifiedRowKey, ["East"], "revenue").value(),
+      ).toBe(999);
+      expect(
+        pd.getTemporalRowSubtotalGrand(modifiedRowKey, "revenue").value(),
+      ).toBe(1999);
     });
   });
 });

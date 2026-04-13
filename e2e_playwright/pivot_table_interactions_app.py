@@ -289,6 +289,30 @@ def render_app(data):
         on_config_change=noop,
     )
 
+    st.subheader("Date Hierarchy Rows Pivot")
+    st_pivot_table(
+        _make_date_hierarchy_data(),
+        key="test_pivot_date_hierarchy_rows",
+        rows=["order_date"],
+        columns=["region"],
+        values=["revenue"],
+        aggregation="sum",
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("Date Hierarchy Mixed Rows Pivot")
+    st_pivot_table(
+        _make_date_hierarchy_data(),
+        key="test_pivot_date_hierarchy_rows_mixed",
+        rows=["region", "order_date"],
+        values=["revenue"],
+        aggregation="sum",
+        show_subtotals=["region"],
+        interactive=True,
+        on_config_change=noop,
+    )
+
     # Adaptive date grain: multi-year dataset -> auto-defaults to "year"
     st.subheader("Adaptive Grain (Multi-Year)")
     adaptive_year_df = pd.DataFrame(

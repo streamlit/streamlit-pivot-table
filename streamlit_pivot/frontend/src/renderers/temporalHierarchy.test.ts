@@ -17,18 +17,26 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  applyTemporalRowCollapse,
   computeTemporalColInfos,
+  computeTemporalRowInfos,
   computeHeaderLevels,
   computeNumHeaderLevels,
+  computeProjectedRowHeaderSpans,
+  computeRowHeaderLevels,
   computeParentGroups,
   computeTemporalColSlots,
+  projectVisibleRowEntries,
   toggleTemporalCollapse,
   type TemporalColInfo,
 } from "./temporalHierarchy";
 import type { ColSlot } from "./TableRenderer";
 import type { ColumnType, PivotConfigV1 } from "../engine/types";
 import { makeKeyString } from "../engine/PivotData";
-import { buildModifiedColKey } from "../engine/dateGrouping";
+import {
+  buildModifiedColKey,
+  buildModifiedRowKey,
+} from "../engine/dateGrouping";
 
 function makeConfig(overrides: Partial<PivotConfigV1> = {}): PivotConfigV1 {
   const values = overrides.values ?? ["revenue"];
@@ -460,5 +468,150 @@ describe("toggleTemporalCollapse", () => {
       "key1",
     );
     expect(result).toEqual({ ship_date: ["key2"] });
+  });
+});
+
+describe("row-side temporal hierarchy helpers", () => {
+  it("computes row temporal metadata and expanded row header levels", () => {
+    const config = makeConfig({
+      rows: ["region", "order_date"],
+      date_grains: { order_date: "month" },
+    });
+    const types = makeColumnTypes({ region: "string", order_date: "date" });
+    const infos = computeTemporalRowInfos(config, types);
+    const levels = computeRowHeaderLevels(config, infos);
+
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({
+      dimIndex: 1,
+      field: "order_date",
+      hierarchyLevels: ["year", "quarter", "month"],
+    });
+    expect(levels.map((level) => `${level.field}:${level.grain}`)).toEqual([
+      "region:region",
+      "order_date:year",
+      "order_date:quarter",
+      "order_date:month",
+    ]);
+  });
+
+  it("replaces collapsed temporal descendants with one synthetic parent row", () => {
+    const collapseKey = makeKeyString(
+      buildModifiedRowKey(["US", "2024-01"], 1, "order_date", "2024").slice(
+        0,
+        2,
+      ),
+    );
+    const config = makeConfig({
+      rows: ["region", "order_date"],
+      date_grains: { order_date: "month" },
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+    const types = makeColumnTypes({ region: "string", order_date: "date" });
+    const infos = computeTemporalRowInfos(config, types);
+    const entries = applyTemporalRowCollapse(
+      [
+        { type: "data", key: ["US", "2024-01"], level: 1 },
+        { type: "data", key: ["US", "2024-02"], level: 1 },
+        { type: "data", key: ["US", "2025-01"], level: 1 },
+      ],
+      infos,
+      config,
+    );
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      type: "temporal_parent",
+      key: ["US", "2024"],
+    });
+    expect(entries[1]).toMatchObject({
+      type: "data",
+      key: ["US", "2025-01"],
+    });
+  });
+
+  it("projects row entries into effective header columns and spans", () => {
+    const collapseKey = makeKeyString(
+      buildModifiedRowKey(["US", "2024-01"], 1, "order_date", "2024").slice(
+        0,
+        2,
+      ),
+    );
+    const config = makeConfig({
+      rows: ["region", "order_date"],
+      date_grains: { order_date: "month" },
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+    const types = makeColumnTypes({ region: "string", order_date: "date" });
+    const infos = computeTemporalRowInfos(config, types);
+    const rowLevels = computeRowHeaderLevels(config, infos);
+    const projected = projectVisibleRowEntries(
+      applyTemporalRowCollapse(
+        [
+          { type: "data", key: ["US", "2024-01"], level: 1 },
+          { type: "data", key: ["US", "2024-02"], level: 1 },
+          { type: "data", key: ["US", "2025-01"], level: 1 },
+        ],
+        infos,
+        config,
+      ),
+      config,
+      rowLevels,
+      infos,
+    );
+    const spans = computeProjectedRowHeaderSpans(projected);
+
+    expect(projected[0]?.headerValues).toEqual(["US", "2024", "", ""]);
+    expect(projected[0]?.headerVisible).toEqual([true, true, true, true]);
+    expect(projected[0]?.headerSpacer).toEqual([false, false, true, true]);
+    expect(projected[1]?.headerValues).toEqual([
+      "US",
+      "2025",
+      "2025-Q1",
+      "2025-01",
+    ]);
+    expect(spans[0]?.[0]).toBe(2);
+    expect(spans[0]?.[1]).toBe(1);
+  });
+
+  it("keeps outer-dimension span across temporal parent and later data row", () => {
+    const collapseKey = makeKeyString(
+      buildModifiedRowKey(["US", "2024-01"], 1, "order_date", "2024").slice(
+        0,
+        2,
+      ),
+    );
+    const config = makeConfig({
+      rows: ["region", "order_date"],
+      date_grains: { order_date: "month" },
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+    const types = makeColumnTypes({ region: "string", order_date: "date" });
+    const infos = computeTemporalRowInfos(config, types);
+    const rowLevels = computeRowHeaderLevels(config, infos);
+    const projected = projectVisibleRowEntries(
+      applyTemporalRowCollapse(
+        [
+          { type: "data", key: ["US", "2024-01"], level: 1 },
+          { type: "data", key: ["US", "2024-02"], level: 1 },
+          { type: "data", key: ["US", "2025-01"], level: 1 },
+        ],
+        infos,
+        config,
+      ),
+      config,
+      rowLevels,
+      infos,
+    );
+    const spans = computeProjectedRowHeaderSpans(projected);
+
+    expect(projected[0]?.type).toBe("temporal_parent");
+    expect(projected[1]?.type).toBe("data");
+    expect(projected[0]?.headerValues[0]).toBe("US");
+    expect(projected[1]?.headerValues[0]).toBe("US");
+    expect(projected[0]?.headerSpacer.slice(1)).toEqual([false, true, true]);
+    expect(projected[1]?.headerSpacer).toEqual([false, false, false, false]);
+    expect(spans[0]?.[0]).toBe(2);
+    expect(spans[1]?.[0]).toBe(0);
   });
 });

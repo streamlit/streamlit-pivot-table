@@ -44,10 +44,24 @@ import {
   renderColumnHeaders,
   renderDataRow,
   renderSubtotalRow,
+  renderTemporalParentRow,
   renderTotalsRow as renderTotalsRowFn,
   HEADER_ROW_HEIGHT,
   type ColSlot,
 } from "./TableRenderer";
+import {
+  applyTemporalRowCollapse,
+  computeHeaderLevels,
+  computeNumRowHeaderLevels,
+  computeProjectedRowHeaderSpans,
+  computeRowHeaderLevels,
+  computeTemporalColInfos,
+  computeTemporalColSlots,
+  computeTemporalRowInfos,
+  projectVisibleRowEntries,
+  toggleTemporalCollapse,
+  toggleTemporalRowCollapse,
+} from "./temporalHierarchy";
 import { useHeaderMenu } from "./useHeaderMenu";
 import tableStyles from "./TableRenderer.module.css";
 
@@ -258,12 +272,39 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   const hasMultipleValues = renderedValueFields.length > 1;
   const numRowDims = Math.max(config.rows.length, 1);
   const numColDims = config.columns.length;
+  const columnTypes = pivotData.getColumnTypes();
 
   const colSlots = useMemo(
     () => computeColSlots(colKeys, config.collapsed_col_groups, numColDims),
     [colKeys, config.collapsed_col_groups, numColDims],
   );
-  const totalDataColumns = colSlots.length;
+  const temporalInfos = useMemo(
+    () => computeTemporalColInfos(config, columnTypes, adaptiveDateGrains),
+    [config, columnTypes, adaptiveDateGrains],
+  );
+  const headerLevels = useMemo(
+    () => computeHeaderLevels(config, temporalInfos),
+    [config, temporalInfos],
+  );
+  const effectiveColSlots: ColSlot[] = useMemo(
+    () => computeTemporalColSlots(colSlots, temporalInfos, config),
+    [colSlots, temporalInfos, config],
+  );
+  const rowTemporalInfos = useMemo(
+    () => computeTemporalRowInfos(config, columnTypes, adaptiveDateGrains),
+    [config, columnTypes, adaptiveDateGrains],
+  );
+  const rowHeaderLevels = useMemo(
+    () => computeRowHeaderLevels(config, rowTemporalInfos),
+    [config, rowTemporalInfos],
+  );
+  const effectiveNumRowDims =
+    config.rows.length === 0
+      ? 1
+      : rowTemporalInfos.length > 0
+        ? computeNumRowHeaderLevels(config, rowTemporalInfos)
+        : numRowDims;
+  const totalDataColumns = effectiveColSlots.length;
 
   const useSubtotals = !!config.show_subtotals && config.rows.length >= 2;
   const collapsedSet = useMemo(() => {
@@ -327,6 +368,28 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     [useSubtotals, pivotData],
   );
 
+  const visibleRowEntries = useMemo(() => {
+    if (rowTemporalInfos.length === 0) return null;
+    const baseEntries: GroupedRow[] = groupedRows
+      ? groupedRows
+      : allRowKeys.map((key) => ({
+          type: "data" as const,
+          key,
+          level: config.rows.length - 1,
+        }));
+    return applyTemporalRowCollapse(baseEntries, rowTemporalInfos, config);
+  }, [rowTemporalInfos, groupedRows, allRowKeys, config]);
+
+  const projectedRowEntries = useMemo(() => {
+    if (!visibleRowEntries) return null;
+    return projectVisibleRowEntries(
+      visibleRowEntries,
+      config,
+      rowHeaderLevels,
+      rowTemporalInfos,
+    );
+  }, [visibleRowEntries, config, rowHeaderLevels, rowTemporalInfos]);
+
   const handleToggleGroup = useCallback(
     (groupKeyStr: string) => {
       if (!onCollapseChange) return;
@@ -353,6 +416,38 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       onCollapseChange("col", [...collapsed].sort());
     },
     [config, onCollapseChange],
+  );
+  const handleTemporalToggle = useCallback(
+    (field: string, collapseKey: string) => {
+      if (!onConfigChange) return;
+      const updated = toggleTemporalCollapse(
+        config.collapsed_temporal_groups,
+        field,
+        collapseKey,
+      );
+      onConfigChange({
+        ...config,
+        collapsed_temporal_groups:
+          Object.keys(updated).length > 0 ? updated : undefined,
+      });
+    },
+    [config, onConfigChange],
+  );
+  const handleTemporalRowToggle = useCallback(
+    (field: string, collapseKey: string) => {
+      if (!onConfigChange) return;
+      const updated = toggleTemporalRowCollapse(
+        config.collapsed_temporal_row_groups,
+        field,
+        collapseKey,
+      );
+      onConfigChange({
+        ...config,
+        collapsed_temporal_row_groups:
+          Object.keys(updated).length > 0 ? updated : undefined,
+      });
+    },
+    [config, onConfigChange],
   );
 
   const {
@@ -389,7 +484,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     adaptiveDateGrains,
   });
 
-  const totalVirtualRows = groupedRows ? groupedRows.length : allRowKeys.length;
+  const totalVirtualRows = projectedRowEntries
+    ? projectedRowEntries.length
+    : groupedRows
+      ? groupedRows.length
+      : allRowKeys.length;
   const numGroupingDims = useSubtotals ? config.rows.length - 1 : 0;
 
   const grpContext = useMemo(
@@ -412,11 +511,12 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   );
 
   const groupBoundaryMap = useMemo(() => {
-    if (!groupedRows || numGroupingDims === 0) return null;
+    const sourceRows = projectedRowEntries ?? groupedRows;
+    if (!sourceRows || numGroupingDims === 0) return null;
     const map = new Map<number, number>();
     let prevDataKey: string[] | null = null;
-    for (let i = 0; i < groupedRows.length; i++) {
-      const entry = groupedRows[i];
+    for (let i = 0; i < sourceRows.length; i++) {
+      const entry = sourceRows[i]!;
       if (entry.type === "subtotal") {
         continue;
       }
@@ -431,14 +531,15 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       prevDataKey = entry.key;
     }
     return map;
-  }, [groupedRows, numGroupingDims]);
+  }, [projectedRowEntries, groupedRows, numGroupingDims]);
 
   const groupEvenMap = useMemo(() => {
-    if (!groupedRows) return null;
+    const sourceRows = projectedRowEntries ?? groupedRows;
+    if (!sourceRows) return null;
     const map = new Map<number, boolean>();
     let groupDataIdx = 0;
-    for (let i = 0; i < groupedRows.length; i++) {
-      const entry = groupedRows[i];
+    for (let i = 0; i < sourceRows.length; i++) {
+      const entry = sourceRows[i]!;
       if (entry.type === "subtotal") {
         groupDataIdx = 0;
         continue;
@@ -449,17 +550,72 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       groupDataIdx++;
     }
     return map;
-  }, [groupedRows, groupBoundaryMap]);
+  }, [projectedRowEntries, groupedRows, groupBoundaryMap]);
 
   const renderRow = useCallback(
     (rowIndex: number, visibleColRange: [number, number]): ReactElement => {
+      if (projectedRowEntries) {
+        const entry = projectedRowEntries[rowIndex]!;
+        if (entry.type === "subtotal") {
+          return renderSubtotalRow(
+            entry.key,
+            entry.level,
+            effectiveColSlots,
+            pivotData,
+            config,
+            hasMultipleValues,
+            collapsedSet.has(makeKeyString(entry.key)),
+            onCollapseChange ? handleToggleGroup : undefined,
+            visibleColRange,
+            onCellClick,
+            onCellClick ? handleCellKeyDown : undefined,
+            undefined,
+            {
+              projectedEntry: entry,
+              rowHeaderLevels,
+              onTemporalToggle: handleTemporalRowToggle,
+            },
+          );
+        }
+        if (entry.type === "temporal_parent") {
+          return renderTemporalParentRow(
+            entry,
+            effectiveColSlots,
+            pivotData,
+            config,
+            hasMultipleValues,
+            rowHeaderLevels,
+            handleTemporalRowToggle,
+            visibleColRange,
+          );
+        }
+        return renderDataRow(
+          entry.key,
+          effectiveColSlots,
+          pivotData,
+          config,
+          hasMultipleValues,
+          onCellClick,
+          onCellClick ? handleCellKeyDown : undefined,
+          visibleColRange,
+          undefined,
+          groupBoundaryMap?.get(rowIndex),
+          grpContext,
+          groupEvenMap?.get(rowIndex) ?? false,
+          {
+            projectedEntry: entry,
+            rowHeaderLevels,
+            onTemporalToggle: handleTemporalRowToggle,
+          },
+        );
+      }
       if (groupedRows) {
         const entry = groupedRows[rowIndex];
         if (entry.type === "subtotal") {
           return renderSubtotalRow(
             entry.key,
             entry.level,
-            colSlots,
+            effectiveColSlots,
             pivotData,
             config,
             hasMultipleValues,
@@ -472,7 +628,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         }
         return renderDataRow(
           entry.key,
-          colSlots,
+          effectiveColSlots,
           pivotData,
           config,
           hasMultipleValues,
@@ -488,7 +644,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       const rowKey = allRowKeys[rowIndex];
       return renderDataRow(
         rowKey,
-        colSlots,
+        effectiveColSlots,
         pivotData,
         config,
         hasMultipleValues,
@@ -503,8 +659,9 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     },
     [
       allRowKeys,
+      projectedRowEntries,
       groupedRows,
-      colSlots,
+      effectiveColSlots,
       pivotData,
       config,
       hasMultipleValues,
@@ -516,15 +673,17 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       groupBoundaryMap,
       groupEvenMap,
       grpContext,
+      rowHeaderLevels,
+      handleTemporalRowToggle,
     ],
   );
 
   const renderHeader = useCallback(
     (visibleColRange: [number, number]): ReactElement[] => {
       return renderColumnHeaders(
-        colSlots,
+        effectiveColSlots,
         config,
-        numRowDims,
+        effectiveNumRowDims,
         hasMultipleValues,
         visibleColRange,
         hasHeaderMenu ? handleOpenMenu : undefined,
@@ -537,12 +696,17 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
         handleResizeDoubleClick,
         adaptiveDateGrains,
+        temporalInfos.length > 0 ? temporalInfos : undefined,
+        temporalInfos.length > 0 ? headerLevels : undefined,
+        handleTemporalToggle,
+        columnTypes,
+        rowTemporalInfos.length > 0 ? rowHeaderLevels : undefined,
       );
     },
     [
-      colSlots,
+      effectiveColSlots,
       config,
-      numRowDims,
+      effectiveNumRowDims,
       numColDims,
       hasMultipleValues,
       hasHeaderMenu,
@@ -555,6 +719,12 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       handleResizeDoubleClick,
       headerRowOffsets,
       adaptiveDateGrains,
+      temporalInfos,
+      headerLevels,
+      handleTemporalToggle,
+      columnTypes,
+      rowTemporalInfos,
+      rowHeaderLevels,
     ],
   );
 
@@ -562,10 +732,10 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     (visibleColRange: [number, number]): ReactElement | null => {
       if (!showColumnTotals(config)) return null;
       return renderTotalsRowFn(
-        colSlots,
+        effectiveColSlots,
         pivotData,
         config,
-        numRowDims,
+        effectiveNumRowDims,
         hasMultipleValues,
         visibleColRange,
         onCellClick,
@@ -573,10 +743,10 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       );
     },
     [
-      colSlots,
+      effectiveColSlots,
       pivotData,
       config,
-      numRowDims,
+      effectiveNumRowDims,
       hasMultipleValues,
       onCellClick,
       handleCellKeyDown,

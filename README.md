@@ -275,7 +275,9 @@ Typed `date` and `datetime` fields are treated as hierarchy-capable dimensions w
 - Alternate grouping: `Week` is available from the header menu, but it is not part of the default drill path.
 - Explicit override precedence: explicit `date_grains[field]` beats interactive state, which beats the adaptive auto default.
 - Explicit opt-out: `date_grains[field] = None` preserves the raw/original date values for that field.
-- Hierarchical parent headers with +/- collapse/expand currently render on the **column axis**. Row-side temporal hierarchy parity is planned separately.
+- Hierarchical parent groups now render on **both axes**:
+  - on `columns`, parent headers such as `2024` or `Q1 2024` collapse/expand inline
+  - on `rows`, collapsing a parent replaces its visible descendants with one synthetic summary row
 
 ```python
 # Adaptive date hierarchy: grain chosen from the data's date range
@@ -326,7 +328,7 @@ Once a temporal field is active on an axis, open its header menu to:
 - switch directly to `Week`,
 - choose `Original` to persist a raw-date opt-out for that field.
 
-When a temporal field is on `columns`, parent headers such as `2024` or `Q1 2024` can be collapsed with the inline +/- toggle. This is a view-only collapse: the underlying leaf buckets remain the data/export contract.
+When a temporal field is on `columns`, parent headers such as `2024` or `Q1 2024` can be collapsed with the inline +/- toggle. When a temporal field is on `rows`, collapsing a parent replaces the visible child rows with one summary row for that parent. Both are view-only collapses: exports still emit the full expanded leaf-level table.
 
 Grouped buckets export as grouped labels such as `Jan 2024`, `Q1 2024`, or `2024-W03`; they are intentionally not exported as fake raw Excel dates.
 

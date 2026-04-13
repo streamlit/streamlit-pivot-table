@@ -83,14 +83,13 @@ TOOLBAR_PIVOT_KEYS = [
     "test_pivot_scalar_roundtrip",
 ]
 
+# Must match the exact order of st_pivot_table(key=...) calls in
+# pivot_table_interactions_app.py so get_pivot()'s nth() fallback matches
+# the right component when Streamlit does not emit a stable .st-key-* class.
 INTERACTIONS_PIVOT_KEYS = [
     "test_pivot",
     "test_pivot_subtotals",
     "test_pivot_cond_fmt",
-    "test_pivot_date_hierarchy",
-    "test_pivot_date_hierarchy_multidim",
-    "test_pivot_adaptive_year",
-    "test_pivot_adaptive_month",
     "test_pivot_locked",
     "test_pivot_locked_groups",
     "test_pivot_readonly",
@@ -101,6 +100,12 @@ INTERACTIONS_PIVOT_KEYS = [
     "test_pivot_per_measure_row_totals",
     "test_pivot_per_measure_col_totals",
     "test_pivot_col_groups",
+    "test_pivot_date_hierarchy",
+    "test_pivot_date_hierarchy_multidim",
+    "test_pivot_date_hierarchy_rows",
+    "test_pivot_date_hierarchy_rows_mixed",
+    "test_pivot_adaptive_year",
+    "test_pivot_adaptive_month",
     "test_pivot_drilldown_pagination",
     "test_pivot_drilldown_pagination_hybrid",
 ]
