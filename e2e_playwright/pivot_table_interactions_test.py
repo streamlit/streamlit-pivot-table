@@ -1137,6 +1137,26 @@ def _open_drilldown_with_pagination(page: Page, pivot_key: str):
     return container, panel
 
 
+def _first_drilldown_revenue_cell(panel):
+    """Return the first visible Revenue cell in the current drilldown page."""
+    return (
+        panel.get_by_test_id("drilldown-table")
+        .locator("tbody tr")
+        .first.locator("td")
+        .nth(2)
+    )
+
+
+def _drilldown_sort_button(panel, column_name: str):
+    """Return the clickable sort button for a drilldown column header."""
+    return (
+        panel.get_by_test_id("drilldown-table")
+        .locator("th")
+        .filter(has_text=column_name)
+        .locator("button")
+    )
+
+
 def test_drilldown_client_pagination_shows_controls(page_at_app: Page):
     """Client-only: clicking a cell with >500 records shows pagination controls."""
     page = page_at_app
@@ -1161,6 +1181,22 @@ def test_drilldown_client_pagination_navigates(page_at_app: Page):
 
     panel.get_by_test_id("drilldown-prev").click()
     expect(panel.locator("text=Page 1 of 2")).to_be_visible(timeout=5000)
+
+
+def test_drilldown_client_sort_orders_full_result_before_pagination(page_at_app: Page):
+    """Client-only drilldown sort reorders the full result set before page slicing."""
+    page = page_at_app
+    _, panel = _open_drilldown_with_pagination(page, "test_pivot_drilldown_pagination")
+
+    _drilldown_sort_button(panel, "Revenue").click()
+    _drilldown_sort_button(panel, "Revenue").click()
+
+    # Fixture values for Alpha/2023 are 10..709 inclusive, so descending page 1
+    # starts at 709 and descending page 2 starts at 209 after the first 500 rows.
+    expect(_first_drilldown_revenue_cell(panel)).to_have_text("709")
+    panel.get_by_test_id("drilldown-next").click()
+    expect(panel.locator("text=Page 2 of 2")).to_be_visible(timeout=5000)
+    expect(_first_drilldown_revenue_cell(panel)).to_have_text("209")
 
 
 def test_drilldown_hybrid_pagination_shows_controls(page_at_app: Page):
@@ -1197,6 +1233,29 @@ def test_drilldown_hybrid_pagination_navigates(page_at_app: Page):
     panel = page.get_by_test_id("drilldown-panel")
     expect(panel).to_be_visible(timeout=30000)
     expect(panel.locator("text=Page 1 of 2")).to_be_visible(timeout=30000)
+
+
+def test_drilldown_hybrid_sort_orders_full_result_before_pagination(page_at_app: Page):
+    """Hybrid drilldown sort reorders the full result set before server pagination."""
+    page = page_at_app
+    _, panel = _open_drilldown_with_pagination(
+        page, "test_pivot_drilldown_pagination_hybrid"
+    )
+
+    _drilldown_sort_button(panel, "Revenue").click()
+    _drilldown_sort_button(panel, "Revenue").click()
+
+    panel = page.get_by_test_id("drilldown-panel")
+    expect(panel).to_be_visible(timeout=30000)
+    # Fixture values for Alpha/2023 are 10..709 inclusive, so descending page 1
+    # starts at 709 and descending page 2 starts at 209 after the first 500 rows.
+    expect(_first_drilldown_revenue_cell(panel)).to_have_text("709", timeout=30000)
+
+    panel.get_by_test_id("drilldown-next").click()
+    panel = page.get_by_test_id("drilldown-panel")
+    expect(panel).to_be_visible(timeout=30000)
+    expect(panel.locator("text=Page 2 of 2")).to_be_visible(timeout=30000)
+    expect(_first_drilldown_revenue_cell(panel)).to_have_text("209", timeout=30000)
 
 
 # ---------------------------------------------------------------------------

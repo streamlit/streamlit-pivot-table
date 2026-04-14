@@ -22,7 +22,7 @@ import re
 import warnings
 from datetime import date, datetime
 from math import prod
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import pandas as pd
 
@@ -1434,7 +1434,7 @@ def _compute_hybrid_totals(
 
 def _compute_hybrid_drilldown(
     df: Any,
-    drilldown_request: dict[str, Any],
+    drilldown_request: DrilldownRequest,
     null_handling: Any = None,
     dims: list[str] | None = None,
     config_filters: dict[str, dict] | None = None,
@@ -1469,6 +1469,8 @@ def _compute_hybrid_drilldown(
 
     filters: dict[str, str] = drilldown_request.get("filters", {})
     page: int = max(0, int(drilldown_request.get("page", 0)))
+    sort_column = drilldown_request.get("sortColumn")
+    sort_direction = drilldown_request.get("sortDirection")
 
     mask = pd.Series(True, index=working.index)
     for col, val in filters.items():
@@ -1489,6 +1491,47 @@ def _compute_hybrid_drilldown(
         mask &= resolved == str(val)
     filtered = working[mask]
     total_count = len(filtered)
+    if (
+        sort_column
+        and sort_direction in ("asc", "desc")
+        and sort_column in filtered.columns
+    ):
+        sort_key = sort_column
+        temp_sort_column: str | None = None
+        col_type = column_types.get(sort_column) if column_types else None
+        if col_type in ("date", "datetime"):
+            temp_sort_column = "__drilldown_sort_key__"
+            while temp_sort_column in filtered.columns:
+                temp_sort_column += "_"
+            filtered = filtered.assign(
+                **{
+                    temp_sort_column: pd.to_datetime(
+                        filtered[sort_column], errors="coerce"
+                    )
+                }
+            )
+            sort_key = temp_sort_column
+        elif col_type in ("integer", "float"):
+            temp_sort_column = "__drilldown_sort_key__"
+            while temp_sort_column in filtered.columns:
+                temp_sort_column += "_"
+            filtered = filtered.assign(
+                **{
+                    temp_sort_column: pd.to_numeric(
+                        filtered[sort_column], errors="coerce"
+                    )
+                }
+            )
+            sort_key = temp_sort_column
+
+        filtered = filtered.sort_values(
+            by=sort_key,
+            ascending=sort_direction == "asc",
+            kind="mergesort",
+            na_position="last",
+        )
+        if temp_sort_column is not None:
+            filtered = filtered.drop(columns=[temp_sort_column])
     offset = page * page_size
     page_slice = filtered.iloc[offset : offset + page_size]
     records = json.loads(page_slice.to_json(orient="records", date_format="iso"))
@@ -1732,6 +1775,15 @@ class CellClickPayload(TypedDict):
     value: float | None
     filters: dict[str, str]
     valueField: str
+
+
+class DrilldownRequest(CellClickPayload, total=False):
+    """Frontend-owned drilldown request state mirrored through session_state."""
+
+    page: int
+    sortColumn: str
+    sortDirection: Literal["asc", "desc"]
+    requestId: str
 
 
 class PerfActionMeasurement(TypedDict, total=False):
@@ -2625,6 +2677,7 @@ def st_pivot_table(
             data_payload["drilldown_total_count"] = total
             data_payload["drilldown_page"] = page
             data_payload["drilldown_page_size"] = _DRILLDOWN_PAGE_SIZE
+            data_payload["drilldown_request_id"] = drilldown_request.get("requestId")
 
     mount_kwargs: dict[str, Any] = {
         "key": key,

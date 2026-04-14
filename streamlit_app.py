@@ -1007,6 +1007,9 @@ contributed to the clicked cell's aggregated value.
 - A detail panel slides in below the table showing all matching source records.
 - The header shows the dimension filters (e.g. "Region: East, Year: 2023")
   and the record count.
+- **Click any column header** in the drill-down panel to sort the results.
+  Click again to toggle between ascending, descending, and original order.
+  Sorting applies to the **full** result set before pagination.
 - Click the **✕** button or press **Escape** to close the panel.
 - Click a different cell to replace the panel with new records.
 
@@ -1042,6 +1045,7 @@ result = st_pivot_table(
     on_cell_click=lambda: None,
 )
 # Click any cell to see the contributing source records.
+# Click a column header in the drill-down panel to sort results.
 """,
             language="python",
         )
@@ -1253,6 +1257,10 @@ Because large cells can match thousands of rows, the results are **paginated**
 - If the cell has more than 500 matching rows, use the **← Prev / Next →**
   buttons at the bottom of the panel to page through all results.
 - The header shows a range like "1–500 of 2,340 records" and the current page.
+- **Click a column header** to sort the drill-down results. In hybrid mode,
+  each sort triggers a server round-trip so the backend sorts the full
+  filtered result before slicing the requested page. Navigate to page 2 to
+  confirm the sort applies globally, not just within the visible page.
 
 **API parameter used:** `execution_mode` (set to `"threshold_hybrid"` here to
 force hybrid mode on a smaller dataset for demonstration purposes)
@@ -1303,6 +1311,7 @@ st_pivot_table(
     execution_mode="threshold_hybrid",
 )
 # Click any cell to see paginated server-side drill-down.
+# Click a column header to sort — sort is applied server-side before pagination.
 """,
             language="python",
         )

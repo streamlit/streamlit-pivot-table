@@ -68,6 +68,7 @@ const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
         drilldown_total_count={data?.drilldown_total_count}
         drilldown_page={data?.drilldown_page}
         drilldown_page_size={data?.drilldown_page_size}
+        drilldown_request_id={data?.drilldown_request_id}
         hybrid_totals={data?.hybrid_totals}
         hybrid_agg_remap={data?.hybrid_agg_remap}
         source_row_count={data?.source_row_count}

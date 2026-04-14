@@ -396,6 +396,138 @@ class TestComputeHybridDrilldown:
         assert len(records) == 1
         assert page == 1
 
+    def test_sort_desc_orders_full_filtered_result_before_pagination(
+        self, pivot_module, df
+    ):
+        records, _, total, page = pivot_module._compute_hybrid_drilldown(
+            df,
+            {
+                "filters": {"region": "US"},
+                "page": 0,
+                "sortColumn": "revenue",
+                "sortDirection": "desc",
+            },
+            page_size=2,
+            column_types={"revenue": "float"},
+        )
+        assert total == 3
+        assert page == 0
+        assert [r["revenue"] for r in records] == [150, 100]
+
+        page_2_records, _, _, page_2 = pivot_module._compute_hybrid_drilldown(
+            df,
+            {
+                "filters": {"region": "US"},
+                "page": 1,
+                "sortColumn": "revenue",
+                "sortDirection": "desc",
+            },
+            page_size=2,
+            column_types={"revenue": "float"},
+        )
+        assert page_2 == 1
+        assert [r["revenue"] for r in page_2_records] == [50]
+
+    def test_removing_sort_restores_filtered_source_order(self, pivot_module, df):
+        records, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}}, page_size=2
+        )
+        assert [r["revenue"] for r in records] == [100, 150]
+
+    def test_sort_places_nulls_last(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "US"],
+                "revenue": [100, None, 50],
+            }
+        )
+        records, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df,
+            {
+                "filters": {"region": "US"},
+                "sortColumn": "revenue",
+                "sortDirection": "asc",
+            },
+            column_types={"revenue": "float"},
+        )
+        assert [r["revenue"] for r in records] == [50.0, 100.0, None]
+
+    def test_temporal_sort_uses_actual_datetime_values(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "US"],
+                "event_at": [
+                    "2024-03-01T00:00:00.000Z",
+                    "2024-01-01T00:00:00.000Z",
+                    "2024-02-01T00:00:00.000Z",
+                ],
+            }
+        )
+        records, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df,
+            {
+                "filters": {"region": "US"},
+                "sortColumn": "event_at",
+                "sortDirection": "asc",
+            },
+            column_types={"event_at": "datetime"},
+        )
+        assert [r["event_at"][:10] for r in records] == [
+            "2024-01-01",
+            "2024-02-01",
+            "2024-03-01",
+        ]
+
+    def test_sort_invalid_column_is_noop(self, pivot_module, df):
+        unsorted, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}}, page_size=10
+        )
+        sorted_records, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df,
+            {
+                "filters": {"region": "US"},
+                "sortColumn": "nonexistent_column",
+                "sortDirection": "asc",
+            },
+            page_size=10,
+        )
+        assert [r["revenue"] for r in sorted_records] == [
+            r["revenue"] for r in unsorted
+        ]
+
+    def test_sort_missing_direction_is_noop(self, pivot_module, df):
+        unsorted, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}}, page_size=10
+        )
+        sorted_records, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df,
+            {
+                "filters": {"region": "US"},
+                "sortColumn": "revenue",
+            },
+            page_size=10,
+        )
+        assert [r["revenue"] for r in sorted_records] == [
+            r["revenue"] for r in unsorted
+        ]
+
+    def test_sort_invalid_direction_is_noop(self, pivot_module, df):
+        unsorted, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df, {"filters": {"region": "US"}}, page_size=10
+        )
+        sorted_records, _, _, _ = pivot_module._compute_hybrid_drilldown(
+            df,
+            {
+                "filters": {"region": "US"},
+                "sortColumn": "revenue",
+                "sortDirection": "invalid",
+            },
+            page_size=10,
+        )
+        assert [r["revenue"] for r in sorted_records] == [
+            r["revenue"] for r in unsorted
+        ]
+
     def test_page_beyond_end_returns_empty(self, pivot_module, df):
         records, columns, total, page = pivot_module._compute_hybrid_drilldown(
             df, {"filters": {"region": "US"}, "page": 99}, page_size=2

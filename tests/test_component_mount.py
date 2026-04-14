@@ -486,6 +486,37 @@ def test_hybrid_drilldown_respects_source_filters(
     assert all(r["Category"] == "A" for r in payload["drilldown_records"])
 
 
+def test_hybrid_drilldown_sort_fields_order_records(
+    sample_df, pivot_module, mount_recorder
+):
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+    session_state = {
+        "pivot": {
+            "drilldown_request": {
+                "filters": {"Region": "East", "Year": "2023"},
+                "page": 0,
+                "sortColumn": "Revenue",
+                "sortDirection": "desc",
+            }
+        }
+    }
+    calls = mount_recorder(session_state=session_state)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        execution_mode="threshold_hybrid",
+    )
+
+    payload = calls[0]["data"]
+    revenues = [row["Revenue"] for row in payload["drilldown_records"]]
+    assert revenues == sorted(revenues, reverse=True)
+
+
 def test_source_filters_and_config_filters_intersect_on_same_field(
     sample_df, pivot_module, mount_recorder
 ):

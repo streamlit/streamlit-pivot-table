@@ -69,7 +69,14 @@ import Toolbar from "./config/Toolbar";
 import DrilldownPanel from "./renderers/DrilldownPanel";
 import WarningBanner from "./shared/WarningBanner";
 
-export type DrilldownRequest = CellClickPayload & { page?: number };
+export type DrilldownSortDirection = "asc" | "desc";
+
+export type DrilldownRequest = CellClickPayload & {
+  page?: number;
+  sortColumn?: string;
+  sortDirection?: DrilldownSortDirection;
+  requestId?: string;
+};
 
 export type PivotRootState = {
   config: PivotConfigV1;
@@ -105,6 +112,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   drilldown_total_count,
   drilldown_page,
   drilldown_page_size,
+  drilldown_request_id,
   hybrid_totals,
   hybrid_agg_remap,
   source_row_count,
@@ -142,6 +150,15 @@ const PivotRoot: FC<PivotRootProps> = ({
   const [isTableScrollable, setIsTableScrollable] = useState(false);
   const [drilldownPayload, setDrilldownPayload] =
     useState<CellClickPayload | null>(null);
+  const [drilldownSortColumn, setDrilldownSortColumn] = useState<
+    string | undefined
+  >(undefined);
+  const [drilldownSortDirection, setDrilldownSortDirection] = useState<
+    DrilldownSortDirection | undefined
+  >(undefined);
+  const [pendingDrilldownRequest, setPendingDrilldownRequest] =
+    useState<DrilldownRequest | null>(null);
+  const drilldownRequestSeqRef = useRef(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [windowHeight, setWindowHeight] = useState(
     typeof window !== "undefined" ? window.innerHeight : 800,
@@ -430,6 +447,9 @@ const PivotRoot: FC<PivotRootProps> = ({
   if (currentConfigJson !== prevConfigJsonRef.current) {
     prevConfigJsonRef.current = currentConfigJson;
     setDrilldownPayload(null);
+    setDrilldownSortColumn(undefined);
+    setDrilldownSortDirection(undefined);
+    setPendingDrilldownRequest(null);
   }
 
   renderStartRef.current = performance.now();
@@ -559,17 +579,77 @@ const PivotRoot: FC<PivotRootProps> = ({
   const drilldownEnabled = enable_drilldown == null || !!enable_drilldown;
   const isHybridMode = execution_mode === "threshold_hybrid";
 
+  const sendHybridDrilldownRequest = useCallback(
+    (
+      payload: CellClickPayload,
+      requestState: Pick<
+        DrilldownRequest,
+        "page" | "sortColumn" | "sortDirection"
+      >,
+    ) => {
+      const request: DrilldownRequest = {
+        ...payload,
+        ...requestState,
+        requestId: `drilldown-${++drilldownRequestSeqRef.current}`,
+      };
+      setPendingDrilldownRequest(request);
+      setStateValue("drilldown_request", request);
+    },
+    [setStateValue],
+  );
+
+  useEffect(() => {
+    if (!isHybridMode || !pendingDrilldownRequest) return;
+    if (pendingDrilldownRequest.requestId === drilldown_request_id) {
+      setPendingDrilldownRequest(null);
+    }
+  }, [drilldown_request_id, isHybridMode, pendingDrilldownRequest]);
+
+  useEffect(() => {
+    if (drilldownPayload || !isHybridMode) return;
+    setPendingDrilldownRequest(null);
+  }, [drilldownPayload, isHybridMode]);
+
   const handleCellClick = useCallback(
     (payload: CellClickPayload) => {
       setTriggerValue("cell_click", payload);
       if (drilldownEnabled) {
         setDrilldownPayload(payload);
+        setDrilldownSortColumn(undefined);
+        setDrilldownSortDirection(undefined);
         if (isHybridMode) {
-          setStateValue("drilldown_request", { ...payload, page: 0 });
+          sendHybridDrilldownRequest(payload, {
+            page: 0,
+            sortColumn: undefined,
+            sortDirection: undefined,
+          });
         }
       }
     },
-    [setTriggerValue, setStateValue, drilldownEnabled, isHybridMode],
+    [
+      setTriggerValue,
+      drilldownEnabled,
+      isHybridMode,
+      sendHybridDrilldownRequest,
+    ],
+  );
+
+  const handleDrilldownSortChange = useCallback(
+    (
+      sortColumn: string | undefined,
+      sortDirection: DrilldownSortDirection | undefined,
+    ) => {
+      setDrilldownSortColumn(sortColumn);
+      setDrilldownSortDirection(sortDirection);
+      if (isHybridMode && drilldownPayload) {
+        sendHybridDrilldownRequest(drilldownPayload, {
+          page: 0,
+          sortColumn,
+          sortDirection,
+        });
+      }
+    },
+    [drilldownPayload, isHybridMode, sendHybridDrilldownRequest],
   );
 
   const handleSortChange = useCallback(
@@ -879,11 +959,17 @@ const PivotRoot: FC<PivotRootProps> = ({
           <DrilldownPanel
             pivotData={pivotData}
             payload={drilldownPayload}
+            sortColumn={drilldownSortColumn}
+            sortDirection={drilldownSortDirection}
+            onSortChange={handleDrilldownSortChange}
             numberFormat={currentConfig.number_format}
             columnAlignment={currentConfig.column_alignment}
             columnTypes={mergedColumnTypes}
             onClose={() => {
               setDrilldownPayload(null);
+              setDrilldownSortColumn(undefined);
+              setDrilldownSortDirection(undefined);
+              setPendingDrilldownRequest(null);
               if (isHybridMode) {
                 setStateValue("drilldown_request", null);
               }
@@ -892,15 +978,19 @@ const PivotRoot: FC<PivotRootProps> = ({
             serverRecords={isHybridMode ? drilldown_records : undefined}
             serverColumns={isHybridMode ? drilldown_columns : undefined}
             serverTotalCount={isHybridMode ? drilldown_total_count : undefined}
-            isLoading={isHybridMode && !drilldown_records}
+            isLoading={
+              isHybridMode &&
+              (pendingDrilldownRequest != null || !drilldown_records)
+            }
             serverPage={isHybridMode ? drilldown_page : undefined}
             serverPageSize={isHybridMode ? drilldown_page_size : undefined}
             onPageChange={
               isHybridMode
                 ? (page: number) => {
-                    setStateValue("drilldown_request", {
-                      ...drilldownPayload,
+                    sendHybridDrilldownRequest(drilldownPayload, {
                       page,
+                      sortColumn: drilldownSortColumn,
+                      sortDirection: drilldownSortDirection,
                     });
                   }
                 : undefined

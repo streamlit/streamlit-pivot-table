@@ -535,7 +535,9 @@ result = st_pivot_table(
 )
 ```
 
-- The panel displays up to 500 matching records.
+- The panel displays up to 500 matching records per page with pagination controls when there are more.
+- **Column sorting:** Click any column header to sort the drilldown results. The sort cycles through ascending, descending, and unsorted (original order). Sorting applies to the **full** result set before pagination, so page boundaries reflect the global sort order.
+- In `threshold_hybrid` mode, sorting triggers a server round-trip so the backend sorts the full filtered DataFrame before slicing the requested page.
 - Close with the **&times;** button or by pressing **Escape**.
 - Set `enable_drilldown=False` to disable (the `on_cell_click` callback still fires).
 
@@ -726,7 +728,7 @@ The component follows WAI-ARIA patterns for all interactive elements:
 - **Export/Import popovers**: Focus is automatically placed on the first interactive element when opened. Tab/Shift+Tab moves between controls; tabbing out closes the popover.
 - **Settings Panel** (pivot icon): Focus moves into the panel on open. Escape closes and discards staged changes. Tab navigates between fields, zones, toggles, and buttons. Aggregation dropdowns support Enter/Space for keyboard selection.
 - **Radio groups** (export format/content): Arrow keys move focus between options. Space/Enter selects.
-- **Drill-down panel**: Focus moves to the close button on open. Escape closes.
+- **Drill-down panel**: Focus moves to the close button on open. Escape closes. Column headers are clickable buttons that cycle sort direction (asc → desc → none).
 - **Data cells**: Focusable via Tab. Space/Enter triggers cell click.
 
 ---

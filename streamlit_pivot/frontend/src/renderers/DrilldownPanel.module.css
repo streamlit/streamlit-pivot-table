@@ -152,7 +152,7 @@
   background: var(--st-dataframe-header-background-color, var(--st-secondary-background-color));
   color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
   font-weight: 500;
-  text-align: left;
+  text-align: center;
   padding: 6px 10px;
   border-bottom: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.2));
   border-right: 1px solid var(--st-dataframe-border-color, rgba(128, 128, 128, 0.2));
@@ -161,6 +161,63 @@
 
 .th:last-child {
   border-right: none;
+}
+
+.thSorted {
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--st-primary-color) 55%,
+    var(--st-dataframe-border-color)
+  );
+}
+
+.sortButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sortButton:hover:not(:disabled) {
+  color: var(--st-text-color);
+}
+
+.sortButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  border-radius: 3px;
+}
+
+.sortButton:disabled {
+  cursor: default;
+}
+
+.sortButtonInner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.sortIndicatorSlot {
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.sortIndicator {
+  display: block;
+  color: var(--st-primary-color);
 }
 
 .td {

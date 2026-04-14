@@ -15,11 +15,16 @@
  * limitations under the License.
  */
 
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import DrilldownPanel from "./DrilldownPanel";
+import DrilldownPanel, {
+  type DrilldownPanelProps,
+  compareDrilldownValues,
+  isBlankSortValue,
+} from "./DrilldownPanel";
 import { PivotData, type DataRecord } from "../engine/PivotData";
-import type { CellClickPayload } from "../engine/types";
+import type { CellClickPayload, ColumnType } from "../engine/types";
 import { makeConfig } from "../test-utils";
 
 const SAMPLE_DATA: DataRecord[] = [
@@ -44,6 +49,44 @@ function makePayload(
     filters: { region: "US", year: "2023" },
     ...overrides,
   };
+}
+
+function renderControlledSortPanel(
+  props: Omit<
+    DrilldownPanelProps,
+    "sortColumn" | "sortDirection" | "onSortChange"
+  >,
+) {
+  function Wrapper() {
+    const [sortColumn, setSortColumn] = useState<string | undefined>(undefined);
+    const [sortDirection, setSortDirection] = useState<
+      "asc" | "desc" | undefined
+    >(undefined);
+    return (
+      <DrilldownPanel
+        {...props}
+        sortColumn={sortColumn}
+        sortDirection={sortDirection}
+        onSortChange={(column, direction) => {
+          setSortColumn(column);
+          setSortDirection(direction);
+        }}
+      />
+    );
+  }
+
+  return render(<Wrapper />);
+}
+
+function getTableRows() {
+  return Array.from(
+    screen.getByTestId("drilldown-table").querySelectorAll("tbody tr"),
+  );
+}
+
+function getCellText(row: Element, columnIndex: number): string {
+  const cell = row.querySelectorAll("td")[columnIndex];
+  return cell?.textContent ?? "";
 }
 
 describe("DrilldownPanel", () => {
@@ -481,6 +524,249 @@ describe("DrilldownPanel — client-side pagination", () => {
       .getByTestId("drilldown-table")
       .querySelectorAll("tbody tr");
     expect(rows).toHaveLength(500);
+  });
+});
+
+describe("DrilldownPanel — sorting", () => {
+  it("cycles header sort none -> asc -> desc -> none", () => {
+    const pd = makePivotData();
+    renderControlledSortPanel({
+      pivotData: pd,
+      payload: makePayload({ filters: {} }),
+      onClose: vi.fn(),
+    });
+
+    const revenueHeader = screen.getByTestId("drilldown-sort-revenue");
+    const getFirstRevenue = () => getCellText(getTableRows()[0]!, 2);
+
+    expect(getFirstRevenue()).toBe("100");
+
+    fireEvent.click(revenueHeader);
+    expect(screen.getByTestId("sort-indicator-asc")).toBeInTheDocument();
+    expect(getFirstRevenue()).toBe("50");
+
+    fireEvent.click(revenueHeader);
+    expect(screen.getByTestId("sort-indicator-desc")).toBeInTheDocument();
+    expect(getFirstRevenue()).toBe("250");
+
+    fireEvent.click(revenueHeader);
+    expect(screen.queryByTestId("sort-indicator-asc")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sort-indicator-desc")).not.toBeInTheDocument();
+    expect(getFirstRevenue()).toBe("100");
+  });
+
+  it("clicking a different header starts a new ascending sort", () => {
+    const pd = makePivotData();
+    renderControlledSortPanel({
+      pivotData: pd,
+      payload: makePayload({ filters: {} }),
+      onClose: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByTestId("drilldown-sort-revenue"));
+    expect(screen.getByTestId("sort-indicator-asc")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("drilldown-sort-profit"));
+    expect(screen.getByTestId("sort-indicator-asc")).toBeInTheDocument();
+    expect(getCellText(getTableRows()[0]!, 3)).toBe("20");
+  });
+
+  it("sorts client-side results before pagination", () => {
+    const records = Array.from({ length: 600 }, (_, i) => ({
+      region: i % 2 === 0 ? "US" : "EU",
+      year: "2023",
+      revenue: 10 * (i + 1),
+      profit: 5 * (i + 1),
+    }));
+    const pd = makePivotData(records);
+    renderControlledSortPanel({
+      pivotData: pd,
+      payload: makePayload({ filters: {} }),
+      onClose: vi.fn(),
+    });
+
+    const revenueHeader = screen.getByTestId("drilldown-sort-revenue");
+    fireEvent.click(revenueHeader);
+    fireEvent.click(revenueHeader);
+
+    expect(getCellText(getTableRows()[0]!, 2)).toBe("6,000");
+
+    fireEvent.click(screen.getByTestId("drilldown-next"));
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    expect(getCellText(getTableRows()[0]!, 2)).toBe("1,000");
+  });
+
+  it("calls onSortChange with hybrid sort metadata", () => {
+    const onSortChange = vi.fn();
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        sortColumn={undefined}
+        sortDirection={undefined}
+        onSortChange={onSortChange}
+        serverRecords={[
+          { region: "US", year: "2023", revenue: 100, profit: 40 },
+          { region: "US", year: "2023", revenue: 50, profit: 20 },
+        ]}
+        serverColumns={["region", "year", "revenue", "profit"]}
+        serverTotalCount={2}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("drilldown-sort-revenue"));
+    expect(onSortChange).toHaveBeenCalledWith("revenue", "asc");
+  });
+});
+
+describe("isBlankSortValue", () => {
+  it.each([
+    [null, true],
+    [undefined, true],
+    ["", true],
+    [NaN, true],
+    [0, false],
+    [false, false],
+    ["hello", false],
+    [" ", false],
+  ])("isBlankSortValue(%j) === %s", (input, expected) => {
+    expect(isBlankSortValue(input)).toBe(expected);
+  });
+});
+
+describe("compareDrilldownValues", () => {
+  it("sorts numbers numerically", () => {
+    expect(compareDrilldownValues(2, 10)).toBeLessThan(0);
+    expect(compareDrilldownValues(10, 2)).toBeGreaterThan(0);
+    expect(compareDrilldownValues(5, 5)).toBe(0);
+  });
+
+  it("sorts strings lexicographically with numeric awareness", () => {
+    expect(compareDrilldownValues("apple", "banana")).toBeLessThan(0);
+    expect(compareDrilldownValues("banana", "apple")).toBeGreaterThan(0);
+    expect(compareDrilldownValues("item2", "item10")).toBeLessThan(0);
+  });
+
+  it("sorts booleans (false < true)", () => {
+    expect(compareDrilldownValues(false, true)).toBeLessThan(0);
+    expect(compareDrilldownValues(true, false)).toBeGreaterThan(0);
+    expect(compareDrilldownValues(true, true)).toBe(0);
+  });
+
+  it("pushes null/undefined/NaN/empty last regardless of order", () => {
+    expect(compareDrilldownValues(null, 5)).toBeGreaterThan(0);
+    expect(compareDrilldownValues(5, null)).toBeLessThan(0);
+    expect(compareDrilldownValues(undefined, "a")).toBeGreaterThan(0);
+    expect(compareDrilldownValues("a", undefined)).toBeLessThan(0);
+    expect(compareDrilldownValues(NaN, 1)).toBeGreaterThan(0);
+    expect(compareDrilldownValues("", "a")).toBeGreaterThan(0);
+  });
+
+  it("treats two blanks as equal", () => {
+    expect(compareDrilldownValues(null, undefined)).toBe(0);
+    expect(compareDrilldownValues("", NaN)).toBe(0);
+  });
+
+  it("sorts ISO date strings chronologically with datetime columnType", () => {
+    const ct: ColumnType = "datetime";
+    expect(
+      compareDrilldownValues(
+        "2024-01-15T00:00:00Z",
+        "2024-03-01T00:00:00Z",
+        ct,
+      ),
+    ).toBeLessThan(0);
+    expect(
+      compareDrilldownValues(
+        "2024-12-31T00:00:00Z",
+        "2024-01-01T00:00:00Z",
+        ct,
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it("sorts ISO date strings chronologically with date columnType", () => {
+    const ct: ColumnType = "date";
+    expect(compareDrilldownValues("2024-01-01", "2024-06-15", ct)).toBeLessThan(
+      0,
+    );
+  });
+
+  it("uses numeric coercion when columnType is integer or float", () => {
+    expect(compareDrilldownValues("9", "10", "integer")).toBeLessThan(0);
+    expect(compareDrilldownValues("2.5", "1.1", "float")).toBeGreaterThan(0);
+  });
+
+  it("falls back to string comparison without columnType", () => {
+    expect(compareDrilldownValues("9", "10")).toBeLessThan(0);
+  });
+});
+
+describe("DrilldownPanel — sort edge cases", () => {
+  it("disables sort buttons while isLoading is true", () => {
+    const pd = makePivotData();
+    const onSortChange = vi.fn();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        sortColumn={undefined}
+        sortDirection={undefined}
+        onSortChange={onSortChange}
+        serverRecords={[
+          { region: "US", year: "2023", revenue: 100, profit: 40 },
+        ]}
+        serverColumns={["region", "year", "revenue", "profit"]}
+        serverTotalCount={100}
+        serverPage={0}
+        serverPageSize={500}
+        onPageChange={vi.fn()}
+        isLoading
+      />,
+    );
+    // Loading state hides the table, so sort buttons are not rendered
+    expect(
+      screen.queryByTestId("drilldown-sort-revenue"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not sort when onSortChange is not provided", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload({ filters: {} })}
+        onClose={vi.fn()}
+      />,
+    );
+    const rows = getTableRows();
+    const firstRevenue = getCellText(rows[0]!, 2);
+    fireEvent.click(screen.getByTestId("drilldown-sort-revenue"));
+    expect(getCellText(getTableRows()[0]!, 2)).toBe(firstRevenue);
+  });
+
+  it("resets to page 1 when sort changes on a paginated panel", () => {
+    const records = Array.from({ length: 600 }, (_, i) => ({
+      region: "US",
+      year: "2023",
+      revenue: i + 1,
+      profit: i + 1,
+    }));
+    const pd = makePivotData(records);
+    renderControlledSortPanel({
+      pivotData: pd,
+      payload: makePayload({ filters: {} }),
+      onClose: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByTestId("drilldown-next"));
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("drilldown-sort-revenue"));
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
   });
 });
 

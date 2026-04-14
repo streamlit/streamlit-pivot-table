@@ -25,7 +25,11 @@ import {
   useState,
 } from "react";
 import type { PivotData, DataRecord } from "../engine/PivotData";
-import type { CellClickPayload, ColumnTypeMap } from "../engine/types";
+import type {
+  CellClickPayload,
+  ColumnType,
+  ColumnTypeMap,
+} from "../engine/types";
 import { measureSync, type PerfActionMeasurement } from "../engine/perf";
 import {
   formatNumber,
@@ -36,12 +40,19 @@ import {
 import styles from "./DrilldownPanel.module.css";
 
 const RECORD_LIMIT = 500;
+type DrilldownSortDirection = "asc" | "desc";
 
 export interface DrilldownPanelProps {
   pivotData: PivotData;
   payload: CellClickPayload;
   onClose: () => void;
   onMeasured?: (action: PerfActionMeasurement) => void;
+  sortColumn?: string;
+  sortDirection?: DrilldownSortDirection;
+  onSortChange?: (
+    sortColumn: string | undefined,
+    sortDirection: DrilldownSortDirection | undefined,
+  ) => void;
   /** Pre-fetched rows from a hybrid-mode server round-trip. */
   serverRecords?: Record<string, unknown>[];
   /** Column names for server-provided rows, in display order. */
@@ -77,6 +88,30 @@ const CloseIcon: FC = () => (
   >
     <line x1="18" y1="6" x2="6" y2="18" />
     <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+const SortIndicator: FC<{ direction: DrilldownSortDirection }> = ({
+  direction,
+}) => (
+  <svg
+    width="8"
+    height="8"
+    viewBox="0 0 8 8"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={styles.sortIndicator}
+    aria-hidden="true"
+    data-testid={`sort-indicator-${direction}`}
+  >
+    {direction === "asc" ? (
+      <polyline points="1,5.5 4,2 7,5.5" />
+    ) : (
+      <polyline points="1,2.5 4,6 7,2.5" />
+    )}
   </svg>
 );
 
@@ -128,11 +163,62 @@ function getCellAlign(
   return undefined;
 }
 
+export function isBlankSortValue(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    value === "" ||
+    (typeof value === "number" && Number.isNaN(value))
+  );
+}
+
+function parseTemporalSortValue(value: unknown): number | null {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export function compareDrilldownValues(
+  a: unknown,
+  b: unknown,
+  columnType?: ColumnType,
+): number {
+  if (isBlankSortValue(a) && isBlankSortValue(b)) return 0;
+  if (isBlankSortValue(a)) return 1;
+  if (isBlankSortValue(b)) return -1;
+
+  if (columnType === "date" || columnType === "datetime") {
+    const aTs = parseTemporalSortValue(a);
+    const bTs = parseTemporalSortValue(b);
+    if (aTs != null && bTs != null) return aTs - bTs;
+  }
+
+  if (columnType === "integer" || columnType === "float") {
+    const aNum = Number(a);
+    const bNum = Number(b);
+    if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) return aNum - bNum;
+  }
+
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "boolean" || typeof b === "boolean") {
+    return Number(Boolean(a)) - Number(Boolean(b));
+  }
+
+  return String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
 const DrilldownPanel: FC<DrilldownPanelProps> = ({
   pivotData,
   payload,
   onClose,
   onMeasured,
+  sortColumn,
+  sortDirection,
+  onSortChange,
   serverRecords,
   serverColumns,
   serverTotalCount,
@@ -190,7 +276,7 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
 
   useEffect(() => {
     setClientPage(0);
-  }, [payload.filters]);
+  }, [payload.filters, sortColumn, sortDirection]);
 
   useEffect(() => {
     if (!onMeasured) return;
@@ -206,6 +292,23 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
     return pivotData.getColumnNames();
   }, [pivotData, serverColumns]);
 
+  const orderedRecords = useMemo(() => {
+    if (!sortColumn || !sortDirection || useServerData) return allRecords;
+    const columnType = columnTypes?.get(sortColumn);
+    return allRecords
+      .map((record, index) => ({ record, index }))
+      .sort((a, b) => {
+        const cmp = compareDrilldownValues(
+          a.record[sortColumn],
+          b.record[sortColumn],
+          columnType,
+        );
+        if (cmp !== 0) return sortDirection === "asc" ? cmp : -cmp;
+        return a.index - b.index;
+      })
+      .map(({ record }) => record);
+  }, [allRecords, columnTypes, sortColumn, sortDirection, useServerData]);
+
   const headerText = formatDrilldownHeader(payload, pivotData);
   const pageSize = serverPageSize ?? RECORD_LIMIT;
   const currentPage = useServerData ? (serverPage ?? 0) : clientPage;
@@ -214,10 +317,10 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
     totalPages > 1 && (useServerData ? onPageChange != null : true);
 
   const records = useMemo(() => {
-    if (useServerData) return allRecords;
+    if (useServerData) return orderedRecords;
     const start = currentPage * pageSize;
-    return allRecords.slice(start, start + pageSize);
-  }, [useServerData, allRecords, currentPage, pageSize]);
+    return orderedRecords.slice(start, start + pageSize);
+  }, [useServerData, orderedRecords, currentPage, pageSize]);
 
   const rangeStart = currentPage * pageSize + 1;
   const rangeEnd = Math.min(rangeStart + records.length - 1, totalCount);
@@ -277,11 +380,56 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
             <table className={styles.table} data-testid="drilldown-table">
               <thead>
                 <tr>
-                  {columns.map((col) => (
-                    <th key={col} className={styles.th}>
-                      {col}
-                    </th>
-                  ))}
+                  {columns.map((col) => {
+                    const isSorted = sortColumn === col && !!sortDirection;
+                    const ariaSort = isSorted
+                      ? sortDirection === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none";
+                    return (
+                      <th
+                        key={col}
+                        className={`${styles.th} ${isSorted ? styles.thSorted : ""}`}
+                        aria-sort={ariaSort}
+                      >
+                        <button
+                          type="button"
+                          className={styles.sortButton}
+                          onClick={() => {
+                            if (!onSortChange) return;
+                            if (sortColumn !== col) {
+                              onSortChange(col, "asc");
+                              return;
+                            }
+                            if (sortDirection === "asc") {
+                              onSortChange(col, "desc");
+                              return;
+                            }
+                            if (sortDirection === "desc") {
+                              onSortChange(undefined, undefined);
+                              return;
+                            }
+                            onSortChange(col, "asc");
+                          }}
+                          disabled={isLoading}
+                          data-testid={`drilldown-sort-${col}`}
+                        >
+                          <span className={styles.sortButtonInner}>
+                            <span>{col}</span>
+                            <span
+                              className={styles.sortIndicatorSlot}
+                              aria-hidden="true"
+                            >
+                              {isSorted && sortDirection && (
+                                <SortIndicator direction={sortDirection} />
+                              )}
+                            </span>
+                          </span>
+                        </button>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>

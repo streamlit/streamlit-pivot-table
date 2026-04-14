@@ -1227,6 +1227,8 @@ export interface PivotTableData {
   drilldown_page?: number;
   /** Number of rows per page (set by the server). */
   drilldown_page_size?: number;
+  /** Opaque request id echoed back from the latest hybrid drill-down response. */
+  drilldown_request_id?: string;
   /** Original row count before hybrid pre-aggregation. */
   source_row_count?: number;
   /** Python-detected column types (covers drilldown-only and object-dtype temporal columns). */
