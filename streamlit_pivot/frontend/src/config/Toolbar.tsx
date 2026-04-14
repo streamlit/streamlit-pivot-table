@@ -50,8 +50,6 @@ import {
   exportPivotData,
 } from "../engine/exportData";
 import {
-  AGGREGATION_TYPES,
-  getAggregationForField,
   getDimensionLabel,
   normalizeAggregationConfig,
   stringifyPivotConfig,
@@ -64,23 +62,20 @@ import {
   type ShowValuesAs,
   type SortConfig,
   type SyntheticMeasureConfig,
-  showRowTotals as resolveShowRowTotals,
-  showColumnTotals as resolveShowColumnTotals,
   validatePivotConfigRuntime,
   validatePivotConfigV1,
 } from "../engine/types";
-import {
-  formatWithPattern,
-  isSupportedFormatPattern,
-} from "../engine/formatters";
 import { useClickOutside } from "../shared/useClickOutside";
-import { useListboxKeyboard } from "../shared/useListboxKeyboard";
 import {
   SortableFieldChip,
   DragOverlayChip,
   makeItemId,
   parseItemId,
 } from "./DndFieldChip";
+import SettingsPanel, {
+  InlineAggPicker,
+  cleanupConfigAfterFieldChanges,
+} from "./SettingsPanel";
 import styles from "./Toolbar.module.css";
 
 export interface ToolbarProps {
@@ -124,19 +119,6 @@ function stringArraysEqual(
   return b.every((value, idx) => a?.[idx] === value);
 }
 
-const AGG_ICONS: Record<AggregationType, string> = {
-  sum: "+",
-  avg: "Σ",
-  count: "#",
-  min: "↓",
-  max: "↑",
-  count_distinct: "∅",
-  median: "M̃",
-  percentile_90: "P₉₀",
-  first: "⇤",
-  last: "⇥",
-};
-
 const AGG_LABELS: Record<AggregationType, string> = {
   sum: "Sum",
   avg: "Avg",
@@ -155,20 +137,6 @@ const AGG_CHIP_LABELS: Record<AggregationType, string> = {
   count_distinct: "Distinct",
   percentile_90: "P90",
 };
-
-const ChevronIcon: FC<{ open?: boolean }> = ({ open }) => (
-  <svg
-    className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <polyline points="6 9 12 15 18 9" />
-  </svg>
-);
 
 type ZoneKey = "rows" | "columns" | "values";
 
@@ -317,12 +285,6 @@ const Toolbar: FC<ToolbarProps> = ({
   isFullscreen,
   onToggleFullscreen,
 }): ReactElement => {
-  const syncAggregation = useCallback(
-    (values: string[], aggregation: AggregationConfig = config.aggregation) =>
-      normalizeAggregationConfig(aggregation, values),
-    [config.aggregation],
-  );
-
   const emitIfChanged = useCallback(
     (updated: PivotConfigV1) => {
       if (onConfigChange && !configsEqual(updated, config)) {
@@ -332,138 +294,38 @@ const Toolbar: FC<ToolbarProps> = ({
     [config, onConfigChange],
   );
 
-  const toggleRow = useCallback(
-    (col: string) => {
-      const rows = config.rows.includes(col)
-        ? config.rows.filter((r) => r !== col)
-        : [...config.rows, col];
-      emitIfChanged({ ...config, rows });
-    },
-    [config, emitIfChanged],
-  );
-
-  const toggleColumn = useCallback(
-    (col: string) => {
-      const columns = config.columns.includes(col)
-        ? config.columns.filter((c) => c !== col)
-        : [...config.columns, col];
-      emitIfChanged({ ...config, columns });
-    },
-    [config, emitIfChanged],
-  );
-
-  const toggleValue = useCallback(
-    (col: string) => {
-      const values = config.values.includes(col)
-        ? config.values.filter((v) => v !== col)
-        : [...config.values, col];
+  const handleValueAggChange = useCallback(
+    (field: string, agg: AggregationType) => {
       emitIfChanged({
         ...config,
-        values,
-        aggregation: syncAggregation(values),
-      });
-    },
-    [config, emitIfChanged, syncAggregation],
-  );
-
-  const removeRow = useCallback(
-    (col: string) => {
-      emitIfChanged({ ...config, rows: config.rows.filter((r) => r !== col) });
-    },
-    [config, emitIfChanged],
-  );
-
-  const removeColumn = useCallback(
-    (col: string) => {
-      emitIfChanged({
-        ...config,
-        columns: config.columns.filter((c) => c !== col),
+        aggregation: normalizeAggregationConfig(
+          { ...config.aggregation, [field]: agg },
+          config.values,
+        ),
       });
     },
     [config, emitIfChanged],
   );
 
-  const removeValue = useCallback(
-    (col: string) => {
-      const values = config.values.filter((v) => v !== col);
-      emitIfChanged({
-        ...config,
-        values,
-        aggregation: syncAggregation(values),
-      });
+  const handleRemoveField = useCallback(
+    (zone: ZoneKey, field: string) => {
+      if (frozenColumns?.has(field)) return;
+      const nextConfig =
+        zone === "rows"
+          ? { ...config, rows: config.rows.filter((item) => item !== field) }
+          : zone === "columns"
+            ? {
+                ...config,
+                columns: config.columns.filter((item) => item !== field),
+              }
+            : {
+                ...config,
+                values: config.values.filter((item) => item !== field),
+              };
+      emitIfChanged(cleanupConfigAfterFieldChanges(config, nextConfig));
     },
-    [config, emitIfChanged, syncAggregation],
+    [config, emitIfChanged, frozenColumns],
   );
-
-  const upsertSyntheticMeasure = useCallback(
-    (measure: SyntheticMeasureConfig) => {
-      const current = config.synthetic_measures ?? [];
-      const idx = current.findIndex((m) => m.id === measure.id);
-      const synthetic_measures =
-        idx === -1
-          ? [...current, measure]
-          : current.map((m, i) => (i === idx ? measure : m));
-      emitIfChanged({ ...config, synthetic_measures });
-    },
-    [config, emitIfChanged],
-  );
-
-  const removeSyntheticMeasure = useCallback(
-    (measureId: string) => {
-      const current = config.synthetic_measures ?? [];
-      const synthetic_measures = current.filter((m) => m.id !== measureId);
-      emitIfChanged({ ...config, synthetic_measures });
-    },
-    [config, emitIfChanged],
-  );
-
-  const handleValueAggregationChange = useCallback(
-    (valueField: string, aggregation: AggregationType) => {
-      emitIfChanged({
-        ...config,
-        aggregation: syncAggregation(config.values, {
-          ...config.aggregation,
-          [valueField]: aggregation,
-        }),
-      });
-    },
-    [config, emitIfChanged, syncAggregation],
-  );
-
-  const toggleRowTotals = useCallback(() => {
-    const current = config.show_row_totals ?? config.show_totals;
-    // string[] (partial) -> true (all-on); true -> false; false -> true
-    const next = Array.isArray(current) ? true : !current;
-    emitIfChanged({ ...config, show_row_totals: next });
-  }, [config, emitIfChanged]);
-
-  const toggleColumnTotals = useCallback(() => {
-    const current = config.show_column_totals ?? config.show_totals;
-    // string[] (partial) -> true (all-on); true -> false; false -> true
-    const next = Array.isArray(current) ? true : !current;
-    emitIfChanged({ ...config, show_column_totals: next });
-  }, [config, emitIfChanged]);
-
-  const toggleSubtotals = useCallback(() => {
-    const current = config.show_subtotals;
-    // string[] (partial) -> true (all-on); true -> false; false -> true
-    const next = Array.isArray(current) ? true : !current;
-    const updated = { ...config, show_subtotals: next };
-    if (!next) {
-      delete updated.collapsed_groups;
-      delete updated.repeat_row_labels;
-    }
-    emitIfChanged(updated);
-  }, [config, emitIfChanged]);
-
-  const toggleRepeatLabels = useCallback(() => {
-    emitIfChanged({ ...config, repeat_row_labels: !config.repeat_row_labels });
-  }, [config, emitIfChanged]);
-
-  const toggleStickyHeaders = useCallback(() => {
-    const current = config.sticky_headers !== false;
-    emitIfChanged({ ...config, sticky_headers: !current });
-  }, [config, emitIfChanged]);
 
   const expandAllGroups = useCallback(() => {
     if (!onCollapseChange) return;
@@ -512,7 +374,6 @@ const Toolbar: FC<ToolbarProps> = ({
   // -------------------------------------------------------------------------
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeOverZone, setActiveOverZone] = useState<string | null>(null);
-  const dropdownCloseRef = useRef<(() => void) | null>(null);
 
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: { distance: 5 },
@@ -524,10 +385,11 @@ const Toolbar: FC<ToolbarProps> = ({
     if (!activeId) return null;
     return parseItemId(activeId);
   }, [activeId]);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const settingsWrapperRef = useRef<HTMLDivElement>(null);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(String(event.active.id));
-    dropdownCloseRef.current?.();
   }, []);
 
   const handleDragOver = useCallback(
@@ -614,43 +476,56 @@ const Toolbar: FC<ToolbarProps> = ({
     });
   });
 
-  const availableForRows = allColumns.filter(
-    (c) => !config.columns.includes(c),
-  );
-  const availableForCols = allColumns.filter((c) => !config.rows.includes(c));
+  // Settings panel open state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const handleSettingsClose = useCallback(() => setSettingsOpen(false), []);
+  const settingsCloseRef = useRef(handleSettingsClose);
+  settingsCloseRef.current = handleSettingsClose;
 
-  const showRowTotals = resolveShowRowTotals(config);
-  const showColTotals = resolveShowColumnTotals(config);
-  const rowTotalsDisabled = config.columns.length === 0;
-  const colTotalsDisabled = config.rows.length === 0;
+  // Close settings panel on drag start (avoids stale-state conflicts)
+  const handleDragStartWithSettingsClose = useCallback(
+    (event: DragStartEvent) => {
+      handleDragStart(event);
+      settingsCloseRef.current();
+    },
+    [handleDragStart],
+  );
+
+  // Group expand/collapse state
+  const showRowGroups =
+    !!config.show_subtotals && config.rows.length >= 2 && !!onCollapseChange;
+  const showColGroups = config.columns.length >= 2 && !!onCollapseChange;
+
+  // Zone card content helpers
+  const syntheticMeasures = config.synthetic_measures ?? [];
+  const emptyHint = "Apply fields in settings menu";
 
   return (
     <div
+      ref={toolbarRef}
       data-testid="pivot-toolbar"
       className={`${styles.toolbar} ${locked ? styles.toolbarLocked : ""}`}
     >
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
-        onDragStart={handleDragStart}
+        onDragStart={handleDragStartWithSettingsClose}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <DropdownMultiSelect
+        <ZoneCard
           label="Rows"
           testId="toolbar-rows"
-          options={availableForRows}
+          zoneId="rows"
           selected={config.rows}
-          onToggle={toggleRow}
-          onRemove={removeRow}
           disabled={locked}
           frozenColumns={frozenColumns}
           sortConfig={config.row_sort}
           filters={config.filters}
-          zoneId="rows"
           isDropHighlighted={activeOverZone === "rows"}
           activeId={activeId}
-          registerCloseDropdown={dropdownCloseRef}
+          emptyHint={emptyHint}
+          onRemove={(field) => handleRemoveField("rows", field)}
           displayLabelForField={(field) =>
             getDimensionLabel(
               config,
@@ -660,21 +535,19 @@ const Toolbar: FC<ToolbarProps> = ({
             )
           }
         />
-        <DropdownMultiSelect
+        <ZoneCard
           label="Columns"
           testId="toolbar-columns"
-          options={availableForCols}
+          zoneId="columns"
           selected={config.columns}
-          onToggle={toggleColumn}
-          onRemove={removeColumn}
           disabled={locked}
           frozenColumns={frozenColumns}
           sortConfig={config.col_sort}
           filters={config.filters}
-          zoneId="columns"
           isDropHighlighted={activeOverZone === "columns"}
           activeId={activeId}
-          registerCloseDropdown={dropdownCloseRef}
+          emptyHint={emptyHint}
+          onRemove={(field) => handleRemoveField("columns", field)}
           displayLabelForField={(field) =>
             getDimensionLabel(
               config,
@@ -684,26 +557,24 @@ const Toolbar: FC<ToolbarProps> = ({
             )
           }
         />
-        <DropdownMultiSelect
+        <ZoneCard
           label="Values"
           testId="toolbar-values"
-          options={numericColumns}
+          zoneId="values"
           selected={config.values}
-          onToggle={toggleValue}
-          onRemove={removeValue}
           disabled={locked}
           frozenColumns={frozenColumns}
-          showValuesAs={config.show_values_as}
-          aggregation={config.aggregation}
-          syntheticMeasures={config.synthetic_measures ?? []}
-          allNumericColumns={syntheticSourceColumns ?? numericColumns}
-          onAggregationChange={handleValueAggregationChange}
-          onUpsertSyntheticMeasure={upsertSyntheticMeasure}
-          onRemoveSyntheticMeasure={removeSyntheticMeasure}
-          zoneId="values"
           isDropHighlighted={activeOverZone === "values"}
           activeId={activeId}
-          registerCloseDropdown={dropdownCloseRef}
+          emptyHint={emptyHint}
+          isValues
+          aggregation={config.aggregation}
+          showValuesAs={config.show_values_as}
+          syntheticMeasures={syntheticMeasures}
+          onAggregationChange={handleValueAggChange}
+          onRemove={(field) => handleRemoveField("values", field)}
+          aggPortalTarget={toolbarRef.current}
+          aggTestIdPrefix="toolbar-values-agg"
         />
         <DragOverlay dropAnimation={{ duration: 200 }}>
           {activeField ? (
@@ -735,7 +606,7 @@ const Toolbar: FC<ToolbarProps> = ({
 
       <div
         ref={utilGroupRef}
-        className={`${styles.utilGroup} ${locked ? styles.utilGroupPinned : ""}`}
+        className={`${styles.utilGroup} ${locked || settingsOpen ? styles.utilGroupPinned : ""}`}
         role="toolbar"
         aria-label="Table actions"
         onKeyDown={(e) => {
@@ -823,6 +694,65 @@ const Toolbar: FC<ToolbarProps> = ({
             adaptiveDateGrains={adaptiveDateGrains}
           />
         )}
+        {showRowGroups && (
+          <>
+            <span className={styles.tooltipWrap} data-tooltip="Expand All">
+              <button
+                data-testid="pivot-group-toggle-expand-all"
+                data-toolbar-btn
+                tabIndex={-1}
+                className={`${styles.utilButton} ${styles.iconButton}`}
+                onClick={expandAllGroups}
+                aria-label="Expand all row groups"
+              >
+                <ExpandIcon />
+              </button>
+            </span>
+            <span className={styles.tooltipWrap} data-tooltip="Collapse All">
+              <button
+                data-testid="pivot-group-toggle-collapse-all"
+                data-toolbar-btn
+                tabIndex={-1}
+                className={`${styles.utilButton} ${styles.iconButton}`}
+                onClick={collapseAllGroups}
+                aria-label="Collapse all row groups"
+              >
+                <CollapseIcon />
+              </button>
+            </span>
+          </>
+        )}
+        {showColGroups && (
+          <>
+            <span className={styles.tooltipWrap} data-tooltip="Expand Columns">
+              <button
+                data-testid="pivot-col-group-expand-all"
+                data-toolbar-btn
+                tabIndex={-1}
+                className={`${styles.utilButton} ${styles.iconButton}`}
+                onClick={expandAllColGroups}
+                aria-label="Expand all column groups"
+              >
+                <ExpandIcon />
+              </button>
+            </span>
+            <span
+              className={styles.tooltipWrap}
+              data-tooltip="Collapse Columns"
+            >
+              <button
+                data-testid="pivot-col-group-collapse-all"
+                data-toolbar-btn
+                tabIndex={-1}
+                className={`${styles.utilButton} ${styles.iconButton}`}
+                onClick={collapseAllColGroups}
+                aria-label="Collapse all column groups"
+              >
+                <CollapseIcon />
+              </button>
+            </span>
+          </>
+        )}
         {onToggleFullscreen && (
           <span
             className={styles.tooltipWrap}
@@ -836,37 +766,46 @@ const Toolbar: FC<ToolbarProps> = ({
               onClick={onToggleFullscreen}
               aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
             >
-              {isFullscreen ? <CollapseIcon /> : <ExpandIcon />}
+              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenEnterIcon />}
             </button>
           </span>
         )}
-        <SettingsPopover
-          config={config}
-          locked={locked}
-          showStickyToggle={showStickyToggle}
-          showRowTotals={showRowTotals}
-          showColTotals={showColTotals}
-          rowTotalsDisabled={rowTotalsDisabled}
-          colTotalsDisabled={colTotalsDisabled}
-          toggleRowTotals={!locked ? toggleRowTotals : undefined}
-          toggleColumnTotals={!locked ? toggleColumnTotals : undefined}
-          toggleSubtotals={!locked ? toggleSubtotals : undefined}
-          toggleRepeatLabels={!locked ? toggleRepeatLabels : undefined}
-          toggleStickyHeaders={!locked ? toggleStickyHeaders : undefined}
-          expandAllGroups={onCollapseChange ? expandAllGroups : undefined}
-          collapseAllGroups={onCollapseChange ? collapseAllGroups : undefined}
-          expandAllColGroups={onCollapseChange ? expandAllColGroups : undefined}
-          collapseAllColGroups={
-            onCollapseChange ? collapseAllColGroups : undefined
-          }
-        />
+        <div ref={settingsWrapperRef} className={styles.settingsWrapper}>
+          <span className={styles.tooltipWrap} data-tooltip="Table Settings">
+            <button
+              data-testid="toolbar-settings"
+              data-toolbar-btn
+              tabIndex={-1}
+              className={`${styles.utilButton} ${styles.iconButton} ${settingsOpen ? styles.iconButtonActive : ""}`}
+              onClick={() => setSettingsOpen((v) => !v)}
+              aria-label="Table settings"
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+            >
+              <SettingsIcon />
+            </button>
+          </span>
+          <SettingsPanel
+            config={config}
+            allColumns={allColumns}
+            numericColumns={numericColumns}
+            syntheticSourceColumns={syntheticSourceColumns}
+            onConfigChange={onConfigChange!}
+            locked={locked}
+            frozenColumns={frozenColumns}
+            showStickyToggle={showStickyToggle}
+            open={settingsOpen}
+            onClose={handleSettingsClose}
+            excludeRef={settingsWrapperRef}
+          />
+        </div>
       </div>
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// DropdownMultiSelect
+// ZoneCard — read-only zone display with cross-zone DnD chips
 // ---------------------------------------------------------------------------
 
 const SHOW_AS_BADGE_LABELS: Record<string, string> = {
@@ -879,181 +818,34 @@ const SHOW_AS_BADGE_LABELS: Record<string, string> = {
   pct_diff_from_prev_year: "% vs prior year",
 };
 
-const SYNTHETIC_FORMAT_PRESETS = [
-  { label: "Percent", value: ".1%" },
-  { label: "Currency", value: "$,.0f" },
-  { label: "Number", value: ",.2f" },
-] as const;
-const SYNTHETIC_FORMAT_PREVIEW_NUMBER = 12345.678;
-const SYNTHETIC_FORMAT_PREVIEW_PERCENT = 0.1234;
-
-interface DropdownMultiSelectProps {
+interface ZoneCardProps {
   label: string;
   testId: string;
-  options: string[];
+  zoneId: string;
   selected: string[];
-  onToggle: (col: string) => void;
-  onRemove: (col: string) => void;
   disabled?: boolean;
   frozenColumns?: Set<string>;
-  /** Read-only: current sort config for status indicator on chips. */
   sortConfig?: SortConfig;
-  /** Read-only: current filters for status indicator on chips. */
   filters?: Record<string, DimensionFilter>;
-  /** Read-only: current show-values-as config for badge indicators on chips. */
   showValuesAs?: Record<string, ShowValuesAs>;
   aggregation?: AggregationConfig;
   syntheticMeasures?: SyntheticMeasureConfig[];
-  allNumericColumns?: string[];
-  onAggregationChange?: (field: string, aggregation: AggregationType) => void;
-  onUpsertSyntheticMeasure?: (measure: SyntheticMeasureConfig) => void;
-  onRemoveSyntheticMeasure?: (id: string) => void;
-  /** Zone identifier for drag-and-drop. */
-  zoneId?: string;
-  /** Whether this zone is highlighted as a valid drop target. */
   isDropHighlighted?: boolean;
-  /** Currently dragged item ID (zone-prefixed). */
   activeId?: string | null;
-  /** Ref to register the dropdown close function for DnD drag start. */
-  registerCloseDropdown?: React.MutableRefObject<(() => void) | null>;
-  /** Optional formatter for selected chip labels. */
+  onAggregationChange?: (field: string, agg: AggregationType) => void;
+  onRemove?: (field: string) => void;
+  aggPortalTarget?: HTMLElement | null;
+  aggTestIdPrefix?: string;
   displayLabelForField?: (field: string) => string;
+  isValues?: boolean;
+  emptyHint?: string;
 }
 
-interface AggregationPickerProps {
-  field: string;
-  value: AggregationType;
-  testId: string;
-  disabled?: boolean;
-  onChange: (value: AggregationType) => void;
-}
-
-const BASIC_AGGREGATIONS: readonly AggregationType[] = [
-  "sum",
-  "avg",
-  "count",
-  "min",
-  "max",
-];
-
-const ADVANCED_AGGREGATIONS: readonly AggregationType[] = [
-  "count_distinct",
-  "median",
-  "percentile_90",
-  "first",
-  "last",
-];
-
-const FIELD_SEARCH_THRESHOLD = 8;
-
-const AggregationPicker: FC<AggregationPickerProps> = ({
-  field,
-  value,
-  testId,
-  disabled,
-  onChange,
-}): ReactElement => {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const closePicker = useCallback(() => setOpen(false), []);
-
-  useClickOutside(containerRef, closePicker, open);
-
-  const listboxKeyDown = useListboxKeyboard(
-    panelRef,
-    triggerRef,
-    open,
-    closePicker,
-    '[role="option"]',
-  );
-
-  const handleSelect = useCallback(
-    (next: AggregationType) => {
-      onChange(next);
-      setOpen(false);
-    },
-    [onChange],
-  );
-
-  return (
-    <div className={styles.aggregationPicker} ref={containerRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={styles.aggregationPickerTrigger}
-        data-testid={`${testId}-trigger`}
-        onClick={() => setOpen((prev) => !prev)}
-        aria-expanded={open}
-        aria-label={`Choose aggregation for ${field}`}
-        disabled={disabled}
-      >
-        <span className={styles.aggregationPickerValue}>
-          <span className={styles.aggIcon}>{AGG_ICONS[value]}</span>
-          <span>{AGG_LABELS[value]}</span>
-        </span>
-        <ChevronIcon open={open} />
-      </button>
-      {open && (
-        <div
-          ref={panelRef}
-          className={styles.aggregationPickerPanel}
-          data-testid={`${testId}-panel`}
-          role="listbox"
-          aria-label={`${field} aggregation options`}
-          onKeyDown={listboxKeyDown}
-        >
-          <div className={styles.dropdownGroupLabel}>Basic</div>
-          {BASIC_AGGREGATIONS.map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              className={`${styles.dropdownItem} ${opt === value ? styles.dropdownItemActive : ""}`}
-              data-testid={`${testId}-option-${opt}`}
-              role="option"
-              aria-selected={opt === value}
-              tabIndex={-1}
-              onClick={() => handleSelect(opt)}
-            >
-              <span className={styles.aggregationPickerOptionContent}>
-                <span className={styles.aggIcon}>{AGG_ICONS[opt]}</span>
-                <span>{AGG_LABELS[opt]}</span>
-              </span>
-            </button>
-          ))}
-          <div className={styles.dropdownGroupDivider} />
-          <div className={styles.dropdownGroupLabel}>Advanced</div>
-          {ADVANCED_AGGREGATIONS.map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              className={`${styles.dropdownItem} ${opt === value ? styles.dropdownItemActive : ""}`}
-              data-testid={`${testId}-option-${opt}`}
-              role="option"
-              aria-selected={opt === value}
-              tabIndex={-1}
-              onClick={() => handleSelect(opt)}
-            >
-              <span className={styles.aggregationPickerOptionContent}>
-                <span className={styles.aggIcon}>{AGG_ICONS[opt]}</span>
-                <span>{AGG_LABELS[opt]}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
+const ZoneCard: FC<ZoneCardProps> = ({
   label,
   testId,
-  options,
+  zoneId,
   selected,
-  onToggle,
-  onRemove,
   disabled,
   frozenColumns,
   sortConfig,
@@ -1061,184 +853,29 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
   showValuesAs,
   aggregation,
   syntheticMeasures = [],
-  allNumericColumns = [],
-  onAggregationChange,
-  onUpsertSyntheticMeasure,
-  onRemoveSyntheticMeasure,
-  zoneId,
   isDropHighlighted,
   activeId,
-  registerCloseDropdown,
+  onAggregationChange,
+  onRemove,
+  aggPortalTarget,
+  aggTestIdPrefix,
   displayLabelForField,
+  isValues,
+  emptyHint = "Drag fields here",
 }): ReactElement => {
-  const [open, setOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [syntheticOpen, setSyntheticOpen] = useState(false);
-  const [editingSyntheticId, setEditingSyntheticId] = useState<string | null>(
-    null,
-  );
-  const [syntheticLabel, setSyntheticLabel] = useState("");
-  const [syntheticOperation, setSyntheticOperation] = useState<
-    "sum_over_sum" | "difference"
-  >("sum_over_sum");
-  const [syntheticNumerator, setSyntheticNumerator] = useState("");
-  const [syntheticDenominator, setSyntheticDenominator] = useState("");
-  const [syntheticFormat, setSyntheticFormat] = useState("");
-  const [syntheticError, setSyntheticError] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const closeDropdown = useCallback(() => {
-    setOpen(false);
-    setSearchQuery("");
-    setSyntheticOpen(false);
-    setSyntheticError(null);
-  }, []);
-  useClickOutside(containerRef, closeDropdown, open || syntheticOpen);
-  const showFieldSearch = options.length > FIELD_SEARCH_THRESHOLD;
-  const listboxKeyDown = useListboxKeyboard(
-    panelRef,
-    triggerRef,
-    open,
-    closeDropdown,
-    '[role="option"]',
-  );
-  const isValuesField = label === "Values";
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const filteredOptions = useMemo(
-    () =>
-      !normalizedSearchQuery
-        ? options
-        : options.filter((col) =>
-            col.toLowerCase().includes(normalizedSearchQuery),
-          ),
-    [options, normalizedSearchQuery],
-  );
-
-  // Drag-and-drop integration
   const { setNodeRef: setDroppableRef } = useDroppable({
-    id: zoneId ?? label.toLowerCase(),
+    id: zoneId,
     data: { type: "container" },
   });
   const sortableIds = useMemo(
-    () => (zoneId ? selected.map((f) => makeItemId(zoneId, f)) : selected),
+    () => selected.map((f) => makeItemId(zoneId, f)),
     [zoneId, selected],
   );
-
-  // Register this dropdown's close function so drag start can close all panels
-  useEffect(() => {
-    if (registerCloseDropdown) {
-      registerCloseDropdown.current = closeDropdown;
-    }
-  }, [registerCloseDropdown, closeDropdown]);
-
-  const openCreateSynthetic = useCallback(() => {
-    setOpen(false);
-    setSearchQuery("");
-    setEditingSyntheticId(null);
-    setSyntheticLabel("");
-    setSyntheticOperation("sum_over_sum");
-    setSyntheticNumerator(allNumericColumns[0] ?? "");
-    setSyntheticDenominator(allNumericColumns[1] ?? allNumericColumns[0] ?? "");
-    setSyntheticFormat("");
-    setSyntheticError(null);
-    setSyntheticOpen(true);
-  }, [allNumericColumns]);
-
-  const openEditSynthetic = useCallback((measure: SyntheticMeasureConfig) => {
-    setOpen(false);
-    setSearchQuery("");
-    setEditingSyntheticId(measure.id);
-    setSyntheticLabel(measure.label);
-    setSyntheticOperation(measure.operation);
-    setSyntheticNumerator(measure.numerator);
-    setSyntheticDenominator(measure.denominator);
-    setSyntheticFormat(measure.format ?? "");
-    setSyntheticError(null);
-    setSyntheticOpen(true);
-  }, []);
-
-  const saveSynthetic = useCallback(() => {
-    if (!onUpsertSyntheticMeasure) return;
-    const trimmedLabel = syntheticLabel.trim();
-    if (!trimmedLabel) {
-      setSyntheticError("Name is required.");
-      return;
-    }
-    if (!syntheticNumerator || !syntheticDenominator) {
-      setSyntheticError("Choose both source fields.");
-      return;
-    }
-    const existing = syntheticMeasures.filter(
-      (m) => m.id !== editingSyntheticId,
-    );
-    if (
-      existing.some((m) => m.label.toLowerCase() === trimmedLabel.toLowerCase())
-    ) {
-      setSyntheticError("Synthetic measure name must be unique.");
-      return;
-    }
-    const id =
-      editingSyntheticId ??
-      `synthetic_${trimmedLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
-    if (!editingSyntheticId && existing.some((m) => m.id === id)) {
-      setSyntheticError(
-        "Generated id collides with an existing synthetic measure.",
-      );
-      return;
-    }
-    if (!editingSyntheticId && selected.includes(id)) {
-      setSyntheticError("Generated id collides with an existing value field.");
-      return;
-    }
-    const trimmedFormat = syntheticFormat.trim();
-    if (trimmedFormat && !isSupportedFormatPattern(trimmedFormat)) {
-      setSyntheticError(
-        "Format is invalid. Try patterns like .1%, $,.0f, or ,.2f.",
-      );
-      return;
-    }
-    onUpsertSyntheticMeasure({
-      id,
-      label: trimmedLabel,
-      operation: syntheticOperation,
-      numerator: syntheticNumerator,
-      denominator: syntheticDenominator,
-      format: trimmedFormat || undefined,
-    });
-    setSyntheticOpen(false);
-  }, [
-    editingSyntheticId,
-    onUpsertSyntheticMeasure,
-    syntheticDenominator,
-    syntheticFormat,
-    syntheticLabel,
-    syntheticMeasures,
-    syntheticNumerator,
-    syntheticOperation,
-  ]);
-
-  const formulaPreview =
-    syntheticOperation === "sum_over_sum"
-      ? `sum(${syntheticNumerator}) / sum(${syntheticDenominator})`
-      : `sum(${syntheticNumerator}) - sum(${syntheticDenominator})`;
-  const trimmedFormat = syntheticFormat.trim();
-  const hasValidFormatPreview =
-    trimmedFormat !== "" && isSupportedFormatPattern(trimmedFormat);
-  const formatPreviewSample = trimmedFormat.includes("%")
-    ? SYNTHETIC_FORMAT_PREVIEW_PERCENT
-    : SYNTHETIC_FORMAT_PREVIEW_NUMBER;
 
   return (
     <div
       className={`${styles.fieldGroup} ${isDropHighlighted ? styles.dropZoneActive : ""}`}
-      ref={(node) => {
-        (
-          containerRef as React.MutableRefObject<HTMLDivElement | null>
-        ).current = node;
-        setDroppableRef(node);
-      }}
+      ref={setDroppableRef}
     >
       <div className={styles.sectionHeader} data-testid={`${testId}-header`}>
         <span className={styles.sectionTitle}>{label}</span>
@@ -1254,152 +891,15 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
         {selected.length > 0 && (
           <span className={styles.countBadge}>{selected.length}</span>
         )}
-        {!disabled && (
-          <div className={styles.dropdownAnchor}>
-            <button
-              ref={triggerRef}
-              type="button"
-              className={styles.dropdownToggle}
-              data-testid={`${testId}-select`}
-              onClick={() => {
-                if (open) setSearchQuery("");
-                setOpen((v) => !v);
-              }}
-              aria-expanded={open}
-              aria-label={`Toggle ${label} dropdown`}
-            >
-              <ChevronIcon open={open} />
-            </button>
-            {open && (
-              <div
-                ref={panelRef}
-                className={`${styles.dropdownPanel} ${isValuesField ? styles.valuesDropdownPanel : ""}`}
-                data-testid={`${testId}-panel`}
-                role="listbox"
-                aria-label={`${label} options`}
-                onKeyDown={listboxKeyDown}
-              >
-                {showFieldSearch && (
-                  <div className={styles.fieldSearchWrapper}>
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      className={styles.fieldSearchInput}
-                      placeholder="Search fields..."
-                      data-testid={`${testId}-search`}
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key !== "ArrowDown") return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        panelRef.current
-                          ?.querySelector<HTMLElement>('[role="option"]')
-                          ?.focus();
-                      }}
-                    />
-                  </div>
-                )}
-                {options.length === 0 ? (
-                  <div className={styles.emptyHint}>No fields available</div>
-                ) : filteredOptions.length === 0 ? (
-                  <div
-                    className={styles.noSearchResults}
-                    data-testid={`${testId}-no-search-results`}
-                  >
-                    No matching fields
-                  </div>
-                ) : (
-                  filteredOptions.map((col) => {
-                    const checked = selected.includes(col);
-                    const frozen = checked && !!frozenColumns?.has(col);
-                    return (
-                      <label
-                        key={col}
-                        className={`${styles.dropdownItem} ${checked ? styles.dropdownItemActive : ""} ${frozen ? styles.dropdownItemDisabled : ""}`}
-                        data-testid={`${testId}-option-${col}`}
-                        role="option"
-                        aria-selected={checked}
-                        aria-disabled={frozen}
-                        tabIndex={-1}
-                        onKeyDown={(e) => {
-                          if (frozen) return;
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            onToggle(col);
-                          }
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => !frozen && onToggle(col)}
-                          disabled={frozen}
-                          tabIndex={-1}
-                        />
-                        <span>{col}</span>
-                      </label>
-                    );
-                  })
-                )}
-                {isValuesField && (
-                  <>
-                    <div className={styles.syntheticBuilderMenuRow}>
-                      <button
-                        type="button"
-                        className={`${styles.subtotalActionBtn} ${styles.syntheticAddButton}`}
-                        data-testid={`${testId}-add-synthetic`}
-                        onClick={openCreateSynthetic}
-                      >
-                        + Add measure
-                      </button>
-                    </div>
-                    {selected.length > 0 && onAggregationChange && (
-                      <>
-                        <div className={styles.dropdownGroupDivider} />
-                        <div className={styles.dropdownGroupLabel}>
-                          Measure Aggregation
-                        </div>
-                        <div data-testid={`${testId}-aggregation-controls`}>
-                          {selected.map((col) => (
-                            <div
-                              key={`${col}-aggregation`}
-                              className={styles.aggregationControlRow}
-                            >
-                              <span className={styles.aggregationControlLabel}>
-                                {col}:
-                              </span>
-                              <AggregationPicker
-                                field={col}
-                                value={aggregation?.[col] ?? "sum"}
-                                testId={`${testId}-aggregation-${col}`}
-                                disabled={disabled}
-                                onChange={(next) =>
-                                  onAggregationChange(col, next)
-                                }
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <SortableContext
         items={sortableIds}
         strategy={horizontalListSortingStrategy}
       >
-        {selected.length > 0 ||
-        (isValuesField && syntheticMeasures.length > 0) ? (
+        {selected.length > 0 || (isValues && syntheticMeasures.length > 0) ? (
           <div className={styles.chipRow} data-testid={`${testId}-chips`}>
             {selected.map((col) => {
-              const zId = zoneId ?? label.toLowerCase();
               const isFrozen = frozenColumns?.has(col);
               const hasFilter =
                 filters?.[col] &&
@@ -1411,18 +911,16 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
               return (
                 <SortableFieldChip
                   key={col}
-                  id={makeItemId(zId, col)}
-                  zone={zId}
+                  id={makeItemId(zoneId, col)}
+                  zone={zoneId}
                   field={col}
                   displayLabel={displayLabelForField?.(col)}
                   testId={testId}
                   isFrozen={isFrozen}
                   disabled={disabled}
-                  isValuesField={isValuesField}
+                  isValuesField={isValues}
                   aggregationLabel={
-                    isValuesField
-                      ? AGG_CHIP_LABELS[currentAggregation]
-                      : undefined
+                    isValues ? AGG_CHIP_LABELS[currentAggregation] : undefined
                   }
                   showAsBadge={showAsBadge}
                   showAsBadgeTitle={
@@ -1431,12 +929,24 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
                       : undefined
                   }
                   hasFilter={!!hasFilter}
-                  onRemove={onRemove}
+                  onRemove={disabled ? undefined : onRemove}
+                  aggregationControl={
+                    isValues && !disabled && onAggregationChange ? (
+                      <InlineAggPicker
+                        field={col}
+                        value={currentAggregation}
+                        onChange={onAggregationChange}
+                        portalTarget={aggPortalTarget}
+                        testIdPrefix={aggTestIdPrefix}
+                        triggerVariant="chevron"
+                      />
+                    ) : undefined
+                  }
                   activeId={activeId}
                 />
               );
             })}
-            {isValuesField &&
+            {isValues &&
               syntheticMeasures.map((measure) => (
                 <span
                   key={measure.id}
@@ -1445,161 +955,13 @@ const DropdownMultiSelect: FC<DropdownMultiSelectProps> = ({
                 >
                   <span className={styles.aggChipIcon}>fx</span>
                   {measure.label}
-                  {!disabled && (
-                    <>
-                      <button
-                        className={styles.chipRemove}
-                        onClick={() => openEditSynthetic(measure)}
-                        aria-label={`Edit ${measure.label}`}
-                        data-testid={`${testId}-edit-synthetic-${measure.id}`}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className={styles.chipRemove}
-                        onClick={() => onRemoveSyntheticMeasure?.(measure.id)}
-                        aria-label={`Remove ${measure.label}`}
-                        data-testid={`${testId}-remove-synthetic-${measure.id}`}
-                      >
-                        ×
-                      </button>
-                    </>
-                  )}
                 </span>
               ))}
           </div>
         ) : (
-          <div className={styles.emptyDropZone}>Drag fields here</div>
+          <div className={styles.emptyDropZone}>{emptyHint}</div>
         )}
       </SortableContext>
-      {isValuesField && syntheticOpen && (
-        <div
-          className={styles.syntheticBuilderPopover}
-          data-testid={`${testId}-synthetic-builder`}
-        >
-          <label className={styles.syntheticBuilderField}>
-            <span className={styles.syntheticBuilderFieldLabel}>Name</span>
-            <input
-              className={styles.syntheticBuilderInput}
-              value={syntheticLabel}
-              onChange={(e) => {
-                setSyntheticLabel(e.target.value);
-                setSyntheticError(null);
-              }}
-            />
-          </label>
-          <label className={styles.syntheticBuilderField}>
-            <span className={styles.syntheticBuilderFieldLabel}>Operation</span>
-            <select
-              className={styles.syntheticBuilderSelect}
-              value={syntheticOperation}
-              onChange={(e) =>
-                setSyntheticOperation(
-                  e.target.value as "sum_over_sum" | "difference",
-                )
-              }
-            >
-              <option value="sum_over_sum">Ratio of sums</option>
-              <option value="difference">Difference of sums</option>
-            </select>
-            {syntheticNumerator && syntheticDenominator && (
-              <div
-                className={styles.syntheticFormulaHint}
-                data-testid={`${testId}-formula-preview`}
-              >
-                {formulaPreview}
-              </div>
-            )}
-          </label>
-          <label className={styles.syntheticBuilderField}>
-            <span className={styles.syntheticBuilderFieldLabel}>Measure A</span>
-            <select
-              className={styles.syntheticBuilderSelect}
-              value={syntheticNumerator}
-              onChange={(e) => setSyntheticNumerator(e.target.value)}
-            >
-              {allNumericColumns.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.syntheticBuilderField}>
-            <span className={styles.syntheticBuilderFieldLabel}>Measure B</span>
-            <select
-              className={styles.syntheticBuilderSelect}
-              value={syntheticDenominator}
-              onChange={(e) => setSyntheticDenominator(e.target.value)}
-            >
-              {allNumericColumns.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.syntheticBuilderField}>
-            <span className={styles.syntheticBuilderFieldLabel}>
-              Format (optional)
-            </span>
-            <div className={styles.syntheticFormatPresets}>
-              {SYNTHETIC_FORMAT_PRESETS.map((preset) => (
-                <button
-                  key={preset.value}
-                  type="button"
-                  className={`${styles.syntheticFormatPresetBtn} ${syntheticFormat.trim() === preset.value ? styles.syntheticFormatPresetBtnActive : ""}`}
-                  data-testid={`${testId}-format-preset-${preset.label.toLowerCase()}`}
-                  onClick={() => {
-                    setSyntheticFormat(preset.value);
-                    setSyntheticError(null);
-                  }}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            <input
-              className={styles.syntheticBuilderInput}
-              value={syntheticFormat}
-              placeholder="e.g. .1%, $,.0f, ,.2f"
-              onChange={(e) => {
-                setSyntheticFormat(e.target.value);
-                setSyntheticError(null);
-              }}
-            />
-            {trimmedFormat && (
-              <div
-                className={styles.syntheticFormatPreview}
-                data-testid={`${testId}-format-preview`}
-              >
-                {hasValidFormatPreview
-                  ? `Example: ${formatWithPattern(formatPreviewSample, trimmedFormat)}`
-                  : "Example unavailable (invalid format pattern)"}
-              </div>
-            )}
-          </label>
-          {syntheticError && (
-            <div className={styles.importError}>{syntheticError}</div>
-          )}
-          <div className={styles.syntheticBuilderActions}>
-            <button
-              type="button"
-              className={styles.syntheticBuilderButton}
-              onClick={() => setSyntheticOpen(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={`${styles.syntheticBuilderButton} ${styles.syntheticBuilderButtonPrimary}`}
-              onClick={saveSynthetic}
-            >
-              Save
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -1724,7 +1086,7 @@ const CollapseIcon: FC = () => (
   </svg>
 );
 
-const GearIcon: FC = () => (
+const FullscreenEnterIcon: FC = () => (
   <svg
     width="14"
     height="14"
@@ -1735,8 +1097,34 @@ const GearIcon: FC = () => (
     strokeLinecap="round"
     strokeLinejoin="round"
   >
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    <polyline points="9 3 3 3 3 9" />
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="3 15 3 21 9 21" />
+    <polyline points="21 15 21 21 15 21" />
+  </svg>
+);
+
+const FullscreenExitIcon: FC = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="10 4 10 8 6 8" />
+    <polyline points="14 4 14 8 18 8" />
+    <polyline points="6 16 10 16 10 20" />
+    <polyline points="18 16 14 16 14 20" />
+  </svg>
+);
+
+const SettingsIcon: FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M21 5c0-1.1-.9-2-2-2h-9v5h11V5zM3 19c0 1.1.9 2 2 2h3V10H3v9zM3 5v3h5V3H5c-1.1 0-2 .9-2 2zm15 3.99L14 13l1.41 1.41 1.59-1.6V15c0 1.1-.9 2-2 2h-2.17l1.59-1.59L13 14l-4 4 4 4 1.41-1.41L12.83 19H15c2.21 0 4-1.79 4-4v-2.18l1.59 1.6L22 13l-4-4.01z" />
   </svg>
 );
 
@@ -2164,365 +1552,6 @@ const ExportDataControls: FC<ExportDataControlsProps> = ({
   );
 };
 
-// ---------------------------------------------------------------------------
-// Settings Popover (gear icon → display toggles + group controls)
-// ---------------------------------------------------------------------------
-
-interface SettingsPopoverProps {
-  config: PivotConfigV1;
-  locked?: boolean;
-  showStickyToggle?: boolean;
-  showRowTotals: boolean;
-  showColTotals: boolean;
-  rowTotalsDisabled: boolean;
-  colTotalsDisabled: boolean;
-  toggleRowTotals?: () => void;
-  toggleColumnTotals?: () => void;
-  toggleSubtotals?: () => void;
-  toggleRepeatLabels?: () => void;
-  toggleStickyHeaders?: () => void;
-  expandAllGroups?: () => void;
-  collapseAllGroups?: () => void;
-  expandAllColGroups?: () => void;
-  collapseAllColGroups?: () => void;
-}
-
-function formatBooleanStatus(value: boolean): string {
-  return value ? "On" : "Off";
-}
-
-function formatTotalsStatus(
-  isEnabled: boolean,
-  isUnavailable: boolean,
-  isPartial: boolean,
-): string {
-  if (isUnavailable) return "N/A";
-  if (isPartial) return "Some";
-  return formatBooleanStatus(isEnabled);
-}
-
-function formatSubtotalsStatus(value: PivotConfigV1["show_subtotals"]): string {
-  if (Array.isArray(value)) {
-    return value.length > 0 ? value.join(", ") : "Off";
-  }
-  return formatBooleanStatus(!!value);
-}
-
-const SettingsPopover: FC<SettingsPopoverProps> = ({
-  config,
-  locked,
-  showStickyToggle,
-  showRowTotals,
-  showColTotals,
-  rowTotalsDisabled,
-  colTotalsDisabled,
-  toggleRowTotals,
-  toggleColumnTotals,
-  toggleSubtotals,
-  toggleRepeatLabels,
-  toggleStickyHeaders,
-  expandAllGroups,
-  collapseAllGroups,
-  expandAllColGroups,
-  collapseAllColGroups,
-}): ReactElement => {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const rawRowTotals = config.show_row_totals ?? config.show_totals;
-  const rowTotalsIndeterminate =
-    Array.isArray(rawRowTotals) && rawRowTotals.length > 0;
-  const rawColTotals = config.show_column_totals ?? config.show_totals;
-  const colTotalsIndeterminate =
-    Array.isArray(rawColTotals) && rawColTotals.length > 0;
-  const subtotalsIndeterminate =
-    Array.isArray(config.show_subtotals) && config.show_subtotals.length > 0;
-
-  const closePopover = useCallback(() => {
-    setOpen(false);
-    requestAnimationFrame(() => triggerRef.current?.focus());
-  }, []);
-
-  useClickOutside(containerRef, closePopover, open);
-
-  useEffect(() => {
-    if (!open) return;
-    requestAnimationFrame(() => {
-      const first =
-        panelRef.current?.querySelector<HTMLElement>("input, button");
-      (first ?? panelRef.current)?.focus();
-    });
-  }, [open]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        closePopover();
-      }
-    },
-    [closePopover],
-  );
-
-  const showRowGroups =
-    !!config.show_subtotals &&
-    config.rows.length >= 2 &&
-    !!expandAllGroups &&
-    !!collapseAllGroups;
-  const showColGroups =
-    config.columns.length >= 2 &&
-    !!expandAllColGroups &&
-    !!collapseAllColGroups;
-  const rowTotalsStatus = formatTotalsStatus(
-    showRowTotals,
-    config.columns.length === 0,
-    rowTotalsIndeterminate,
-  );
-  const colTotalsStatus = formatTotalsStatus(
-    showColTotals,
-    config.rows.length === 0,
-    colTotalsIndeterminate,
-  );
-  const subtotalsStatus = formatSubtotalsStatus(config.show_subtotals);
-  const repeatLabelsStatus = formatBooleanStatus(!!config.repeat_row_labels);
-  const stickyHeadersStatus = formatBooleanStatus(
-    config.sticky_headers !== false,
-  );
-
-  return (
-    <div className={styles.settingsWrapper} ref={containerRef}>
-      <span className={styles.tooltipWrap} data-tooltip="Table Settings">
-        <button
-          ref={triggerRef}
-          data-testid="toolbar-settings"
-          data-toolbar-btn
-          tabIndex={-1}
-          className={`${styles.utilButton} ${styles.iconButton} ${open ? styles.iconButtonActive : ""}`}
-          onClick={() => setOpen((v) => !v)}
-          aria-label="Table settings"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-        >
-          <GearIcon />
-        </button>
-      </span>
-      {open && (
-        <div
-          ref={panelRef}
-          tabIndex={-1}
-          className={styles.settingsPopover}
-          data-testid="toolbar-settings-panel"
-          role="dialog"
-          aria-label="Table settings"
-          onKeyDown={handleKeyDown}
-        >
-          <span className={styles.settingsSectionTitle}>
-            {locked ? "Current View" : "Display"}
-          </span>
-          {locked ? (
-            <div className={styles.settingsStatusList}>
-              <div
-                className={styles.settingsStatusRow}
-                data-testid="toolbar-row-totals-status"
-              >
-                <span className={styles.settingsStatusLabel}>Row Totals</span>
-                <span className={styles.settingsStatusValue}>
-                  {rowTotalsStatus}
-                </span>
-              </div>
-              <div
-                className={styles.settingsStatusRow}
-                data-testid="toolbar-col-totals-status"
-              >
-                <span className={styles.settingsStatusLabel}>
-                  Column Totals
-                </span>
-                <span className={styles.settingsStatusValue}>
-                  {colTotalsStatus}
-                </span>
-              </div>
-              {config.rows.length >= 2 && (
-                <div
-                  className={styles.settingsStatusRow}
-                  data-testid="toolbar-subtotals-status"
-                >
-                  <span className={styles.settingsStatusLabel}>Subtotals</span>
-                  <span className={styles.settingsStatusValue}>
-                    {subtotalsStatus}
-                  </span>
-                </div>
-              )}
-              {config.rows.length >= 2 && (
-                <div
-                  className={styles.settingsStatusRow}
-                  data-testid="toolbar-repeat-labels-status"
-                >
-                  <span className={styles.settingsStatusLabel}>
-                    Repeat Labels
-                  </span>
-                  <span className={styles.settingsStatusValue}>
-                    {repeatLabelsStatus}
-                  </span>
-                </div>
-              )}
-              {showStickyToggle && (
-                <div
-                  className={styles.settingsStatusRow}
-                  data-testid="toolbar-sticky-headers-status"
-                >
-                  <span className={styles.settingsStatusLabel}>
-                    Sticky Headers
-                  </span>
-                  <span className={styles.settingsStatusValue}>
-                    {stickyHeadersStatus}
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
-              <label
-                className={styles.checkboxLabel}
-                data-testid="toolbar-row-totals"
-                title={
-                  rowTotalsDisabled
-                    ? "Requires at least one column dimension"
-                    : undefined
-                }
-              >
-                <input
-                  ref={(el) => {
-                    if (el) el.indeterminate = rowTotalsIndeterminate;
-                  }}
-                  type="checkbox"
-                  checked={showRowTotals}
-                  onChange={() => toggleRowTotals?.()}
-                  disabled={rowTotalsDisabled}
-                />
-                <span>Row Totals</span>
-              </label>
-              <label
-                className={styles.checkboxLabel}
-                data-testid="toolbar-col-totals"
-                title={
-                  colTotalsDisabled
-                    ? "Requires at least one row dimension"
-                    : undefined
-                }
-              >
-                <input
-                  ref={(el) => {
-                    if (el) el.indeterminate = colTotalsIndeterminate;
-                  }}
-                  type="checkbox"
-                  checked={showColTotals}
-                  onChange={() => toggleColumnTotals?.()}
-                  disabled={colTotalsDisabled}
-                />
-                <span>Column Totals</span>
-              </label>
-              {config.rows.length >= 2 && (
-                <label
-                  className={styles.checkboxLabel}
-                  data-testid="toolbar-subtotals"
-                >
-                  <input
-                    ref={(el) => {
-                      if (el) el.indeterminate = subtotalsIndeterminate;
-                    }}
-                    type="checkbox"
-                    checked={
-                      config.show_subtotals === true || subtotalsIndeterminate
-                    }
-                    onChange={() => toggleSubtotals?.()}
-                  />
-                  <span>Subtotals</span>
-                </label>
-              )}
-              {config.rows.length >= 2 && (
-                <label
-                  className={styles.checkboxLabel}
-                  data-testid="toolbar-repeat-labels"
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!config.repeat_row_labels}
-                    onChange={() => toggleRepeatLabels?.()}
-                  />
-                  <span>Repeat Labels</span>
-                </label>
-              )}
-              {showStickyToggle && (
-                <label
-                  className={styles.checkboxLabel}
-                  data-testid="toolbar-sticky-headers"
-                >
-                  <input
-                    type="checkbox"
-                    checked={config.sticky_headers !== false}
-                    onChange={() => toggleStickyHeaders?.()}
-                  />
-                  <span>Sticky Headers</span>
-                </label>
-              )}
-            </>
-          )}
-          {(showRowGroups || showColGroups) && (
-            <>
-              <div className={styles.settingsDivider} />
-              <span className={styles.settingsSectionTitle}>Groups</span>
-              {showRowGroups && (
-                <div className={styles.subtotalActions}>
-                  <button
-                    type="button"
-                    className={styles.subtotalActionBtn}
-                    onClick={() => expandAllGroups?.()}
-                    data-testid="pivot-group-toggle-expand-all"
-                    aria-label="Expand all row groups"
-                  >
-                    Expand All
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.subtotalActionBtn}
-                    onClick={() => collapseAllGroups?.()}
-                    data-testid="pivot-group-toggle-collapse-all"
-                    aria-label="Collapse all row groups"
-                  >
-                    Collapse All
-                  </button>
-                </div>
-              )}
-              {showColGroups && (
-                <div className={styles.subtotalActions}>
-                  <button
-                    type="button"
-                    className={styles.subtotalActionBtn}
-                    onClick={() => expandAllColGroups?.()}
-                    data-testid="pivot-col-group-expand-all"
-                    aria-label="Expand all column groups"
-                  >
-                    Expand Columns
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.subtotalActionBtn}
-                    onClick={() => collapseAllColGroups?.()}
-                    data-testid="pivot-col-group-collapse-all"
-                    aria-label="Collapse all column groups"
-                  >
-                    Collapse Columns
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
+// SettingsPopover is replaced by the SettingsPanel component (./SettingsPanel.tsx)
 
 export default Toolbar;

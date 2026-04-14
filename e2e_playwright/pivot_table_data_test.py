@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
-from e2e_utils import get_pivot, open_settings_popover
+from e2e_utils import get_pivot, open_settings_panel
 from pivot_table_app_support import _load_main_fixture
 
 
@@ -371,8 +371,9 @@ def test_sticky_headers_during_scroll(page_at_app: Page):
         header_box_after["y"] >= wrapper_box["y"] - 2
     ), "Sticky header should remain within the wrapper viewport"
 
-    open_settings_popover(page, container)
-    container.get_by_test_id("toolbar-sticky-headers").locator("input").click()
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-sticky-headers").locator("input").click()
+    panel.get_by_test_id("settings-apply").click()
 
     table = container.get_by_test_id("pivot-table")
     page.wait_for_function(

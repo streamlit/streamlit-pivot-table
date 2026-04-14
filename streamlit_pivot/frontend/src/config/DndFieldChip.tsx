@@ -15,7 +15,12 @@
  * limitations under the License.
  */
 
-import { type CSSProperties, type FC, type ReactElement } from "react";
+import {
+  type CSSProperties,
+  type FC,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { AggregationType, ShowValuesAs } from "../engine/types";
@@ -45,6 +50,7 @@ export interface FieldChipProps {
   showAsBadgeTitle?: string;
   hasFilter?: boolean;
   onRemove?: (field: string) => void;
+  aggregationControl?: ReactNode;
 }
 
 const GripDotsIcon: FC = () => (
@@ -77,6 +83,7 @@ function ChipContent({
   showAsBadgeTitle,
   hasFilter,
   onRemove,
+  aggregationControl,
   showDragHandle,
 }: FieldChipProps & { showDragHandle?: boolean }): ReactElement {
   return (
@@ -113,6 +120,7 @@ function ChipContent({
           data-testid={`${testId}-filter-indicator-${field}`}
         />
       )}
+      {aggregationControl}
       {!disabled && !isFrozen && onRemove && (
         <button
           className={styles.chipRemove}

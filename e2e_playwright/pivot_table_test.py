@@ -21,7 +21,7 @@ import re
 
 from playwright.sync_api import Page, expect
 
-from e2e_utils import get_pivot, open_settings_popover
+from e2e_utils import get_pivot, open_settings_panel
 
 
 def test_app_starts(app):
@@ -75,25 +75,27 @@ def test_toolbar_visible_in_interactive_mode(page_at_app: Page):
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=5000)
 
 
-def test_aggregation_change_via_toolbar(page_at_app: Page):
-    """Changing aggregation via toolbar fires config change and updates table."""
+def test_aggregation_change_via_settings_panel(page_at_app: Page):
+    """Changing aggregation in the settings panel fires config change and updates table."""
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
     expect(page.get_by_text("Config change count: 0")).to_be_visible()
 
-    container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
-    trigger = page.get_by_test_id("toolbar-values-aggregation-Revenue-trigger")
-    expect(trigger).to_be_visible(timeout=5000)
-    trigger.evaluate("el => el.click()")
-    option = page.get_by_test_id("toolbar-values-aggregation-Revenue-option-avg")
-    expect(option).to_be_visible(timeout=5000)
-    option.scroll_into_view_if_needed()
-    option.click(force=True)
+    panel = open_settings_panel(page, container)
 
-    expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
-        "Revenue (Avg)", timeout=10000
+    trigger = panel.get_by_test_id("settings-agg-Revenue")
+    expect(trigger).to_be_visible(timeout=5000)
+    trigger.click()
+
+    option = page.get_by_test_id("settings-agg-panel-Revenue").locator(
+        "button", has_text="Avg"
     )
+    expect(option).to_be_visible(timeout=5000)
+    option.dispatch_event("mousedown")
+
+    panel.get_by_test_id("settings-apply").click()
+
     expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
 
 
@@ -197,19 +199,25 @@ def test_wide_table_horizontal_scroll_alignment(page_at_app: Page):
         )
 
 
-def test_toolbar_add_row_dimension(page_at_app: Page):
-    """Adding a row dimension via toolbar dropdown updates the table."""
+def test_add_row_dimension_via_settings_panel(page_at_app: Page):
+    """Adding a row dimension via settings panel updates the table."""
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
     initial_row_count = container.get_by_test_id("pivot-row-header").count()
 
-    container.get_by_test_id("toolbar-rows-select").evaluate("el => el.click()")
-    option = page.get_by_test_id("toolbar-rows-option-Category")
-    expect(option).to_be_visible(timeout=5000)
-    option.scroll_into_view_if_needed()
-    option.click(force=True)
+    panel = open_settings_panel(page, container)
+
+    chip = panel.get_by_test_id("settings-available-Category")
+    expect(chip).to_be_visible(timeout=5000)
+    chip.click()
+
+    menu_item = page.locator("text=Add to Rows")
+    expect(menu_item).to_be_visible(timeout=5000)
+    menu_item.click()
+
+    panel.get_by_test_id("settings-apply").click()
 
     chips = container.get_by_test_id("toolbar-rows-chips")
     expect(chips).to_contain_text("Category", timeout=10000)
@@ -219,8 +227,8 @@ def test_toolbar_add_row_dimension(page_at_app: Page):
     assert row_headers.count() > initial_row_count
 
 
-def test_toolbar_remove_row_chip(page_at_app: Page):
-    """Removing a row dimension chip updates the table."""
+def test_remove_row_via_settings_panel(page_at_app: Page):
+    """Removing a row dimension via settings panel updates the table."""
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
@@ -228,40 +236,57 @@ def test_toolbar_remove_row_chip(page_at_app: Page):
     chips_before = container.get_by_test_id("toolbar-rows-chips")
     expect(chips_before).to_contain_text("Region")
 
-    container.get_by_test_id("toolbar-rows-remove-Region").click()
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-rows-remove-Region").click()
+    panel.get_by_test_id("settings-apply").click()
 
-    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=10000)
+    expect(container.get_by_test_id("toolbar-rows-chips")).to_have_count(
+        0, timeout=10000
+    )
 
 
-def test_toolbar_add_value_field(page_at_app: Page):
-    """Adding a second value field shows two value label headers."""
+def test_add_value_field_via_settings_panel(page_at_app: Page):
+    """Adding a second value field via settings panel shows two value label headers."""
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
-    option = page.get_by_test_id("toolbar-values-option-Profit")
-    expect(option).to_be_visible(timeout=5000)
-    option.evaluate("el => el.click()")
+    panel = open_settings_panel(page, container)
+
+    chip = panel.get_by_test_id("settings-available-Profit")
+    expect(chip).to_be_visible(timeout=5000)
+    chip.click()
+
+    menu_item = page.locator("text=Add to Values")
+    expect(menu_item).to_be_visible(timeout=5000)
+    menu_item.click()
+
+    panel.get_by_test_id("settings-apply").click()
 
     expect(container.get_by_test_id("toolbar-values-chip-label-Profit")).to_be_visible(
         timeout=10000
     )
 
 
-def test_toolbar_per_measure_aggregation_controls(page_at_app: Page):
-    """Values UI supports setting different aggregations per raw measure."""
+def test_per_measure_aggregation_via_settings_panel(page_at_app: Page):
+    """Settings panel supports setting different aggregations per raw measure."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_cond_fmt")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-values-select").evaluate("el => el.click()")
-    controls = page.get_by_test_id("toolbar-values-aggregation-controls")
-    expect(controls).to_be_visible(timeout=5000)
-    profit_trigger = page.get_by_test_id("toolbar-values-aggregation-Profit-trigger")
-    profit_trigger.scroll_into_view_if_needed()
-    profit_trigger.evaluate("el => el.click()")
-    page.get_by_test_id("toolbar-values-aggregation-Profit-option-count").click()
+    panel = open_settings_panel(page, container)
+
+    profit_trigger = panel.get_by_test_id("settings-agg-Profit")
+    expect(profit_trigger).to_be_visible(timeout=5000)
+    profit_trigger.click()
+
+    option = page.get_by_test_id("settings-agg-panel-Profit").get_by_role(
+        "button", name="# Count", exact=True
+    )
+    expect(option).to_be_visible(timeout=5000)
+    option.dispatch_event("mousedown")
+
+    panel.get_by_test_id("settings-apply").click()
 
     expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
         "Revenue (Sum)", timeout=10000
@@ -279,16 +304,19 @@ def test_scalar_aggregation_roundtrip_persists_and_python_override_wins(
     container = get_pivot(page, "test_pivot_scalar_roundtrip")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    container.get_by_test_id("toolbar-values-select").click()
-    expect(
-        container.get_by_test_id("toolbar-values-aggregation-controls")
-    ).to_be_visible(timeout=5000)
-    profit_trigger = container.get_by_test_id(
-        "toolbar-values-aggregation-Profit-trigger"
+    panel = open_settings_panel(page, container)
+
+    profit_trigger = panel.get_by_test_id("settings-agg-Profit")
+    expect(profit_trigger).to_be_visible(timeout=5000)
+    profit_trigger.click()
+
+    option = page.get_by_test_id("settings-agg-panel-Profit").get_by_role(
+        "button", name="# Count", exact=True
     )
-    profit_trigger.scroll_into_view_if_needed()
-    profit_trigger.evaluate("el => el.click()")
-    container.get_by_test_id("toolbar-values-aggregation-Profit-option-count").click()
+    expect(option).to_be_visible(timeout=5000)
+    option.dispatch_event("mousedown")
+
+    panel.get_by_test_id("settings-apply").click()
 
     expect(container.get_by_test_id("toolbar-values-chip-label-Revenue")).to_have_text(
         "Revenue (Sum)", timeout=10000
@@ -344,16 +372,18 @@ def test_toggle_row_totals_off(page_at_app: Page):
 
     expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
 
-    panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-row-totals").locator("input").evaluate(
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
         "el => el.click()"
     )
+    panel.get_by_test_id("settings-apply").click()
     expect(container.get_by_test_id("pivot-row-total")).to_have_count(0, timeout=10000)
 
-    panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-row-totals").locator("input").evaluate(
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
         "el => el.click()"
     )
+    panel.get_by_test_id("settings-apply").click()
     expect(container.get_by_test_id("pivot-row-total").first).to_be_visible(
         timeout=10000
     )
@@ -367,10 +397,11 @@ def test_toggle_column_totals_off(page_at_app: Page):
 
     expect(container.get_by_test_id("pivot-totals-row")).to_be_visible()
 
-    panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-col-totals").locator("input").evaluate(
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-col-totals").locator("input").evaluate(
         "el => el.click()"
     )
+    panel.get_by_test_id("settings-apply").click()
     expect(container.get_by_test_id("pivot-totals-row")).to_have_count(0, timeout=10000)
 
 
@@ -382,14 +413,16 @@ def test_toggle_subtotals(page_at_app: Page):
 
     expect(container.get_by_test_id("pivot-subtotal-row").first).to_be_visible()
 
-    panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-subtotals").locator("input").click()
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-subtotals").locator("input").click()
+    panel.get_by_test_id("settings-apply").click()
     expect(container.get_by_test_id("pivot-subtotal-row")).to_have_count(
         0, timeout=10000
     )
 
-    panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-subtotals").locator("input").click()
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-subtotals").locator("input").click()
+    panel.get_by_test_id("settings-apply").click()
     expect(container.get_by_test_id("pivot-subtotal-row").first).to_be_visible(
         timeout=10000
     )
@@ -405,8 +438,9 @@ def test_toggle_repeat_labels(page_at_app: Page):
         h.inner_text() for h in container.get_by_test_id("pivot-row-header").all()
     ]
 
-    panel = open_settings_popover(page, container)
-    panel.get_by_test_id("toolbar-repeat-labels").locator("input").click()
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-repeat-labels").locator("input").click()
+    panel.get_by_test_id("settings-apply").click()
 
     first_blank_idx = next(
         (i for i, h in enumerate(headers_before) if h.strip() == ""), None
@@ -523,16 +557,15 @@ def test_drag_handle_visible_on_chips(page_at_app: Page):
 
 
 def test_empty_zone_shows_placeholder(page_at_app: Page):
-    """Zones with no chips display a 'Drag fields here' placeholder."""
+    """Zones with no chips display an 'Apply fields in settings menu' placeholder."""
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    # Remove the only row chip to create an empty zone
-    remove_btn = container.get_by_test_id("toolbar-rows-remove-Region")
-    expect(remove_btn).to_be_visible(timeout=5000)
-    remove_btn.click()
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-rows-remove-Region").click()
+    panel.get_by_test_id("settings-apply").click()
 
-    expect(container.locator("text=Drag fields here").first).to_be_visible(
+    expect(container.locator("text=Apply fields in settings menu").first).to_be_visible(
         timeout=10000
     )

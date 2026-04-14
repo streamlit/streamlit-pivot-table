@@ -155,7 +155,7 @@ st_pivot_table(
 )
 ```
 
-In the interactive toolbar, aggregation is edited inside the `Values` dropdown, and raw measure chips display the selected aggregation inline in a compact name-first format such as `Revenue (Sum)`.
+In the interactive toolbar, aggregation is edited inside the **Settings Panel**. Open the panel, click the aggregation badge on a value chip to change it, then click **Apply**. Raw measure chips in the toolbar display the selected aggregation inline in a compact name-first format such as `Revenue (Sum)`.
 
 ### Synthetic Measures (V1)
 
@@ -473,7 +473,7 @@ st_pivot_table(
 
 - Each group shows a subtotal row with a collapse/expand toggle (+/&minus;).
 - Collapsed groups hide child rows but keep the subtotal visible.
-- Expand All / Collapse All controls are available in the Settings popover (gear icon in the toolbar).
+- Expand All / Collapse All controls are available in the toolbar utility menu.
 
 **Grouping vs. leaf dimensions:** When subtotals are on, all dimensions except
 the innermost are *grouping dimensions*.  They define collapsible groups and
@@ -569,7 +569,7 @@ st_pivot_table(
 
 ### Locked Mode
 
-Use `locked=True` for a viewer-mode experience with exploration enabled. Toolbar config controls stay locked so end-users cannot change rows, columns, values, per-measure aggregation, or settings toggles. Reset, Swap, and config import/export are hidden, while data export remains available and the Settings gear stays visible for read-only display status plus Expand/Collapse All group controls. Header-menu sorting, filtering, and `Show Values As` remain available, and drill-down still works.
+Use `locked=True` for a viewer-mode experience with exploration enabled. The Settings Panel and toolbar config controls are locked so end-users cannot change rows, columns, values, or per-measure aggregation. Reset, Swap, and config import/export are hidden, while data export remains available. Expand/Collapse All group controls remain accessible in the toolbar utility menu. Header-menu sorting, filtering, and `Show Values As` remain available, and drill-down still works.
 
 ```python
 st_pivot_table(
@@ -582,9 +582,9 @@ st_pivot_table(
 )
 ```
 
-### Toolbar Utility Menu
+### Toolbar and Settings Panel
 
-When `interactive=True`, hovering over the top-right of the toolbar reveals utility actions:
+When `interactive=True`, the toolbar displays read-only zone cards showing current **Rows**, **Columns**, and **Values** assignments. Hovering over the top-right reveals utility actions:
 
 | Action | Description |
 |--------|-------------|
@@ -593,28 +593,38 @@ When `interactive=True`, hovering over the top-right of the toolbar reveals util
 | **Copy Config** | Copies the current config as JSON to clipboard |
 | **Import Config** | Paste a JSON config to apply |
 | **Export Data** | Open the export popover (Excel / CSV / TSV / Clipboard). Use `export_filename` to customize the download filename. |
+| **Expand / Collapse All** | Expand or collapse all row/column groups (visible when subtotals are enabled or 2+ column dimensions exist) |
 | **Fullscreen** (expand icon) | Toggles fullscreen mode — the table fills the entire viewport. Press Escape or click the collapse icon to exit. |
-| **Settings** (gear icon) | Opens a popover with display toggles: Row Totals, Column Totals, Subtotals, Repeat Labels, Sticky Headers, and Expand/Collapse All group controls |
+| **Settings** (pivot icon) | Opens the Settings Panel for full field configuration |
 
-In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings gear remains visible, its popover shows read-only display status plus group expand/collapse actions, and header-menu sorting, filtering, and `Show Values As` stay enabled.
+#### Settings Panel (Staged Commit UX)
 
-### Toolbar Field Search
+The Settings Panel is the primary authoring surface for pivot configuration. Changes are staged locally and only applied when you click **Apply**. Click **Cancel** or press **Escape** to discard.
 
-When a toolbar picker has more than **8 available fields**, the `Rows`, `Columns`, or `Values` dropdown automatically shows a field search input at the top of the panel.
+The panel contains:
 
-- Typing filters the available field list in place.
-- `ArrowDown` from the search box moves focus into the first matching option.
-- `Escape` closes the dropdown, even when the current query has zero matches.
-- In the `Values` dropdown, search only filters the field checklist. Synthetic-measure actions and per-measure aggregation controls remain visible below it.
+- **Available Fields** — unassigned columns shown as draggable chips. Click a chip's menu to add it to Rows, Columns, or Values. When more than 8 fields are available, a search input appears.
+- **Rows / Columns / Values** drop zones — drag chips to reorder within a zone, drag between zones, or use the `x` button to remove. Value chips show an aggregation picker (click the badge to change).
+- **Synthetic Measures** — click **+ Add measure** to create derived metrics (ratio of sums, difference of sums) with optional format patterns.
+- **Display Toggles** — Row Totals, Column Totals, Subtotals, Repeat Labels, and Sticky Headers.
+
+External config changes (toolbar DnD, Reset, Swap, config import) while the panel is open will close it and discard uncommitted edits.
+
+In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings icon shows read-only display status, and header-menu sorting, filtering, and `Show Values As` stay enabled.
+
+### Field Search
+
+When the Settings Panel has more than **8 available fields**, a search input appears at the top of the Available Fields section. Typing filters the field chips in place. The container maintains its initial height even when search reduces the visible chips.
 
 This is a frontend-only convenience feature; no Python parameter is needed to enable it.
 
 ### Drag-and-Drop Field Configuration
 
-When `interactive=True`, each chip in the Rows, Columns, and Values toolbar zones has a **grip-dots drag handle** on its left side. Drag chips to:
+Drag-and-drop is available in two contexts:
 
-- **Reorder within a zone** — change the grouping hierarchy (e.g., swap which dimension is the outer vs. inner group in Rows).
-- **Move between zones** — drag a chip from Rows to Columns (or vice versa), or between Rows/Columns and Values. The Values zone only accepts numeric columns; non-numeric drops are silently rejected.
+**Toolbar DnD:** Each chip in the Rows, Columns, and Values toolbar zones has a **grip-dots drag handle**. Drag to reorder within a zone or move between zones. These are immediate (non-staged) changes.
+
+**Settings Panel DnD:** Inside the Settings Panel, chips in Available Fields and all zone sections are draggable. Drag from Available Fields into a zone, reorder within zones, or move between zones. These changes are staged and applied on **Apply**.
 
 **Visual feedback:**
 - A floating overlay chip follows the cursor during drag.
@@ -624,9 +634,11 @@ When `interactive=True`, each chip in the Rows, Columns, and Values toolbar zone
 
 **Constraints:**
 - `frozen_columns` render without drag handles and cannot be dragged.
-- Synthetic measures cannot be dragged to other zones.
+- Non-numeric fields are rejected from the Values zone.
+- Rows and Columns are mutually exclusive (a field cannot be in both).
+- A field can be in Values and one dimension zone simultaneously.
 - When `locked=True`, drag-and-drop is fully disabled.
-- A 5 px activation distance distinguishes clicks from drags, so remove buttons and dropdown toggles work normally.
+- A 5 px activation distance distinguishes clicks from drags.
 
 **Config cleanup on move:** When fields move between zones, related config properties (aggregation, sort, collapsed groups, subtotals, conditional formatting, show-values-as, per-measure totals) are automatically synchronized.
 
@@ -712,10 +724,59 @@ The component follows WAI-ARIA patterns for all interactive elements:
 - **Drag-and-drop**: Space to pick up a chip, arrow keys to move, Space to drop at the new position. Screen reader announcements provided by dnd-kit.
 - **Header menus**: Escape closes. Arrow keys navigate options. Space/Enter selects.
 - **Export/Import popovers**: Focus is automatically placed on the first interactive element when opened. Tab/Shift+Tab moves between controls; tabbing out closes the popover.
-- **Settings popover** (gear icon): Focus moves to first checkbox on open. Escape closes. Tab navigates between toggles.
+- **Settings Panel** (pivot icon): Focus moves into the panel on open. Escape closes and discards staged changes. Tab navigates between fields, zones, toggles, and buttons. Aggregation dropdowns support Enter/Space for keyboard selection.
 - **Radio groups** (export format/content): Arrow keys move focus between options. Space/Enter selects.
 - **Drill-down panel**: Focus moves to the close button on open. Escape closes.
 - **Data cells**: Focusable via Tab. Space/Enter triggers cell click.
+
+---
+
+## Performance: Using Fragments
+
+Streamlit reruns the entire script whenever a widget's state changes. In apps with multiple pivot tables or expensive data preparation, this means every toolbar change, sort, or filter in one table triggers a full rerun — including all other tables.
+
+Wrapping each pivot table in [`@st.fragment`](https://docs.streamlit.io/develop/api-reference/execution-flow/st.fragment) scopes reruns to just the fragment that changed, leaving the rest of the app untouched.
+
+### Basic pattern
+
+```python
+import streamlit as st
+from streamlit_pivot import st_pivot_table
+
+df = load_data()  # runs once per full rerun, not on fragment reruns
+
+@st.fragment
+def sales_pivot():
+    result = st_pivot_table(df, key="sales", rows=["Region"], values=["Revenue"])
+    if result and result.get("cell_click"):
+        st.info(f"Clicked: {result['cell_click']}")
+
+sales_pivot()
+
+@st.fragment
+def product_pivot():
+    st_pivot_table(df, key="products", rows=["Product"], values=["Units"])
+
+product_pivot()
+```
+
+Interacting with "sales" only re-executes `sales_pivot()` — the data load and `product_pivot()` are not re-executed.
+
+### When fragments help
+
+| Scenario | Benefit |
+|---|---|
+| App with multiple pivot tables | Interactions in one table don't re-execute the others |
+| Expensive data loading / transformation | Data prep runs only on full reruns, not on every config change |
+| Hybrid drilldown (`execution_mode="threshold_hybrid"`) | Server round-trips for drill-down are scoped to the fragment |
+
+### Caveats
+
+- **Return values**: Streamlit ignores fragment return values during fragment reruns. Code that reads the result of `st_pivot_table()` should live inside the same fragment, or use `st.session_state[key]` instead.
+- **Data prep with randomness**: Keep DataFrame generation that uses random seeds outside the fragment to avoid non-deterministic data on fragment reruns.
+- **Callbacks**: `on_config_change` and `on_cell_click` fire during fragment reruns, which is the expected behavior.
+
+The demo app (`streamlit_app.py`) wraps each of its 19 sections in `@st.fragment` as a reference implementation.
 
 ---
 
@@ -735,7 +796,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains 18 sections covering the major features and usage patterns with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains 19 sections covering the major features and usage patterns with interactive examples and inline documentation.
 
 ### Building the frontend
 
@@ -768,7 +829,7 @@ npx vitest run
    uv build
    ```
 
-Output: `dist/streamlit_pivot-0.1.0-py3-none-any.whl`
+Output: `dist/streamlit_pivot-<version>-py3-none-any.whl`
 
 ### Requirements
 

@@ -24,6 +24,7 @@ import random as _rnd
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from streamlit_pivot import st_pivot_table
 
@@ -77,14 +78,18 @@ df_dates = pd.DataFrame(_date_records)
 st.divider()
 st.subheader("1. Getting Started — Basic Pivot")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_basic():
+    st.markdown(
+        """
 A basic pivot table needs three things: **row dimensions**, **column dimensions**,
 and **value fields** to aggregate.
 
 **Try it:**
-- Use the **Rows / Columns / Values** dropdowns in the toolbar to add or remove fields.
-- Change the **Aggregation** (e.g. Sum → Average) in the toolbar.
+- Click the **Settings** icon in the toolbar utility menu to open the **Settings Panel**
+  — this is the primary surface for adding, removing, and rearranging fields.
+  Make changes, then click **Apply** (or **Cancel** / Escape to discard).
 - Omit `rows`, `columns`, and `values` entirely to let the component auto-detect dimensions and measures.
 - Click any data cell — the cell coordinates will appear below the table.
 - Hover over the top-right of the toolbar to reveal the **utility menu**:
@@ -95,27 +100,26 @@ and **value fields** to aggregate.
   - **Import Config** — paste a JSON config to apply it.
   - **Export Data** (↓) — export the table as Excel, CSV, TSV, or copy to clipboard
     (see Section 11 for details).
-  - **Settings** (⚙) — opens a popover with display toggles (e.g. Row Totals,
-    Column Totals). More options appear here as you add features — see
-    Sections 4 and 10.
+  - **Settings** — opens the full Settings Panel for field configuration,
+    aggregation, synthetic measures, and display toggles (see Section 19).
 """
-)
+    )
 
-result_basic = st_pivot_table(
-    df,
-    key="basic",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue"],
-    aggregation="sum",
-    show_totals=True,
-    interactive=True,
-    on_cell_click=lambda: None,
-)
+    st_pivot_table(
+        df,
+        key="basic",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+        interactive=True,
+        on_cell_click=lambda: None,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="basic",
@@ -127,49 +131,51 @@ st_pivot_table(
     interactive=True,
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
-basic_cell_click = st.session_state.get("basic", {}).get("cell_click")
-if basic_cell_click:
-    st.info(f"Last cell click: {basic_cell_click}")
+    basic_cell_click = st.session_state.get("basic", {}).get("cell_click")
+    if basic_cell_click:
+        st.info(f"Last cell click: {basic_cell_click}")
 
-st.markdown("#### Auto-Detect Layout")
-st.markdown(
-    """
+    st.markdown("#### Auto-Detect Layout")
+    st.markdown(
+        """
 If you omit `rows`, `columns`, and `values`, the component auto-detects dimensions
 and measures from the input data. This is useful for quick exploration when you
 want a sensible starting layout without pre-configuring the pivot.
 """
-)
-st_pivot_table(
-    df,
-    key="basic_auto_detect",
-)
+    )
+    st_pivot_table(
+        df,
+        key="basic_auto_detect",
+    )
 
-st.markdown("#### Toolbar Field Search")
-st.markdown(
-    """
-The toolbar adds a **field search input** automatically when a picker has more than
-8 available fields. This wider demo includes enough dimensions and numeric measures
-to surface search in the **Rows**, **Columns**, and **Values** dropdowns.
+    st.markdown("#### Field Search in Settings Panel")
+    st.markdown(
+        """
+When the Settings Panel has more than **8 available fields**, a search input
+appears at the top of the **Available Fields** section. This wider demo includes
+enough dimensions and numeric measures to surface the search.
 
 **Try it:**
-- Open **Rows**, **Columns**, or **Values** and type part of a field name.
-- Press **ArrowDown** from the search box to jump into the filtered list.
-- Press **Escape** to close the dropdown.
+- Open the **Settings Panel** (pivot icon) and type part of a field name in the
+  search box above the Available Fields chips.
+- The chip list filters in place while the container maintains its original height.
 """
-)
-st_pivot_table(
-    df_field_search,
-    key="basic_field_search",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue"],
-    interactive=True,
-    show_totals=True,
-)
+    )
+    st_pivot_table(
+        df_field_search,
+        key="basic_field_search",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        interactive=True,
+        show_totals=True,
+    )
 
+
+section_basic()
 
 # ---------------------------------------------------------------------------
 # Section 2: Multiple Measures and Sorting
@@ -177,17 +183,20 @@ st_pivot_table(
 st.divider()
 st.subheader("2. Multiple Measures and Sorting")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_sorting():
+    st.markdown(
+        """
 Add multiple value fields to compare measures side-by-side.  Sorting lets you
 rank rows or columns by label or by value.
 
 **Try it:**
 - The table shows both **Revenue** and **Profit** — notice the value label row
   below the column headers.
-- Open the **Values** dropdown to see that each raw measure has its own
-  aggregation control.
-- Notice the selected value chips use a compact inline format like
+- Open the **Settings Panel** (pivot icon) to see the Values zone with each
+  measure's aggregation control (click the badge, e.g. "Sum", to change it).
+- Notice the toolbar value chips use a compact inline format like
   **Revenue (Sum)**.
 - Click the **⋮** menu icon on a row/column header to open the **header menu**.
   Choose **Sort A→Z**, **Sort Z→A**, or **Sort by value ↑/↓**.
@@ -195,22 +204,22 @@ rank rows or columns by label or by value.
 
 **API parameters used:** `row_sort`, `col_sort`
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="sorting",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation={"Revenue": "sum", "Profit": "avg"},
-    row_sort={"by": "value", "direction": "desc", "value_field": "Revenue"},
-    col_sort={"by": "key", "direction": "asc"},
-)
+    st_pivot_table(
+        df,
+        key="sorting",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "avg"},
+        row_sort={"by": "value", "direction": "desc", "value_field": "Revenue"},
+        col_sort={"by": "key", "direction": "asc"},
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="sorting",
@@ -222,9 +231,11 @@ st_pivot_table(
     col_sort={"by": "key", "direction": "asc"},
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_sorting()
 
 # ---------------------------------------------------------------------------
 # Section 3: Filtering, Locked Mode, and Non-Interactive Mode
@@ -232,8 +243,11 @@ st_pivot_table(
 st.divider()
 st.subheader("3. Filtering, Locked Mode, and Non-Interactive Mode")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_filtering():
+    st.markdown(
+        """
 Control which values appear via **header menu filters** or the Python API.
 **Locked mode** freezes the toolbar config controls so end-users cannot change
 rows, columns, values, or per-measure aggregation — but sorting and filtering via header
@@ -249,8 +263,7 @@ and drill-down still work.
 - Use the search box to find specific values quickly.
 
 **Middle table** is **locked** — authoring actions like reset, swap, and config import/export
-are hidden, but **Export Data** remains available, the **Settings** gear shows
-read-only view status plus **Expand/Collapse All** group controls, and you can
+are hidden, but **Export Data** remains available, and you can
 still sort, filter, and change **Show Values As** from the header menus.
 
 **Right table** is **non-interactive** — there is no toolbar and no header-menu
@@ -258,50 +271,50 @@ config UI, but cell clicks still work and drill-down remains enabled.
 
 **API parameters used:** `hidden_from_aggregators`, `sorters`, `locked`, `interactive`
 """
-)
-
-col_left, col_middle, col_right = st.columns(3)
-
-with col_left:
-    st.caption("Interactive (with custom sorters)")
-    st_pivot_table(
-        df,
-        key="filtering",
-        rows=["Region"],
-        columns=["Year"],
-        values=["Revenue"],
-        sorters={"Region": ["North", "South", "East", "West"]},
-        null_handling="zero",
     )
 
-with col_middle:
-    st.caption("Locked mode")
-    st_pivot_table(
-        df,
-        key="locked",
-        rows=["Region", "Category"],
-        columns=["Year"],
-        values=["Revenue", "Profit"],
-        locked=True,
-        hidden_from_aggregators=["Year", "Region"],
-        show_subtotals=True,
-    )
+    col_left, col_middle, col_right = st.columns(3)
 
-with col_right:
-    st.caption("Non-interactive mode")
-    result_noninteractive = st_pivot_table(
-        df,
-        key="noninteractive",
-        rows=["Region"],
-        columns=["Year"],
-        values=["Revenue"],
-        interactive=False,
-        on_cell_click=lambda: None,
-    )
+    with col_left:
+        st.caption("Interactive (with custom sorters)")
+        st_pivot_table(
+            df,
+            key="filtering",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            sorters={"Region": ["North", "South", "East", "West"]},
+            null_handling="zero",
+        )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with col_middle:
+        st.caption("Locked mode")
+        st_pivot_table(
+            df,
+            key="locked",
+            rows=["Region", "Category"],
+            columns=["Year"],
+            values=["Revenue", "Profit"],
+            locked=True,
+            hidden_from_aggregators=["Year", "Region"],
+            show_subtotals=True,
+        )
+
+    with col_right:
+        st.caption("Non-interactive mode")
+        st_pivot_table(
+            df,
+            key="noninteractive",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            interactive=False,
+            on_cell_click=lambda: None,
+        )
+
+    with st.expander("View Code"):
+        st.code(
+            """
 # Interactive with custom dimension ordering
 st_pivot_table(
     df,
@@ -336,13 +349,17 @@ st_pivot_table(
     on_cell_click=lambda: None,
 )
 """,
-        language="python",
+            language="python",
+        )
+
+    noninteractive_cell_click = st.session_state.get("noninteractive", {}).get(
+        "cell_click"
     )
+    if noninteractive_cell_click:
+        st.info(f"Non-interactive cell click: {noninteractive_cell_click}")
 
-noninteractive_cell_click = st.session_state.get("noninteractive", {}).get("cell_click")
-if noninteractive_cell_click:
-    st.info(f"Non-interactive cell click: {noninteractive_cell_click}")
 
+section_filtering()
 
 # ---------------------------------------------------------------------------
 # Section 4: Subtotals and Grouping
@@ -350,8 +367,11 @@ if noninteractive_cell_click:
 st.divider()
 st.subheader("4. Subtotals and Grouping")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_subtotals():
+    st.markdown(
+        """
 When you have **two or more row dimensions**, enable subtotals to see
 aggregated values at each group level.
 
@@ -363,28 +383,28 @@ aggregated values at each group level.
 - **Dimension-level collapse:** Click the **dimension header** label (e.g.
   "Region ›") to collapse or expand **all groups at that level** at once.
   This is available on both row and column headers when there are 2+ dimensions.
-- Click the **Settings** gear icon (⚙) in the utility menu to open the display
-  toggles. Use **Expand All** / **Collapse All** buttons, and toggle the
-  **Subtotals** and **Repeat Labels** checkboxes.
+- Use the **Expand All** / **Collapse All** buttons in the toolbar utility menu.
+- Open the **Settings Panel** (pivot icon) and toggle **Subtotals** and
+  **Repeat Labels** checkboxes, then click **Apply**.
 
 **API parameters used:** `show_subtotals`, `repeat_row_labels`
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="subtotals",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue"],
-    aggregation="sum",
-    show_subtotals=True,
-    repeat_row_labels=False,
-)
+    st_pivot_table(
+        df,
+        key="subtotals",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_subtotals=True,
+        repeat_row_labels=False,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="subtotals",
@@ -395,59 +415,61 @@ st_pivot_table(
     repeat_row_labels=False,
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
-st.markdown("#### Per-Dimension Subtotals")
-st.markdown(
-    """
+    st.markdown("#### Per-Dimension Subtotals")
+    st.markdown(
+        """
 Pass a list of dimension names to `show_subtotals` to control which levels get subtotal rows.
 Only listed dimensions will have subtotals; others are skipped.
 """
-)
-st_pivot_table(
-    df_medium,
-    key="demo_per_dim_subtotals",
-    rows=["Region", "Category", "Product"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    show_subtotals=["Region"],
-)
+    )
+    st_pivot_table(
+        df_medium,
+        key="demo_per_dim_subtotals",
+        rows=["Region", "Category", "Product"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        show_subtotals=["Region"],
+    )
 
-st.markdown("#### Per-Measure Row Totals")
-st.markdown(
-    """
+    st.markdown("#### Per-Measure Row Totals")
+    st.markdown(
+        """
 Pass a list of measure names to `show_row_totals` to control which measures appear
 in the rightmost Total column. Excluded measures show `–` (dash).
 """
-)
-st_pivot_table(
-    df,
-    key="demo_per_measure_row_totals",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    show_row_totals=["Revenue"],
-)
+    )
+    st_pivot_table(
+        df,
+        key="demo_per_measure_row_totals",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        show_row_totals=["Revenue"],
+    )
 
-st.markdown("#### Per-Measure Column Totals")
-st.markdown(
-    """
+    st.markdown("#### Per-Measure Column Totals")
+    st.markdown(
+        """
 Pass a list of measure names to `show_column_totals` to control which measures appear
 in the Grand Total row. Excluded measures show `–` (dash) in the Grand Total.
 Subtotals are independent — they still show all measures regardless of this setting.
 """
-)
-st_pivot_table(
-    df_medium,
-    key="demo_per_measure_col_totals",
-    rows=["Region", "Category", "Product"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    show_column_totals=["Revenue"],
-    show_subtotals=True,
-)
+    )
+    st_pivot_table(
+        df_medium,
+        key="demo_per_measure_col_totals",
+        rows=["Region", "Category", "Product"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        show_column_totals=["Revenue"],
+        show_subtotals=True,
+    )
 
+
+section_subtotals()
 
 # ---------------------------------------------------------------------------
 # Section 5: Advanced Aggregators and Show Values As
@@ -455,8 +477,11 @@ st_pivot_table(
 st.divider()
 st.subheader("5. Advanced Aggregators and Show Values As")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_aggregators():
+    st.markdown(
+        """
 Beyond Sum, Average, Count, Min, Max — the component supports **advanced
 aggregators**: Count Distinct, Median, Percentile (90th), First, and Last.
 
@@ -464,8 +489,9 @@ aggregators**: Count Distinct, Median, Percentile (90th), First, and Last.
 **% of Row Total**, or **% of Column Total** instead of raw numbers.
 
 **Try it:**
-- Open the **Values** dropdown in the toolbar and use each measure's own
-  aggregation control.
+- Open the **Settings Panel** (pivot icon) and click the aggregation badge on a
+  value chip to switch between Sum, Average, Count, Min, Max, and advanced
+  aggregators like Median, Percentile 90, Count Distinct, First, Last.
 - Selected value chips show aggregation inline, using the same name-first
   pattern as **Revenue (Sum)**.
 - Click the **⋮** menu icon on a **value label** header (e.g. "Revenue") to open
@@ -475,21 +501,21 @@ aggregators**: Count Distinct, Median, Percentile (90th), First, and Last.
 
 **API parameters used:** `aggregation`, `show_values_as`
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="advanced_agg",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation="sum",
-    show_values_as={"Revenue": "pct_of_total"},
-)
+    st_pivot_table(
+        df,
+        key="advanced_agg",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation="sum",
+        show_values_as={"Revenue": "pct_of_total"},
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="advanced_agg",
@@ -500,9 +526,11 @@ st_pivot_table(
     show_values_as={"Revenue": "pct_of_total"},
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_aggregators()
 
 # ---------------------------------------------------------------------------
 # Section 6: Conditional Formatting
@@ -510,8 +538,11 @@ st_pivot_table(
 st.divider()
 st.subheader("6. Conditional Formatting")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_cond_fmt():
+    st.markdown(
+        """
 Apply visual formatting rules to cells based on their values. Three rule types
 are supported:
 
@@ -532,43 +563,43 @@ are supported:
 
 **API parameter used:** `conditional_formatting`
 """
-)
+    )
 
-cond_fmt_rules: list[dict[str, Any]] = [
-    {
-        "type": "data_bars",
-        "apply_to": ["Revenue"],
-        "color": "#1976d2",
-        "fill": "gradient",
-    },
-    {
-        "type": "color_scale",
-        "apply_to": ["Profit"],
-        "min_color": "#1b2e1b",
-        "max_color": "#4caf50",
-    },
-    {
-        "type": "threshold",
-        "apply_to": ["Units"],
-        "conditions": [
-            {"operator": "gt", "value": 250, "background": "#1565c0", "bold": True},
-        ],
-    },
-]
+    cond_fmt_rules: list[dict[str, Any]] = [
+        {
+            "type": "data_bars",
+            "apply_to": ["Revenue"],
+            "color": "#1976d2",
+            "fill": "gradient",
+        },
+        {
+            "type": "color_scale",
+            "apply_to": ["Profit"],
+            "min_color": "#1b2e1b",
+            "max_color": "#4caf50",
+        },
+        {
+            "type": "threshold",
+            "apply_to": ["Units"],
+            "conditions": [
+                {"operator": "gt", "value": 250, "background": "#1565c0", "bold": True},
+            ],
+        },
+    ]
 
-st_pivot_table(
-    df,
-    key="cond_fmt",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue", "Profit", "Units"],
-    aggregation="sum",
-    conditional_formatting=cond_fmt_rules,
-)
+    st_pivot_table(
+        df,
+        key="cond_fmt",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Profit", "Units"],
+        aggregation="sum",
+        conditional_formatting=cond_fmt_rules,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="cond_fmt",
@@ -599,9 +630,11 @@ st_pivot_table(
     ],
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_cond_fmt()
 
 # ---------------------------------------------------------------------------
 # Section 7: Number Formatting and Layout
@@ -609,8 +642,11 @@ st_pivot_table(
 st.divider()
 st.subheader("7. Number Formatting and Layout")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_formatting():
+    st.markdown(
+        """
 Control how numbers are displayed and align columns.
 
 | Format Pattern | Example Output | Description |
@@ -626,22 +662,22 @@ Control how numbers are displayed and align columns.
 
 **API parameters used:** `number_format`, `column_alignment`
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="formatting",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation="sum",
-    number_format={"Revenue": "$,.0f", "Profit": ",.2f"},
-    column_alignment={"Revenue": "right", "Profit": "right"},
-)
+    st_pivot_table(
+        df,
+        key="formatting",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation="sum",
+        number_format={"Revenue": "$,.0f", "Profit": ",.2f"},
+        column_alignment={"Revenue": "right", "Profit": "right"},
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="formatting",
@@ -652,9 +688,11 @@ st_pivot_table(
     column_alignment={"Revenue": "right", "Profit": "right"},
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_formatting()
 
 # ---------------------------------------------------------------------------
 # Section 8: Column Group Collapse/Expand
@@ -662,8 +700,11 @@ st_pivot_table(
 st.divider()
 st.subheader("8. Column Group Collapse/Expand")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_col_collapse():
+    st.markdown(
+        """
 When you have **two or more column dimensions**, column groups can be
 collapsed just like row groups.
 
@@ -675,21 +716,21 @@ collapsed just like row groups.
 
 **Note:** Column collapse/expand works alongside row subtotals and row grouping.
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="col_collapse",
-    rows=["Region"],
-    columns=["Year", "Category"],
-    values=["Revenue"],
-    aggregation="sum",
-    show_totals=True,
-)
+    st_pivot_table(
+        df,
+        key="col_collapse",
+        rows=["Region"],
+        columns=["Year", "Category"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="col_collapse",
@@ -700,9 +741,11 @@ st_pivot_table(
     show_totals=True,
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_col_collapse()
 
 # ---------------------------------------------------------------------------
 # Section 9: Synthetic Measures (V1)
@@ -710,8 +753,11 @@ st_pivot_table(
 st.divider()
 st.subheader("9. Synthetic Measures (V1)")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_synthetic():
+    st.markdown(
+        """
 Synthetic measures let you combine source metrics using fixed operations while
 still keeping regular measures in the same table.
 
@@ -721,7 +767,8 @@ still keeping regular measures in the same table.
 
 **Try it:**
 - Keep **Total PRs** as a regular measure.
-- Add synthetic measures in the **Values** panel using **+ Add measure**.
+- Open the **Settings Panel** (pivot icon) and click **+ Add measure** in the
+  Calculated Measures section to create new synthetic measures interactively.
 - Compare **PRs / Person** and **PRs - People** alongside raw values.
 - Notice denominator-zero cells render as `–`.
 - In the builder, try **Format presets** (Percent/Currency/Number) or enter a custom format pattern.
@@ -730,48 +777,48 @@ Synthetic measures currently do not support **Show Values As** transformations,
 and they continue to use sum-based source semantics even if raw measures in the
 same pivot use different aggregations.
 """
-)
+    )
 
-df_synth_demo = pd.DataFrame(
-    {
-        "Region": ["East", "East", "West", "West", "North"],
-        "Year": [2023, 2024, 2023, 2024, 2024],
-        "Total PRs": [20, 30, 10, 25, 5],
-        "People": [5, 0, 2, 5, 1],
-    }
-)
-
-st_pivot_table(
-    df_synth_demo,
-    key="synthetic_measures_v1",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Total PRs", "People"],
-    aggregation={"Total PRs": "sum", "People": "count"},
-    synthetic_measures=[
+    df_synth_demo = pd.DataFrame(
         {
-            "id": "prs_per_person",
-            "label": "PRs / Person",
-            "operation": "sum_over_sum",
-            "numerator": "Total PRs",
-            "denominator": "People",
-            "format": ".1%",
-        },
-        {
-            "id": "prs_minus_people",
-            "label": "PRs - People",
-            "operation": "difference",
-            "numerator": "Total PRs",
-            "denominator": "People",
-            "format": ",.1f",
-        },
-    ],
-    number_format={"Total PRs": ",.0f", "People": ",.0f", "__all__": ",.2f"},
-)
+            "Region": ["East", "East", "West", "West", "North"],
+            "Year": [2023, 2024, 2023, 2024, 2024],
+            "Total PRs": [20, 30, 10, 25, 5],
+            "People": [5, 0, 2, 5, 1],
+        }
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    st_pivot_table(
+        df_synth_demo,
+        key="synthetic_measures_v1",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Total PRs", "People"],
+        aggregation={"Total PRs": "sum", "People": "count"},
+        synthetic_measures=[
+            {
+                "id": "prs_per_person",
+                "label": "PRs / Person",
+                "operation": "sum_over_sum",
+                "numerator": "Total PRs",
+                "denominator": "People",
+                "format": ".1%",
+            },
+            {
+                "id": "prs_minus_people",
+                "label": "PRs - People",
+                "operation": "difference",
+                "numerator": "Total PRs",
+                "denominator": "People",
+                "format": ",.1f",
+            },
+        ],
+        number_format={"Total PRs": ",.0f", "People": ",.0f", "__all__": ",.2f"},
+    )
+
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df_synth_demo,
     key="synthetic_measures_v1",
@@ -799,9 +846,11 @@ st_pivot_table(
     ],
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_synthetic()
 
 # ---------------------------------------------------------------------------
 # Section 10: Sticky Headers, Height, and Max Height
@@ -809,11 +858,14 @@ st_pivot_table(
 st.divider()
 st.subheader("10. Sticky Headers, Height, and Max Height")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_sticky():
+    st.markdown(
+        """
 By default, column headers **stick** to the top of the table as you scroll.
 You can disable this behavior with `sticky_headers=False` or toggle it at
-runtime via the **Sticky Headers** checkbox in the **Settings** popover (gear icon in the utility menu).
+runtime via the **Sticky Headers** checkbox in the **Settings Panel** (pivot icon).
 
 The table container size is controlled by `max_height` (default ``500``).
 The table auto-sizes up to this limit, then becomes scrollable with sticky
@@ -822,28 +874,28 @@ headers. The sticky headers checkbox appears when content exceeds this limit.
 **Try it:**
 - The table below has `max_height=700` and sticky headers **disabled** — scroll
   down and notice the headers scroll away.
-- Hover over the top-right of the toolbar, click the **Settings** gear icon,
-  and toggle the **Sticky Headers** checkbox to re-enable.
+- Open the **Settings Panel** (pivot icon), enable **Sticky Headers**, and
+  click **Apply** to re-enable.
 
 **API parameters used:** `sticky_headers`, `max_height`
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="sticky_off",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation="sum",
-    sticky_headers=False,
-    show_subtotals=True,
-    max_height=700,
-)
+    st_pivot_table(
+        df,
+        key="sticky_off",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation="sum",
+        sticky_headers=False,
+        show_subtotals=True,
+        max_height=700,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="sticky_off",
@@ -855,9 +907,11 @@ st_pivot_table(
     max_height=700,
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_sticky()
 
 # ---------------------------------------------------------------------------
 # Section 11: Data Export
@@ -865,8 +919,11 @@ st_pivot_table(
 st.divider()
 st.subheader("11. Data Export")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_export():
+    st.markdown(
+        """
 Export the pivot table data as **Excel** (.xlsx), **CSV**, **TSV**, or copy to
 **clipboard** for pasting into spreadsheets.
 
@@ -894,24 +951,24 @@ exporting the table in **Section 6** to see this in action.
 - This demo sets `export_filename="sales-export-demo"` so you can see the custom
   filename behavior in the downloaded file.
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="export_demo",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation="sum",
-    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
-    show_totals=True,
-    interactive=True,
-    export_filename="sales-export-demo",
-)
+    st_pivot_table(
+        df,
+        key="export_demo",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation="sum",
+        number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        show_totals=True,
+        interactive=True,
+        export_filename="sales-export-demo",
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="export_demo",
@@ -924,8 +981,11 @@ st_pivot_table(
 )
 # Then use the Download icon in the toolbar utility menu.
 """,
-        language="python",
-    )
+            language="python",
+        )
+
+
+section_export()
 
 # ---------------------------------------------------------------------------
 # Section 12: Drill-Down Detail Panel
@@ -933,8 +993,11 @@ st_pivot_table(
 st.divider()
 st.subheader("12. Drill-Down Detail Panel")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_drilldown():
+    st.markdown(
+        """
 Click any **data cell** (or total cell) to open an inline **drill-down panel**
 below the pivot table. The panel displays the **source records** that
 contributed to the clicked cell's aggregated value.
@@ -952,23 +1015,23 @@ contributed to the clicked cell's aggregated value.
 Set ``enable_drilldown=False`` to disable the drill-down panel (the
 ``on_cell_click`` callback still fires).
 """
-)
+    )
 
-result_drilldown = st_pivot_table(
-    df,
-    key="drilldown_demo",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue"],
-    aggregation="sum",
-    show_totals=True,
-    enable_drilldown=True,
-    on_cell_click=lambda: None,
-)
+    st_pivot_table(
+        df,
+        key="drilldown_demo",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+        enable_drilldown=True,
+        on_cell_click=lambda: None,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 result = st_pivot_table(
     df,
     key="drilldown_demo",
@@ -980,8 +1043,11 @@ result = st_pivot_table(
 )
 # Click any cell to see the contributing source records.
 """,
-        language="python",
-    )
+            language="python",
+        )
+
+
+section_drilldown()
 
 # ---------------------------------------------------------------------------
 # Section 13: Grouping Hierarchy and Sorting
@@ -989,8 +1055,11 @@ result = st_pivot_table(
 st.divider()
 st.subheader("13. Grouping Hierarchy and Scoped Sorting")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_hierarchy():
+    st.markdown(
+        """
 When **subtotals** are enabled with multiple row dimensions, the component
 treats the data as a **grouped hierarchy**:
 
@@ -1005,106 +1074,106 @@ treats the data as a **grouped hierarchy**:
 
 Compare the tables below to see the hierarchy in action.
 """
-)
+    )
 
-hier_cols = st.columns(2)
+    hier_cols = st.columns(2)
 
-with hier_cols[0]:
-    st.markdown("**Subtotals ON — 3-level hierarchy**")
+    with hier_cols[0]:
+        st.markdown("**Subtotals ON — 3-level hierarchy**")
+        st_pivot_table(
+            df_medium,
+            key="hier_subtotals_on",
+            rows=["Region", "Category", "Product"],
+            columns=[],
+            values=["Revenue"],
+            aggregation="sum",
+            show_subtotals=True,
+            show_totals=True,
+            max_height=500,
+        )
+
+    with hier_cols[1]:
+        st.markdown("**Subtotals OFF — flat table for comparison**")
+        st_pivot_table(
+            df_medium,
+            key="hier_subtotals_off",
+            rows=["Region", "Category", "Product"],
+            columns=[],
+            values=["Revenue"],
+            aggregation="sum",
+            show_subtotals=False,
+            show_totals=True,
+            max_height=500,
+        )
+
+    st.markdown("---")
+    st.markdown("**Scoped value sort — sort Category desc, Regions stay in place**")
     st_pivot_table(
         df_medium,
-        key="hier_subtotals_on",
+        key="hier_scoped_sort",
         rows=["Region", "Category", "Product"],
         columns=[],
         values=["Revenue"],
         aggregation="sum",
         show_subtotals=True,
         show_totals=True,
+        row_sort={
+            "by": "value",
+            "direction": "desc",
+            "value_field": "Revenue",
+            "dimension": "Category",
+        },
         max_height=500,
     )
 
-with hier_cols[1]:
-    st.markdown("**Subtotals OFF — flat table for comparison**")
-    st_pivot_table(
-        df_medium,
-        key="hier_subtotals_off",
-        rows=["Region", "Category", "Product"],
-        columns=[],
-        values=["Revenue"],
-        aggregation="sum",
-        show_subtotals=False,
-        show_totals=True,
-        max_height=500,
-    )
-
-st.markdown("---")
-st.markdown("**Scoped value sort — sort Category desc, Regions stay in place**")
-st_pivot_table(
-    df_medium,
-    key="hier_scoped_sort",
-    rows=["Region", "Category", "Product"],
-    columns=[],
-    values=["Revenue"],
-    aggregation="sum",
-    show_subtotals=True,
-    show_totals=True,
-    row_sort={
-        "by": "value",
-        "direction": "desc",
-        "value_field": "Revenue",
-        "dimension": "Category",
-    },
-    max_height=500,
-)
-
-st.markdown(
-    """
+    st.markdown(
+        """
 ↑ **What to observe:** Region groups are in their default (ascending by
 subtotal) order. Categories *within* each Region are sorted descending by
 Revenue subtotal. Products within each Category are also descending.
 
 Compare with the **global** value sort below — all levels sort descending:
 """
-)
+    )
 
-st_pivot_table(
-    df_medium,
-    key="hier_global_sort",
-    rows=["Region", "Category", "Product"],
-    columns=[],
-    values=["Revenue"],
-    aggregation="sum",
-    show_subtotals=True,
-    show_totals=True,
-    row_sort={"by": "value", "direction": "desc", "value_field": "Revenue"},
-    max_height=500,
-)
+    st_pivot_table(
+        df_medium,
+        key="hier_global_sort",
+        rows=["Region", "Category", "Product"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        show_subtotals=True,
+        show_totals=True,
+        row_sort={"by": "value", "direction": "desc", "value_field": "Revenue"},
+        max_height=500,
+    )
 
-st.markdown("---")
-st.markdown("**Per-dimension subtotals — only Region grouped**")
-st_pivot_table(
-    df_medium,
-    key="hier_partial_subtotals",
-    rows=["Region", "Category", "Product"],
-    columns=[],
-    values=["Revenue"],
-    aggregation="sum",
-    show_subtotals=["Region"],
-    show_totals=True,
-    max_height=500,
-)
+    st.markdown("---")
+    st.markdown("**Per-dimension subtotals — only Region grouped**")
+    st_pivot_table(
+        df_medium,
+        key="hier_partial_subtotals",
+        rows=["Region", "Category", "Product"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        show_subtotals=["Region"],
+        show_totals=True,
+        max_height=500,
+    )
 
-st.markdown(
-    """
+    st.markdown(
+        """
 ↑ Only Region has subtotals. Category and Product are both leaf attributes
 within each Region group. The Region column gets grouping-dimension styling
 while Category and Product are plain detail data.
 """
-)
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 # 3-level hierarchy with full subtotals
 st_pivot_table(
     df_medium,
@@ -1138,8 +1207,11 @@ st_pivot_table(
     show_subtotals=["Region"],
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
+
+
+section_hierarchy()
 
 # ---------------------------------------------------------------------------
 # Section 14: Server-Side Drill-Down (Hybrid Mode)
@@ -1147,8 +1219,26 @@ st_pivot_table(
 st.divider()
 st.subheader("14. Server-Side Drill-Down (Hybrid Mode)")
 
-st.markdown(
-    """
+_rng = np.random.default_rng(42)
+_n = 50_000
+df_hybrid = pd.DataFrame(
+    {
+        "Region": _rng.choice(["North", "South", "East", "West"], _n),
+        "Category": _rng.choice(
+            ["Electronics", "Clothing", "Food", "Furniture", "Toys"], _n
+        ),
+        "Year": _rng.choice([2022, 2023, 2024], _n),
+        "Channel": _rng.choice(["Online", "Retail", "Wholesale"], _n),
+        "Revenue": _rng.uniform(10, 5000, _n).round(2),
+        "Profit": _rng.uniform(-500, 2000, _n).round(2),
+    }
+)
+
+
+@st.fragment
+def section_hybrid():
+    st.markdown(
+        """
 When datasets are large enough to trigger **threshold_hybrid** mode, the pivot
 data is pre-aggregated on the server before being sent to the browser. In this
 mode, drill-down works via a **server round-trip**: clicking a cell sends a
@@ -1167,42 +1257,25 @@ Because large cells can match thousands of rows, the results are **paginated**
 **API parameter used:** `execution_mode` (set to `"threshold_hybrid"` here to
 force hybrid mode on a smaller dataset for demonstration purposes)
 """
-)
+    )
 
-import numpy as np  # noqa: E402
+    st_pivot_table(
+        df_hybrid,
+        key="hybrid_drilldown_demo",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        show_totals=True,
+        show_subtotals=True,
+        enable_drilldown=True,
+        execution_mode="threshold_hybrid",
+    )
 
-_rng = np.random.default_rng(42)
-_n = 50_000
-df_hybrid = pd.DataFrame(
-    {
-        "Region": _rng.choice(["North", "South", "East", "West"], _n),
-        "Category": _rng.choice(
-            ["Electronics", "Clothing", "Food", "Furniture", "Toys"], _n
-        ),
-        "Year": _rng.choice([2022, 2023, 2024], _n),
-        "Channel": _rng.choice(["Online", "Retail", "Wholesale"], _n),
-        "Revenue": _rng.uniform(10, 5000, _n).round(2),
-        "Profit": _rng.uniform(-500, 2000, _n).round(2),
-    }
-)
-
-st_pivot_table(
-    df_hybrid,
-    key="hybrid_drilldown_demo",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation={"Revenue": "sum", "Profit": "sum"},
-    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
-    show_totals=True,
-    show_subtotals=True,
-    enable_drilldown=True,
-    execution_mode="threshold_hybrid",
-)
-
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 import numpy as np
 
 rng = np.random.default_rng(42)
@@ -1231,54 +1304,54 @@ st_pivot_table(
 )
 # Click any cell to see paginated server-side drill-down.
 """,
-        language="python",
+            language="python",
+        )
+
+    st.caption(
+        f"Dataset: {len(df_hybrid):,} rows × {len(df_hybrid.columns)} columns — "
+        "forced to threshold_hybrid mode for demonstration."
     )
 
-st.caption(
-    f"Dataset: {len(df_hybrid):,} rows × {len(df_hybrid.columns)} columns — "
-    "forced to threshold_hybrid mode for demonstration."
-)
-
-st.markdown(
-    """
+    st.markdown(
+        """
 **Non-decomposable aggregations in hybrid mode:** All 10 aggregation types are
 supported in hybrid mode, including `median`, `count_distinct`, `percentile_90`,
 `first`, and `last`. The server computes correct totals via a sidecar payload.
 `count` and `count_distinct` work on any column type; all other aggregations
 coerce values to numeric and ignore non-numeric entries.
 """
-)
-
-col_a, col_b = st.columns(2)
-with col_a:
-    st.markdown("**Hybrid Median Pivot**")
-    st_pivot_table(
-        df_hybrid,
-        key="hybrid_median_demo",
-        rows=["Region"],
-        columns=["Year"],
-        values=["Revenue"],
-        aggregation="median",
-        number_format={"Revenue": "$,.2f"},
-        show_totals=True,
-        execution_mode="threshold_hybrid",
-    )
-with col_b:
-    st.markdown("**Hybrid Count Distinct Pivot**")
-    st_pivot_table(
-        df_hybrid,
-        key="hybrid_count_distinct_demo",
-        rows=["Region"],
-        columns=["Year"],
-        values=["Category"],
-        aggregation="count_distinct",
-        show_totals=True,
-        execution_mode="threshold_hybrid",
     )
 
-with st.expander("View Code — Non-decomposable Aggregations"):
-    st.code(
-        """
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("**Hybrid Median Pivot**")
+        st_pivot_table(
+            df_hybrid,
+            key="hybrid_median_demo",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            aggregation="median",
+            number_format={"Revenue": "$,.2f"},
+            show_totals=True,
+            execution_mode="threshold_hybrid",
+        )
+    with col_b:
+        st.markdown("**Hybrid Count Distinct Pivot**")
+        st_pivot_table(
+            df_hybrid,
+            key="hybrid_count_distinct_demo",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Category"],
+            aggregation="count_distinct",
+            show_totals=True,
+            execution_mode="threshold_hybrid",
+        )
+
+    with st.expander("View Code — Non-decomposable Aggregations"):
+        st.code(
+            """
 # Median: server computes correct grand/row/col totals
 st_pivot_table(
     df_hybrid,
@@ -1301,9 +1374,11 @@ st_pivot_table(
     execution_mode="threshold_hybrid",
 )
 """,
-        language="python",
-    )
+            language="python",
+        )
 
+
+section_hybrid()
 
 # ---------------------------------------------------------------------------
 # Section 15: Drag-and-Drop Field Configuration
@@ -1311,40 +1386,46 @@ st_pivot_table(
 st.divider()
 st.subheader("15. Drag-and-Drop Field Configuration")
 
-st.markdown(
-    """
-Each chip in the **Rows**, **Columns**, and **Values** toolbar zones has a
-**grip-dots drag handle** on its left side. Use it to:
 
-- **Reorder within a zone** — change the grouping hierarchy (e.g., swap
-  which dimension is the outer vs. inner group).
-- **Move between zones** — drag a Row chip into Columns, or move a numeric
-  field into Values. Non-numeric fields are rejected from the Values zone.
+@st.fragment
+def section_dnd():
+    st.markdown(
+        """
+Drag-and-drop is available in **two contexts**:
+
+**Toolbar DnD:** Each chip in the Rows, Columns, and Values toolbar zones has a
+**grip-dots drag handle**. Drag to reorder within a zone or move between zones.
+These are immediate changes.
+
+**Settings Panel DnD:** Inside the Settings Panel (pivot icon), chips in
+Available Fields and all zone sections are draggable. Drag from Available Fields
+into a zone, reorder within zones, or move between zones. These changes are
+staged and applied on **Apply**.
 
 **Try it** on the pivot below (two row dimensions so you can reorder):
 - Drag the grip handle on **Category** and drop it before **Region** to
   reverse the grouping order.
 - Drag **Category** from Rows into the Columns zone.
-- Drag a numeric chip into/out of Values.
+- Open the **Settings Panel** and drag fields from Available Fields into zones.
 
 Frozen columns (set via `frozen_columns`) cannot be dragged. When `locked=True`,
 drag-and-drop is fully disabled.
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="drag_and_drop_demo",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation={"Revenue": "sum", "Profit": "sum"},
-    show_totals=True,
-)
+    st_pivot_table(
+        df,
+        key="drag_and_drop_demo",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        show_totals=True,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="drag_and_drop_demo",
@@ -1356,8 +1437,11 @@ st_pivot_table(
 )
 # Drag the grip-dots handle on any chip to reorder or move between zones.
 """,
-        language="python",
-    )
+            language="python",
+        )
+
+
+section_dnd()
 
 # ---------------------------------------------------------------------------
 # Section 16: Column Resize
@@ -1365,8 +1449,11 @@ st_pivot_table(
 st.divider()
 st.subheader("16. Column Resize")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_resize():
+    st.markdown(
+        """
 Drag the **right edge of any column header** to resize that column.
 The resize handle appears as a thin highlight strip when you hover the
 column border. Minimum width is 40 px. Works in both virtualized and
@@ -1382,22 +1469,22 @@ non-virtualized rendering modes.
 Column resize is a **purely frontend interaction** — no Python API parameter
 is required.
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="column_resize_demo",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation={"Revenue": "sum", "Profit": "sum"},
-    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
-    show_totals=True,
-)
+    st_pivot_table(
+        df,
+        key="column_resize_demo",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        show_totals=True,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="column_resize_demo",
@@ -1410,8 +1497,11 @@ st_pivot_table(
 )
 # Drag any column header edge to resize.
 """,
-        language="python",
-    )
+            language="python",
+        )
+
+
+section_resize()
 
 # ---------------------------------------------------------------------------
 # Section 17: Fullscreen Mode
@@ -1419,8 +1509,11 @@ st_pivot_table(
 st.divider()
 st.subheader("17. Fullscreen Mode")
 
-st.markdown(
-    """
+
+@st.fragment
+def section_fullscreen():
+    st.markdown(
+        """
 Click the **expand icon** (⤢) in the toolbar utility menu to enter
 **fullscreen mode**. The pivot table fills the entire browser viewport
 as a fixed overlay. Press **Escape** or click the **collapse icon** (⤡)
@@ -1428,7 +1521,7 @@ to exit.
 
 **Try it:**
 - Hover over the toolbar area to reveal the utility buttons.
-- Click the expand icon (rightmost group, before the gear icon).
+- Click the expand icon in the utility menu (before the Settings icon).
 - The table expands to fill the full viewport — virtual scrolling
   automatically adjusts to the new height.
 - Press **Escape** or click the collapse icon to return to normal view.
@@ -1437,24 +1530,24 @@ Fullscreen mode is a **purely frontend interaction** — no Python API
 parameter is required. It works with both virtualized and non-virtualized
 tables.
 """
-)
+    )
 
-st_pivot_table(
-    df,
-    key="fullscreen_demo",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation={"Revenue": "sum", "Profit": "sum"},
-    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
-    show_totals=True,
-    show_subtotals=True,
-    max_height=350,
-)
+    st_pivot_table(
+        df,
+        key="fullscreen_demo",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        show_totals=True,
+        show_subtotals=True,
+        max_height=350,
+    )
 
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 st_pivot_table(
     df,
     key="fullscreen_demo",
@@ -1470,8 +1563,11 @@ st_pivot_table(
 # Click the expand icon in the toolbar to go fullscreen.
 # Press Escape to exit.
 """,
-        language="python",
-    )
+            language="python",
+        )
+
+
+section_fullscreen()
 
 # ---------------------------------------------------------------------------
 # Section 18: Date Hierarchy and Time Comparisons
@@ -1479,8 +1575,24 @@ st_pivot_table(
 st.divider()
 st.subheader("18. Date Hierarchy and Time Comparisons")
 
-st.markdown(
-    """
+_short_records = []
+for day in range(1, 15):
+    for region in ["US", "EU"]:
+        base = 80 if region == "EU" else 120
+        _short_records.append(
+            {
+                "region": region,
+                "order_date": _dt.date(2024, 3, day),
+                "Revenue": base + _rnd.randint(-15, 25),
+            }
+        )
+df_dates_short = pd.DataFrame(_short_records)
+
+
+@st.fragment
+def section_dates():
+    st.markdown(
+        """
 Typed date and datetime fields now auto-behave like BI-style time hierarchies.
 When a temporal field is placed on rows or columns, the pivot **adapts the
 default grouping grain** to the date range in the source data:
@@ -1514,107 +1626,94 @@ still keep the full leaf-level date structure regardless of collapse state.
 
 **API parameters used:** `auto_date_hierarchy`, `date_grains`, `show_values_as`
 """
-)
+    )
 
-_short_records = []
-for day in range(1, 15):
-    for region in ["US", "EU"]:
-        base = 80 if region == "EU" else 120
-        _short_records.append(
-            {
-                "region": region,
-                "order_date": _dt.date(2024, 3, day),
-                "Revenue": base + _rnd.randint(-15, 25),
-            }
+    date_col_1, date_col_2 = st.columns(2)
+
+    with date_col_1:
+        st.caption("2-year span → adaptive default: Quarter")
+        st_pivot_table(
+            df_dates,
+            key="date_hierarchy_auto",
+            rows=["region"],
+            columns=["order_date"],
+            values=["Revenue"],
+            aggregation="sum",
+            show_totals=True,
         )
-df_dates_short = pd.DataFrame(_short_records)
 
-date_col_1, date_col_2 = st.columns(2)
+    with date_col_2:
+        st.caption("2-week span → adaptive default: Day")
+        st_pivot_table(
+            df_dates_short,
+            key="date_hierarchy_adaptive_day",
+            rows=["region"],
+            columns=["order_date"],
+            values=["Revenue"],
+            aggregation="sum",
+            show_totals=True,
+        )
 
-with date_col_1:
-    st.caption("2-year span → adaptive default: Quarter")
-    st_pivot_table(
-        df_dates,
-        key="date_hierarchy_auto",
-        rows=["region"],
-        columns=["order_date"],
-        values=["Revenue"],
-        aggregation="sum",
-        show_totals=True,
-    )
+    date_col_3, date_col_4 = st.columns(2)
 
-with date_col_2:
-    st.caption("2-week span → adaptive default: Day")
-    st_pivot_table(
-        df_dates_short,
-        key="date_hierarchy_adaptive_day",
-        rows=["region"],
-        columns=["order_date"],
-        values=["Revenue"],
-        aggregation="sum",
-        show_totals=True,
-    )
+    with date_col_3:
+        st.caption("Explicit override: Month grain (raw sums)")
+        st_pivot_table(
+            df_dates,
+            key="date_hierarchy_quarter",
+            rows=["region"],
+            columns=["order_date"],
+            values=["Revenue"],
+            aggregation="sum",
+            show_totals=True,
+            date_grains={"order_date": "month"},
+        )
 
-date_col_3, date_col_4 = st.columns(2)
+    with date_col_4:
+        st.caption("Global auto hierarchy off")
+        st_pivot_table(
+            df_dates,
+            key="date_hierarchy_auto_off",
+            rows=["region"],
+            columns=["ship_date"],
+            values=["Revenue"],
+            aggregation="sum",
+            show_totals=True,
+            auto_date_hierarchy=False,
+        )
 
-with date_col_3:
-    st.caption("Explicit override: Month grain (raw sums)")
-    st_pivot_table(
-        df_dates,
-        key="date_hierarchy_quarter",
-        rows=["region"],
-        columns=["order_date"],
-        values=["Revenue"],
-        aggregation="sum",
-        show_totals=True,
-        date_grains={"order_date": "month"},
-    )
+    date_col_5, date_col_6 = st.columns(2)
 
-with date_col_4:
-    st.caption("Global auto hierarchy off")
-    st_pivot_table(
-        df_dates,
-        key="date_hierarchy_auto_off",
-        rows=["region"],
-        columns=["ship_date"],
-        values=["Revenue"],
-        aggregation="sum",
-        show_totals=True,
-        auto_date_hierarchy=False,
-    )
+    with date_col_5:
+        st.caption("Per-field Original opt-out")
+        st_pivot_table(
+            df_dates,
+            key="date_hierarchy_original",
+            rows=["region"],
+            columns=["ship_date"],
+            values=["Revenue"],
+            aggregation="sum",
+            show_totals=True,
+            date_grains={"ship_date": None},
+        )
 
-date_col_5, date_col_6 = st.columns(2)
+    with date_col_6:
+        st.caption(
+            "Row-side hierarchy with collapsible parent rows (click the +/- in the row headers)"
+        )
+        st_pivot_table(
+            df_dates,
+            key="date_hierarchy_rows",
+            rows=["order_date"],
+            columns=["region"],
+            values=["Revenue"],
+            aggregation="sum",
+            show_totals=True,
+        )
 
-with date_col_5:
-    st.caption("Per-field Original opt-out")
-    st_pivot_table(
-        df_dates,
-        key="date_hierarchy_original",
-        rows=["region"],
-        columns=["ship_date"],
-        values=["Revenue"],
-        aggregation="sum",
-        show_totals=True,
-        date_grains={"ship_date": None},
-    )
-
-with date_col_6:
-    st.caption(
-        "Row-side hierarchy with collapsible parent rows (click the +/- in the row headers)"
-    )
-    st_pivot_table(
-        df_dates,
-        key="date_hierarchy_rows",
-        rows=["order_date"],
-        columns=["region"],
-        values=["Revenue"],
-        aggregation="sum",
-        show_totals=True,
-    )
-
-with st.expander("View Code"):
-    st.code(
-        """
+    with st.expander("View Code"):
+        st.code(
+            """
 # Adaptive default: 2-year span → Quarter
 st_pivot_table(
     df_dates,  # spans 2023-2024
@@ -1668,8 +1767,89 @@ st_pivot_table(
     values=["Revenue"],
 )
 """,
-        language="python",
+            language="python",
+        )
+
+
+section_dates()
+
+# ---------------------------------------------------------------------------
+# Section 19: Settings Panel
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("19. Settings Panel (Staged Commit UX)")
+
+
+@st.fragment
+def section_settings():
+    st.markdown(
+        """
+The **Settings Panel** is the primary authoring surface for pivot field
+configuration. It uses a **staged commit** model: changes are made locally
+and only applied when you click **Apply**.
+
+**Panel sections:**
+- **Available Fields** — unassigned columns shown as draggable chips with
+  context menus for adding to Rows, Columns, or Values. A search input
+  appears when more than 8 fields are available.
+- **Rows / Columns / Values** — drop zones with drag-and-drop reordering,
+  remove buttons, and aggregation pickers on value chips.
+- **Calculated Measures** — click **+ Add measure** to build synthetic
+  metrics (ratio of sums, difference of sums) with format patterns.
+- **Display** — toggles for Row Totals, Column Totals, Subtotals, Repeat
+  Labels, and Sticky Headers.
+- **Apply / Cancel** — commit or discard all staged changes.
+
+**Key behaviors:**
+- The **Apply** button is disabled when no changes have been made.
+- **Escape** or clicking outside the panel discards staged changes.
+- If the toolbar config changes externally (Reset, Swap, DnD, import) while
+  the panel is open, it automatically closes and discards uncommitted edits.
+- Frozen columns appear in Available Fields if unassigned, but once placed in
+  a zone their chips are non-draggable and non-removable.
+
+**Try it:**
+- Click the **Settings** icon in the toolbar utility menu to open the panel.
+- Drag fields from Available Fields into Rows, Columns, or Values.
+- Change an aggregation by clicking the badge on a value chip.
+- Add a synthetic measure via **+ Add measure**.
+- Toggle display settings, then click **Apply** to see the changes.
+- Click **Cancel** or press **Escape** to discard.
+"""
     )
+
+    st_pivot_table(
+        df_field_search,
+        key="settings_panel_demo",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+        interactive=True,
+    )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+st_pivot_table(
+    df_field_search,
+    key="settings_panel_demo",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    aggregation="sum",
+    show_totals=True,
+    interactive=True,
+)
+# Click the Settings icon in the toolbar to open the Settings Panel.
+# Make changes, then click Apply or Cancel.
+""",
+            language="python",
+        )
+
+
+section_settings()
 
 # ---------------------------------------------------------------------------
 # Footer: Raw Data

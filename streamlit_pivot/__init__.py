@@ -1946,10 +1946,9 @@ def st_pivot_table(
         Custom sort orderings per dimension. Maps column name to a list
         of values in the desired order.
     locked : bool
-        If True, toolbar config controls are disabled. The settings gear stays
-        visible so users can inspect current view status and expand/collapse
-        groups. Data export plus header-menu sorting, filtering, and show-values-as
-        remain available. Defaults to False.
+        If True, toolbar config controls are disabled. Data export plus
+        header-menu sorting, filtering, and show-values-as remain available.
+        Defaults to False.
     menu_limit : int or None
         Max items to show in the header-menu filter checklist. Defaults
         to 50 when None.

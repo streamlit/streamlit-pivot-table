@@ -1,0 +1,819 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* --- Settings Panel (full config panel anchored to settings button) --- */
+
+.wrapper {
+  position: relative;
+}
+
+.panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  width: 300px;
+  max-width: calc(100vw - 20px);
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: 8px;
+  box-shadow: var(--pivot-popover-shadow, 0 8px 24px rgba(0, 0, 0, 0.12));
+  font-family: var(--st-font);
+  font-size: var(--st-base-font-size);
+  transform-origin: top right;
+}
+
+@keyframes panelFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes panelFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.panelEnter {
+  animation: panelFadeIn 150ms cubic-bezier(0.2, 0, 0.13, 1.5) forwards;
+}
+
+.panelExit {
+  animation: panelFadeOut 120ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+.panel:focus {
+  outline: none;
+}
+
+/* --- Section titles --- */
+
+.sectionTitle {
+  font-weight: 600;
+  font-size: 0.68em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--st-text-color);
+  opacity: 0.5;
+  margin-top: 6px;
+  margin-bottom: 1px;
+}
+
+.sectionTitle:first-child {
+  margin-top: 0;
+}
+
+.sectionHint {
+  font-size: 0.65em;
+  color: color-mix(in srgb, var(--st-text-color) 40%, transparent);
+  margin-bottom: 2px;
+}
+
+/* --- Available Fields section --- */
+
+.fieldSearchWrapper {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 4px;
+  background: var(--st-background-color);
+}
+
+.fieldSearchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 20%, transparent);
+  border-radius: var(--st-base-radius);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.8em;
+}
+
+.fieldSearchInput:focus {
+  outline: none;
+  border-color: var(--st-primary-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--st-primary-color) 30%, transparent);
+}
+
+.availableFieldsChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 12%, transparent);
+  border-radius: var(--st-base-radius);
+  box-sizing: border-box;
+  max-height: 70px;
+  overflow-y: auto;
+}
+
+.availableChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 9px 3px 9px;
+  height: 24px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: var(--st-secondary-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.75em;
+  cursor: grab;
+  transition: background 0.12s, box-shadow 0.12s;
+  white-space: nowrap;
+  position: relative;
+  user-select: none;
+}
+
+.availableChipAssigned {
+  background: color-mix(
+    in srgb,
+    var(--st-primary-color) 10%,
+    var(--st-secondary-background-color)
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--st-primary-color) 22%, transparent);
+}
+
+.availableChip:hover {
+  background: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-text-color) 10%);
+}
+
+.availableChipDragging {
+  opacity: 0.3;
+}
+
+.noFields {
+  font-size: 0.75em;
+  color: color-mix(in srgb, var(--st-text-color) 50%, transparent);
+  padding: 4px 0;
+}
+
+/* --- Add-to-zone menu (floating) --- */
+
+.addMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 140px;
+  padding: 4px 0;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+}
+
+.addMenuItem {
+  display: block;
+  width: 100%;
+  padding: 5px 12px;
+  border: none;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.75em;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.addMenuItem:hover {
+  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
+}
+
+.addMenuItem:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+/* --- Zone drop areas --- */
+
+.zoneArea {
+  min-height: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 2px dashed color-mix(in srgb, var(--st-text-color) 22%, transparent);
+  border-radius: var(--st-base-radius);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.zoneAreaActive {
+  border-color: var(--st-primary-color);
+  background: color-mix(in srgb, var(--st-primary-color) 5%, transparent);
+}
+
+.zoneEmpty {
+  width: 100%;
+  font-size: 0.72em;
+  color: color-mix(in srgb, var(--st-text-color) 40%, transparent);
+  text-align: center;
+  padding: 2px 0;
+}
+
+.dragHandle {
+  cursor: grab;
+  opacity: 0.35;
+  flex-shrink: 0;
+  margin-right: 1px;
+  transition: opacity 0.15s;
+  color: var(--st-text-color);
+  touch-action: none;
+}
+
+.dragHandle:hover {
+  opacity: 0.8;
+}
+
+/* Zone chip with context menu */
+.zoneChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px 3px 9px;
+  height: 24px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: var(--st-secondary-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.75em;
+  white-space: nowrap;
+  position: relative;
+  user-select: none;
+  cursor: grab;
+}
+
+.zoneChip:active {
+  cursor: grabbing;
+}
+
+.zoneChipFrozen {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.zoneChipFrozen::after {
+  content: "🔒";
+  font-size: 0.7em;
+  margin-left: 2px;
+}
+
+.zoneChipDragging {
+  opacity: 0.3;
+}
+
+.dragOverlayChip {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: scale(1.03);
+  cursor: grabbing;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.chipAggLabel {
+  font-size: 0.9em;
+  opacity: 0.6;
+}
+
+.chipRemoveBtn {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--st-text-color);
+  opacity: 0.5;
+  padding: 0 2px;
+  font-size: 1.08em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 50%;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.chipRemoveBtn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+.chipMenuBtn {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--st-text-color);
+  opacity: 0.45;
+  padding: 0 2px;
+  font-size: 1.08em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 50%;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.chipMenuBtn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+/* --- Display section --- */
+
+.displayGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75em;
+  color: var(--st-text-color);
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 2px 0;
+}
+
+.checkboxLabel input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--st-primary-color);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+
+.checkboxLabel input[type="checkbox"]:indeterminate {
+  accent-color: color-mix(in srgb, var(--st-text-color) 50%, transparent);
+}
+
+.checkboxLabel:has(input:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.checkboxLabel input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+/* --- Status display (locked mode) --- */
+
+.statusList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.statusRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.85em;
+}
+
+.statusLabel {
+  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+}
+
+.statusValue {
+  color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
+  font-weight: 500;
+  text-align: right;
+}
+
+/* --- Synthetic measures section --- */
+
+.syntheticChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--st-primary-color) 30%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--st-primary-color) 5%, transparent);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.75em;
+  white-space: nowrap;
+}
+
+.syntheticIcon {
+  font-weight: 700;
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.addMeasureBtn {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: var(--st-button-radius, var(--st-base-radius, 4px));
+  background: var(--st-primary-color);
+  color: white;
+  font-family: var(--st-font);
+  font-size: 0.72em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.addMeasureBtn:hover {
+  opacity: 0.85;
+}
+
+/* Synthetic builder (reuses most styles from Toolbar) */
+.syntheticBuilder {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  padding: 8px;
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  background: color-mix(in srgb, var(--st-secondary-background-color) 30%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.builderField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.builderFieldLabel {
+  font-weight: 600;
+  font-size: 0.68em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--st-text-color);
+  opacity: 0.55;
+}
+
+.builderInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 20%, transparent);
+  border-radius: var(--st-base-radius);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.8em;
+}
+
+.builderInput:focus {
+  outline: none;
+  border-color: var(--st-primary-color);
+}
+
+.builderInput:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
+}
+
+.builderSelect {
+  position: relative;
+  width: 100%;
+}
+
+.builderSelectTrigger {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 20%, transparent);
+  border-radius: var(--st-base-radius);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.8em;
+  line-height: normal;
+  text-align: left;
+  cursor: pointer;
+}
+
+.builderSelectTrigger:focus {
+  outline: none;
+  border-color: var(--st-primary-color);
+}
+
+.builderSelectTrigger:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
+}
+
+.builderSelectLabel {
+  min-width: 0;
+}
+
+.builderSelectIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--st-text-color) 55%, transparent);
+}
+
+.builderSelectPanel {
+  z-index: 9999;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+}
+
+.builderSelectOption {
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.8em;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+
+.builderSelectOption:hover {
+  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
+}
+
+.builderSelectOption:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
+}
+
+.builderSelectOptionActive {
+  color: var(--st-primary-color);
+  font-weight: 500;
+  background: var(--st-secondary-background-color);
+}
+
+.formulaHint {
+  font-size: 0.72em;
+  color: color-mix(in srgb, var(--st-text-color) 55%, transparent);
+  font-style: italic;
+  margin-top: 1px;
+}
+
+.formatPresets {
+  display: flex;
+  gap: 4px;
+}
+
+.formatPresetBtn {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
+  border-radius: var(--st-base-radius);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.72em;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.formatPresetBtn:hover {
+  border-color: var(--st-primary-color);
+}
+
+.formatPresetBtnActive {
+  border-color: var(--st-primary-color);
+  background: color-mix(in srgb, var(--st-primary-color) 10%, transparent);
+  font-weight: 600;
+}
+
+.formatPreview {
+  font-size: 0.72em;
+  color: color-mix(in srgb, var(--st-text-color) 60%, transparent);
+}
+
+.builderError {
+  font-size: 0.72em;
+  color: #d32f2f;
+}
+
+.builderActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.builderBtn {
+  padding: 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
+  border-radius: var(--st-base-radius);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.75em;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.builderBtn:hover {
+  background: color-mix(in srgb, var(--st-text-color) 5%, transparent);
+}
+
+.builderBtnPrimary {
+  background: var(--st-primary-color);
+  color: white;
+  border-color: var(--st-primary-color);
+}
+
+.builderBtnPrimary:hover {
+  opacity: 0.9;
+  background: var(--st-primary-color);
+}
+
+/* Aggregation picker (inline in zone chips) */
+.aggPicker {
+  position: relative;
+  display: inline-flex;
+}
+
+.aggTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.85em;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.aggTrigger:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
+}
+
+.aggTriggerIcon {
+  width: auto !important;
+}
+
+.aggPanel {
+  z-index: 9999;
+  min-width: 140px;
+  padding: 4px 0;
+  background: var(--st-background-color);
+  border: 1px solid var(--st-border-color);
+  border-radius: var(--st-base-radius);
+  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
+  font-family: var(--st-font);
+  font-size: 0.75rem;
+}
+
+.aggOption {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 7px;
+  border: none;
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 1em;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.aggOption:hover {
+  background: color-mix(in srgb, var(--st-primary-color) 10%, transparent);
+}
+
+.aggOptionActive {
+  font-weight: 600;
+  color: var(--st-primary-color);
+}
+
+.aggIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 0.85em;
+  font-weight: 700;
+  opacity: 0.6;
+}
+
+.aggGroupLabel {
+  font-weight: 600;
+  font-size: 0.65em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--st-text-color);
+  opacity: 0.4;
+  padding: 4px 10px 2px;
+}
+
+.aggGroupDivider {
+  height: 1px;
+  margin: 3px 6px;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+/* --- Apply / Cancel footer --- */
+
+.footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.cancelBtn {
+  padding: 5px 14px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
+  border-radius: var(--st-base-radius);
+  background: none;
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.78em;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.cancelBtn:hover {
+  background: color-mix(in srgb, var(--st-text-color) 5%, transparent);
+}
+
+.applyBtn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: var(--st-button-radius, var(--st-base-radius, 4px));
+  background: var(--st-primary-color);
+  color: white;
+  font-family: var(--st-font);
+  font-size: 0.78em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.applyBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.applyBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.applyBtn:focus-visible,
+.cancelBtn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}

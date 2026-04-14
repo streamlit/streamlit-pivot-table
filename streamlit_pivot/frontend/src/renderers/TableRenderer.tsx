@@ -2787,7 +2787,31 @@ const TableRenderer: FC<TableRendererProps> = ({
       e.preventDefault();
       e.stopPropagation();
       const el = (e.target as HTMLElement).closest("th");
-      const startWidth = el ? el.offsetWidth : MIN_COL_WIDTH;
+      let startWidth = el ? el.offsetWidth : MIN_COL_WIDTH;
+      // When resizing from a value-row cell (single sub-column), the stored
+      // width applies to the full column group.  Use the group width so that
+      // dragging feels 1:1 instead of requiring extra movement to overcome
+      // the width gap between one sub-column and the full group.
+      if (el && el.colSpan <= 1 && slotIndex >= 0) {
+        const existingWidth = columnWidthMap.get(slotIndex);
+        if (existingWidth != null) {
+          startWidth = existingWidth;
+        } else {
+          const tr = el.parentElement;
+          if (tr) {
+            const siblings = tr.querySelectorAll<HTMLTableCellElement>(
+              `th:has([data-testid^="resize-handle-val-${slotIndex}-"])`,
+            );
+            if (siblings.length > 1) {
+              let total = 0;
+              siblings.forEach((th) => {
+                total += th.offsetWidth;
+              });
+              startWidth = total;
+            }
+          }
+        }
+      }
       resizeDragRef.current = { slotIndex, startX: e.clientX, startWidth };
       setIsResizing(true);
 
@@ -2817,7 +2841,7 @@ const TableRenderer: FC<TableRendererProps> = ({
       window.addEventListener("mouseup", cleanup);
       window.addEventListener("mouseleave", cleanup);
     },
-    [],
+    [columnWidthMap],
   );
 
   const allRowKeys = pivotData.getRowKeys();

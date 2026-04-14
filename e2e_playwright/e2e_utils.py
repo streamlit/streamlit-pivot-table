@@ -173,18 +173,32 @@ def get_pivot(page: Page, key: str) -> Locator:
     return container
 
 
-def open_settings_popover(page: Page, container: Locator) -> Locator:
-    """Open the gear settings popover in the toolbar."""
-    panel = page.get_by_test_id("toolbar-settings-panel")
+def open_settings_panel(page: Page, container: Locator) -> Locator:
+    """Open the settings panel in the toolbar.
+
+    Waits for any exit animation to complete before re-opening.
+    """
+    panel = page.get_by_test_id("settings-panel")
+
+    # If the panel is animating out, wait for it to fully disappear first
     if panel.count():
-        expect(panel).to_be_visible(timeout=5000)
-        return panel
+        try:
+            panel.wait_for(state="hidden", timeout=500)
+        except Exception:
+            expect(panel).to_be_visible(timeout=5000)
+            return panel
 
     button = container.get_by_test_id("toolbar-settings")
     button.scroll_into_view_if_needed()
     button.evaluate("el => el.click()")
     expect(panel).to_be_visible(timeout=5000)
+    page.wait_for_timeout(100)
     return panel
+
+
+def open_settings_popover(page: Page, container: Locator) -> Locator:
+    """Deprecated alias for open_settings_panel."""
+    return open_settings_panel(page, container)
 
 
 def _find_free_port() -> int:

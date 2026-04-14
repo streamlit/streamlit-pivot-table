@@ -257,14 +257,23 @@
   gap: 4px;
 }
 
+.valueChipGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   padding: 3px 7px 3px 9px;
+  height: 24px;
+  box-sizing: border-box;
   border-radius: 12px;
   background: var(--st-secondary-background-color);
   color: var(--st-text-color);
+  font-family: var(--st-font);
   font-size: 0.75em;
   white-space: nowrap;
   max-width: 100%;
@@ -289,11 +298,12 @@
   color: var(--st-text-color);
   opacity: 0.5;
   padding: 0 2px;
-  font-size: 1.1em;
+  font-size: 1.08em;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   border-radius: 50%;
+  transition: opacity 0.1s, background 0.1s;
 }
 
 .chipRemove:hover {
@@ -395,16 +405,16 @@
 }
 
 .emptyDropZone {
-  min-height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px dashed color-mix(in srgb, var(--st-text-color) 20%, transparent);
-  border-radius: 8px;
+  border-radius: 12px;
   color: var(--st-text-color);
   opacity: 0.45;
-  font-size: 0.8em;
+  font-size: 0.72em;
   font-style: italic;
+  padding: 3px 10px;
 }
 
 .aggregationControlRow {
@@ -497,7 +507,7 @@
   box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
 }
 
-/* --- Checkbox styles (used inside settings popover) --- */
+/* --- Checkbox styles (used inside settings panel) --- */
 
 .checkboxLabel {
   display: inline-flex;
@@ -752,250 +762,10 @@
   border-radius: var(--st-base-radius);
 }
 
-.syntheticBuilderMenuRow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 4px 4px;
-}
-
-.syntheticAddButton {
-  opacity: 1;
-  border: none;
-  border-radius: var(--st-button-radius, var(--st-base-radius, 4px));
-  background: var(--st-primary-color);
-  color: var(--st-background-color);
-  font-size: 0.72em;
-  font-weight: 600;
-  padding: 4px 10px;
-  transition: opacity 0.15s;
-}
-
-.syntheticAddButton:hover {
-  opacity: 0.85;
-  background: var(--st-primary-color);
-}
-
-.syntheticAddButton:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
-}
-
-.syntheticBuilderPopover {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 22;
-  width: auto;
-  max-width: none;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  background: var(--st-background-color);
-  border: 1px solid var(--st-border-color);
-  border-radius: var(--st-base-radius);
-  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
-}
-
-.syntheticBuilderField {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.syntheticBuilderFieldLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.82em;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
-}
-
-.syntheticBuilderInput,
-.syntheticBuilderSelect {
-  box-sizing: border-box;
-  width: 100%;
-  height: 34px;
-  padding: 5px 8px;
-  border: 1px solid var(--st-border-color);
-  border-radius: calc(var(--st-base-radius) - 2px);
-  background: var(--st-background-color);
-  color: var(--st-text-color);
-  font-family: var(--st-font);
-  font-size: 0.92em;
-  line-height: 1.2;
-}
-
-.syntheticBuilderInput:focus,
-.syntheticBuilderSelect:focus {
-  border-color: var(--st-primary-color);
-  outline: none;
-}
-
-.syntheticBuilderInput:focus-visible,
-.syntheticBuilderSelect:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
-}
-
-.syntheticFormulaHint {
-  display: inline-block;
-  font-size: 0.76em;
-  color: color-mix(in srgb, var(--st-text-color) 84%, transparent);
-  margin-top: 4px;
-  padding: 5px 8px;
-  border-radius: calc(var(--st-base-radius) - 2px);
-  background: color-mix(in srgb, var(--st-secondary-background-color) 75%, transparent);
-}
-
-.syntheticFormatPresets {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 2px;
-}
-
-.syntheticFormatPresetBtn {
-  padding: 3px 8px;
-  border: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
-  border-radius: 999px;
-  background: var(--st-secondary-background-color);
-  color: var(--st-text-color);
-  font-size: 0.76em;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.syntheticFormatPresetBtn:hover {
-  background: color-mix(in srgb, var(--st-text-color) 8%, var(--st-secondary-background-color));
-}
-
-.syntheticFormatPresetBtnActive {
-  border-color: color-mix(in srgb, var(--st-primary-color) 60%, transparent);
-  background: color-mix(in srgb, var(--st-primary-color) 14%, var(--st-secondary-background-color));
-}
-
-.syntheticFormatPreview {
-  font-size: 0.77em;
-  color: color-mix(in srgb, var(--st-text-color) 80%, transparent);
-  padding: 2px 0 0;
-}
-
-.syntheticBuilderActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.syntheticBuilderButton {
-  padding: 5px 10px;
-  border: 1px solid color-mix(in srgb, var(--st-text-color) 18%, transparent);
-  border-radius: calc(var(--st-base-radius) - 2px);
-  background: none;
-  color: var(--st-text-color);
-  font-family: var(--st-font);
-  font-size: 0.8em;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.syntheticBuilderButton:hover {
-  background: color-mix(in srgb, var(--st-text-color) 6%, transparent);
-}
-
-.syntheticBuilderButton:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
-  outline: none;
-}
-
-.syntheticBuilderButtonPrimary {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--st-primary-color) 88%, #000 12%);
-  color: white;
-}
-
-.syntheticBuilderButtonPrimary:hover {
-  background: color-mix(in srgb, var(--st-primary-color) 80%, #000 20%);
-}
-
-.fieldHint {
-  font-size: 0.75em;
-  color: var(--st-text-color);
-  opacity: 0.6;
-  padding: 2px 0;
-  line-height: 1.3;
-}
-
-/* --- Settings (gear) popover --- */
+/* --- Settings panel --- */
 
 .settingsWrapper {
   position: relative;
-}
-
-.settingsPopover {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 20;
-  width: max-content;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  background: var(--st-background-color);
-  border: 1px solid var(--st-border-color);
-  border-radius: var(--st-base-radius);
-  box-shadow: var(--pivot-dropdown-shadow, 0 6px 18px rgba(0, 0, 0, 0.08));
-}
-
-.settingsPopover:focus {
-  outline: none;
-}
-
-.settingsSectionTitle {
-  font-weight: 600;
-  font-size: 0.68em;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--st-text-color);
-  opacity: 0.5;
-  margin-top: 4px;
-}
-
-.settingsSectionTitle:first-child {
-  margin-top: 0;
-}
-
-.settingsDivider {
-  height: 1px;
-  margin: 4px 0;
-  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
-}
-
-.settingsStatusList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.settingsStatusRow {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 0.85em;
-}
-
-.settingsStatusLabel {
-  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
-}
-
-.settingsStatusValue {
-  color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
-  font-weight: 500;
-  text-align: right;
 }
 
 /* Export data popover */
@@ -1065,7 +835,7 @@
   border: none;
   border-radius: var(--st-button-radius, var(--st-base-radius, 4px));
   background: var(--st-primary-color);
-  color: var(--st-background-color);
+  color: white;
   font-family: var(--st-font);
   font-size: 0.72em;
   font-weight: 600;

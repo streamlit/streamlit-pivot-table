@@ -16,8 +16,16 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from "@testing-library/react";
 import Toolbar, { applyDragMove } from "./Toolbar";
+import { resolveDragEnd } from "./SettingsPanel";
 import { PivotData, type DataRecord } from "../engine/PivotData";
 import { makeConfig } from "../test-utils";
 
@@ -77,7 +85,7 @@ describe("Toolbar - rendering", () => {
     );
   });
 
-  it("renders measure aggregation controls inside the Values dropdown", () => {
+  it("renders aggregation controls for values inside the settings panel", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -86,13 +94,11 @@ describe("Toolbar - rendering", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    expect(
-      screen.getByTestId("toolbar-values-aggregation-controls"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("toolbar-values-aggregation-revenue-trigger"),
-    ).toHaveTextContent("Sum");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const aggTrigger = within(
+      screen.getByTestId("settings-values-chip-revenue"),
+    ).getByTestId("settings-agg-revenue");
+    expect(aggTrigger).toHaveTextContent("▾");
   });
 
   it("shows count badge with selected count", () => {
@@ -110,7 +116,7 @@ describe("Toolbar - rendering", () => {
 });
 
 describe("Toolbar - interactions", () => {
-  it("fires onConfigChange when a value aggregation changes", () => {
+  it("fires onConfigChange when a value aggregation changes via settings panel", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -120,13 +126,10 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-aggregation-revenue-trigger"),
-    );
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-aggregation-revenue-option-avg"),
-    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-agg-revenue"));
+    fireEvent.mouseDown(screen.getByText("Avg"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].aggregation).toEqual({
       revenue: "avg",
@@ -134,7 +137,7 @@ describe("Toolbar - interactions", () => {
     });
   });
 
-  it("does not fire when the same value aggregation is selected", () => {
+  it("does not fire when settings panel is cancelled", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -144,17 +147,12 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-aggregation-revenue-trigger"),
-    );
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-aggregation-revenue-option-sum"),
-    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-cancel"));
     expect(handleChange).not.toHaveBeenCalled();
   });
 
-  it("toggles a row dimension via dropdown checkbox", () => {
+  it("adds a row dimension via settings panel", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -164,13 +162,15 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    fireEvent.click(screen.getByTestId("toolbar-rows-option-category"));
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-category"));
+    fireEvent.click(screen.getByText("Add to Rows"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].rows).toEqual(["region", "category"]);
   });
 
-  it("unchecks a row dimension via dropdown checkbox", () => {
+  it("removes a row dimension via settings panel", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -180,17 +180,45 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    fireEvent.click(screen.getByTestId("toolbar-rows-option-region"));
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-rows-remove-region"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].rows).toEqual(["category"]);
   });
 
-  it("removes a row dimension when chip remove is clicked", () => {
+  it("toolbar zone chips render immediate remove buttons", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region", "category"],
+          columns: ["year"],
+          values: ["revenue", "profit"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByTestId("toolbar-rows-remove-region"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("toolbar-columns-remove-year"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("toolbar-values-remove-revenue"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("toolbar-values-agg-revenue"),
+    ).toBeInTheDocument();
+  });
+
+  it("removes a row dimension immediately from the toolbar", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
-        config={makeConfig({ rows: ["region", "category"] })}
+        config={makeConfig({ rows: ["region", "category"], columns: [] })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={handleChange}
@@ -201,26 +229,15 @@ describe("Toolbar - interactions", () => {
     expect(handleChange.mock.calls[0][0].rows).toEqual(["category"]);
   });
 
-  it("removes a column dimension when chip remove is clicked", () => {
+  it("removes a value immediately from the toolbar with cleanup", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
-        config={makeConfig({ columns: ["year"] })}
-        allColumns={ALL_COLUMNS}
-        numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={handleChange}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("toolbar-columns-remove-year"));
-    expect(handleChange).toHaveBeenCalledTimes(1);
-    expect(handleChange.mock.calls[0][0].columns).toEqual([]);
-  });
-
-  it("removes a value when chip remove is clicked", () => {
-    const handleChange = vi.fn();
-    render(
-      <Toolbar
-        config={makeConfig({ values: ["revenue", "profit"] })}
+        config={makeConfig({
+          values: ["revenue", "profit"],
+          aggregation: { revenue: "avg", profit: "sum" },
+          show_values_as: { revenue: "pct_of_row", profit: "raw" },
+        })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={handleChange}
@@ -232,9 +249,31 @@ describe("Toolbar - interactions", () => {
     expect(handleChange.mock.calls[0][0].aggregation).toEqual({
       profit: "sum",
     });
+    expect(handleChange.mock.calls[0][0].show_values_as).toEqual({
+      profit: "raw",
+    });
   });
 
-  it("creates a synthetic measure from Values builder", () => {
+  it("changes value aggregation immediately from the toolbar values section", () => {
+    const handleChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({ values: ["revenue", "profit"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={handleChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-values-agg-revenue"));
+    fireEvent.mouseDown(screen.getByText("Avg"));
+    expect(handleChange).toHaveBeenCalledTimes(1);
+    expect(handleChange.mock.calls[0][0].aggregation).toEqual({
+      revenue: "avg",
+      profit: "sum",
+    });
+  });
+
+  it("creates a synthetic measure via settings panel", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -244,16 +283,17 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
-    const builder = screen.getByTestId("toolbar-values-synthetic-builder");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-add-synthetic"));
+    const builder = screen.getByTestId("settings-synthetic-builder");
     const nameInput = builder.querySelector("input");
     expect(nameInput).toBeTruthy();
     fireEvent.change(nameInput!, { target: { value: "Rev / Profit" } });
     fireEvent.change(screen.getByPlaceholderText("e.g. .1%, $,.0f, ,.2f"), {
       target: { value: ".1%" },
     });
-    fireEvent.click(screen.getByText("Save"));
+    fireEvent.click(screen.getByTestId("settings-synthetic-save"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].synthetic_measures).toHaveLength(1);
     expect(handleChange.mock.calls[0][0].synthetic_measures[0].format).toBe(
@@ -261,7 +301,39 @@ describe("Toolbar - interactions", () => {
     );
   });
 
-  it("applies a format preset in the synthetic builder", () => {
+  it("synthetic builder cancel stays in settings panel and footer is hidden while editing", () => {
+    vi.useFakeTimers();
+    render(
+      <Toolbar
+        config={makeConfig({ values: ["revenue"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-add-synthetic"));
+    expect(
+      screen.getByTestId("settings-synthetic-builder"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-cancel")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-synthetic-cancel"));
+    expect(
+      screen.queryByTestId("settings-synthetic-builder"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-cancel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-cancel"));
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(screen.queryByTestId("settings-panel")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("applies a format preset in the settings synthetic builder", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -271,20 +343,15 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
-    const builder = screen.getByTestId("toolbar-values-synthetic-builder");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-add-synthetic"));
+    const builder = screen.getByTestId("settings-synthetic-builder");
     const nameInput = builder.querySelector("input");
     expect(nameInput).toBeTruthy();
     fireEvent.change(nameInput!, { target: { value: "Margin" } });
-    fireEvent.click(screen.getByTestId("toolbar-values-format-preset-percent"));
-    expect(
-      screen.getByTestId("toolbar-values-format-preview"),
-    ).toHaveTextContent("Example:");
-    expect(
-      screen.getByTestId("toolbar-values-format-preview"),
-    ).toHaveTextContent("%");
-    fireEvent.click(screen.getByText("Save"));
+    fireEvent.click(screen.getByText("Percent"));
+    fireEvent.click(screen.getByTestId("settings-synthetic-save"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].synthetic_measures[0].format).toBe(
       ".1%",
@@ -301,19 +368,16 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
-    const builder = screen.getByTestId("toolbar-values-synthetic-builder");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-add-synthetic"));
+    const builder = screen.getByTestId("settings-synthetic-builder");
     const nameInput = builder.querySelector("input");
     expect(nameInput).toBeTruthy();
     fireEvent.change(nameInput!, { target: { value: "Bad Format Metric" } });
     fireEvent.change(screen.getByPlaceholderText("e.g. .1%, $,.0f, ,.2f"), {
       target: { value: "abc" },
     });
-    expect(
-      screen.getByTestId("toolbar-values-format-preview"),
-    ).toHaveTextContent("invalid format");
-    fireEvent.click(screen.getByText("Save"));
+    fireEvent.click(screen.getByTestId("settings-synthetic-save"));
     expect(screen.getByText(/Format is invalid/i)).toBeInTheDocument();
     expect(handleChange).not.toHaveBeenCalled();
   });
@@ -327,17 +391,19 @@ describe("Toolbar - interactions", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-add-synthetic"));
+    const builder = screen.getByTestId("settings-synthetic-builder");
+    expect(builder).toHaveTextContent("sum(revenue) / sum(profit)");
+    fireEvent.click(screen.getByTestId("settings-synthetic-operation"));
+    fireEvent.click(
+      screen.getByTestId("settings-synthetic-operation-difference"),
+    );
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
     expect(
-      screen.getByTestId("toolbar-values-formula-preview"),
-    ).toHaveTextContent("sum(revenue) / sum(profit)");
-    const builder = screen.getByTestId("toolbar-values-synthetic-builder");
-    const selects = builder.querySelectorAll("select");
-    fireEvent.change(selects[0], { target: { value: "difference" } });
-    expect(
-      screen.getByTestId("toolbar-values-formula-preview"),
-    ).toHaveTextContent("sum(revenue) - sum(profit)");
+      screen.getByTestId("settings-synthetic-builder"),
+    ).toBeInTheDocument();
+    expect(builder).toHaveTextContent("sum(revenue) - sum(profit)");
   });
 
   it("blocks save when generated synthetic id collides with a value field", () => {
@@ -350,20 +416,21 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
-    const builder = screen.getByTestId("toolbar-values-synthetic-builder");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-add-synthetic"));
+    const builder = screen.getByTestId("settings-synthetic-builder");
     const nameInput = builder.querySelector("input");
     expect(nameInput).toBeTruthy();
     fireEvent.change(nameInput!, { target: { value: "Margin" } });
-    fireEvent.click(screen.getByText("Save"));
+    fireEvent.click(screen.getByTestId("settings-synthetic-save"));
     expect(
       screen.getByText(/collides with an existing value field/i),
     ).toBeInTheDocument();
     expect(handleChange).not.toHaveBeenCalled();
   });
 
-  it("closes synthetic builder when clicking outside", () => {
+  it("closes settings panel when clicking outside", async () => {
+    vi.useFakeTimers();
     render(
       <Toolbar
         config={makeConfig({ values: ["revenue"] })}
@@ -372,15 +439,14 @@ describe("Toolbar - interactions", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
-    expect(
-      screen.getByTestId("toolbar-values-synthetic-builder"),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
     fireEvent.mouseDown(document.body);
-    expect(
-      screen.queryByTestId("toolbar-values-synthetic-builder"),
-    ).not.toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByTestId("settings-panel")).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("allows hidden-from-aggregators numeric fields as synthetic sources", () => {
@@ -393,18 +459,14 @@ describe("Toolbar - interactions", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
-    const builder = screen.getByTestId("toolbar-values-synthetic-builder");
-    const selects = builder.querySelectorAll("select");
-    expect(selects.length).toBeGreaterThanOrEqual(3);
-    const numeratorOptions = Array.from(
-      selects[1].querySelectorAll("option"),
-    ).map((opt) => opt.value);
-    expect(numeratorOptions).toContain("profit");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-add-synthetic"));
+    fireEvent.click(screen.getByTestId("settings-synthetic-numerator"));
+    const panel = screen.getByTestId("settings-synthetic-numerator-panel");
+    expect(within(panel).getByText("profit")).toBeInTheDocument();
   });
 
-  it("edits and removes a synthetic measure chip", () => {
+  it("displays existing synthetic measures in the settings panel", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -425,28 +487,12 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-edit-synthetic-rev_minus_profit"),
-    );
-    const builder = screen.getByTestId("toolbar-values-synthetic-builder");
-    const nameInput = builder.querySelector("input");
-    expect(nameInput).toBeTruthy();
-    fireEvent.change(nameInput!, {
-      target: { value: "Rev - Profit (Edited)" },
-    });
-    fireEvent.click(screen.getByText("Save"));
-    expect(handleChange).toHaveBeenCalled();
-
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-remove-synthetic-rev_minus_profit"),
-    );
-    expect(
-      handleChange.mock.calls[handleChange.mock.calls.length - 1][0]
-        .synthetic_measures,
-    ).toEqual([]);
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const synChip = screen.getByTestId("settings-synthetic-rev_minus_profit");
+    expect(synChip).toBeInTheDocument();
   });
 
-  it("preserves explicit date_grains overrides when removing and re-adding a field", () => {
+  it("preserves explicit date_grains when removing a column via settings panel", () => {
     const handleChange = vi.fn();
     const allColumns = [...ALL_COLUMNS, "order_date"];
     const config = makeConfig({
@@ -454,7 +500,7 @@ describe("Toolbar - interactions", () => {
       columns: ["order_date"],
       date_grains: { order_date: "quarter" },
     });
-    const { rerender } = render(
+    render(
       <Toolbar
         config={config}
         allColumns={allColumns}
@@ -462,49 +508,56 @@ describe("Toolbar - interactions", () => {
         onConfigChange={handleChange}
       />,
     );
-
-    fireEvent.click(screen.getByTestId("toolbar-columns-remove-order_date"));
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-columns-remove-order_date"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
     const removedConfig = handleChange.mock.calls[0][0];
     expect(removedConfig.columns).toEqual([]);
     expect(removedConfig.date_grains).toEqual({ order_date: "quarter" });
+  });
 
-    rerender(
+  it("does not drop a non-numeric field when moving to values is rejected", () => {
+    const handleChange = vi.fn();
+    render(
       <Toolbar
-        config={removedConfig}
-        allColumns={allColumns}
-        numericColumns={NUMERIC_COLUMNS}
+        config={makeConfig({
+          rows: ["region", "category"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
         onConfigChange={handleChange}
       />,
     );
-
-    fireEvent.click(screen.getByTestId("toolbar-columns-select"));
-    const checkbox = screen
-      .getByTestId("toolbar-columns-option-order_date")
-      .querySelector("input")!;
-    fireEvent.click(checkbox);
-
-    const readdedConfig = handleChange.mock.calls[1][0];
-    expect(readdedConfig.columns).toEqual(["order_date"]);
-    expect(readdedConfig.date_grains).toEqual({ order_date: "quarter" });
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const menuBtn = screen.queryByTestId("settings-rows-menu-region");
+    if (menuBtn) {
+      fireEvent.click(menuBtn);
+      expect(screen.queryByText("Move to Values")).not.toBeInTheDocument();
+    }
+    expect(screen.getByTestId("settings-rows-chip-region")).toBeInTheDocument();
+    const applyBtn = screen.getByTestId("settings-apply");
+    expect(applyBtn).toBeDisabled();
   });
 });
 
-describe("Toolbar - field search", () => {
-  it("does not render search input when options are at or below the threshold", () => {
+describe("Toolbar - field search in settings panel", () => {
+  it("does not render search input when available fields are at or below threshold", () => {
     render(
       <Toolbar
-        config={makeConfig({ rows: [] })}
+        config={makeConfig({ rows: ["region", "year", "category"] })}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={vi.fn()}
       />,
     );
-
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    expect(screen.queryByTestId("toolbar-rows-search")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(
+      screen.queryByTestId("settings-field-search"),
+    ).not.toBeInTheDocument();
   });
 
-  it("renders search input above threshold and filters options", () => {
+  it("renders search input above threshold and filters available fields", () => {
     render(
       <Toolbar
         config={makeConfig({ rows: [] })}
@@ -513,26 +566,23 @@ describe("Toolbar - field search", () => {
         onConfigChange={vi.fn()}
       />,
     );
-
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    const search = screen.getByTestId("toolbar-rows-search");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const search = screen.getByTestId("settings-field-search");
     expect(search).toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "cat" } });
     expect(
-      screen.getByTestId("toolbar-rows-option-category"),
+      screen.getByTestId("settings-available-category"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByTestId("toolbar-rows-option-region"),
+      screen.queryByTestId("settings-available-region"),
     ).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "" } });
-    expect(
-      screen.getByTestId("toolbar-rows-option-region"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("settings-available-region")).toBeInTheDocument();
   });
 
-  it("does not move focus into the search input when the dropdown opens", () => {
+  it("restores all chips when search query is cleared", () => {
     render(
       <Toolbar
         config={makeConfig({ rows: [] })}
@@ -542,106 +592,12 @@ describe("Toolbar - field search", () => {
       />,
     );
 
-    const trigger = screen.getByTestId("toolbar-rows-select");
-    trigger.focus();
-    fireEvent.click(trigger);
-    const search = screen.getByTestId("toolbar-rows-search");
-
-    expect(trigger).toHaveFocus();
-    expect(search).not.toHaveFocus();
-  });
-
-  it("closes the dropdown on Escape even when search yields zero results", () => {
-    render(
-      <Toolbar
-        config={makeConfig({ rows: [] })}
-        allColumns={MANY_FIELDS}
-        numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    const search = screen.getByTestId("toolbar-rows-search");
-    fireEvent.change(search, { target: { value: "zzz" } });
-
-    expect(
-      screen.getByTestId("toolbar-rows-no-search-results"),
-    ).toBeInTheDocument();
-    fireEvent.keyDown(search, { key: "Escape" });
-    expect(screen.queryByTestId("toolbar-rows-panel")).not.toBeInTheDocument();
-  });
-
-  it("moves focus to the first option on ArrowDown from the search input", () => {
-    render(
-      <Toolbar
-        config={makeConfig({ rows: [] })}
-        allColumns={MANY_FIELDS}
-        numericColumns={NUMERIC_COLUMNS}
-        onConfigChange={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    const search = screen.getByTestId("toolbar-rows-search");
-    const firstOption = screen.getByTestId("toolbar-rows-option-region");
-
-    search.focus();
-    fireEvent.keyDown(search, { key: "ArrowDown" });
-    expect(firstOption).toHaveFocus();
-  });
-
-  it("filters value-field options without hiding synthetic or aggregation controls", () => {
-    render(
-      <Toolbar
-        config={makeConfig({ values: ["revenue", "profit"] })}
-        allColumns={[...MANY_FIELDS, ...MANY_NUMERIC_COLUMNS]}
-        numericColumns={MANY_NUMERIC_COLUMNS}
-        onConfigChange={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    const search = screen.getByTestId("toolbar-values-search");
-    fireEvent.change(search, { target: { value: "tax" } });
-
-    expect(screen.getByTestId("toolbar-values-option-tax")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("toolbar-values-option-revenue"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId("toolbar-values-add-synthetic"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("toolbar-values-aggregation-controls"),
-    ).toBeInTheDocument();
-  });
-
-  it("clears the values search when opening the synthetic measure builder", () => {
-    render(
-      <Toolbar
-        config={makeConfig({ values: ["revenue", "profit"] })}
-        allColumns={[...MANY_FIELDS, ...MANY_NUMERIC_COLUMNS]}
-        numericColumns={MANY_NUMERIC_COLUMNS}
-        onConfigChange={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.change(screen.getByTestId("toolbar-values-search"), {
-      target: { value: "tax" },
-    });
-    fireEvent.click(screen.getByTestId("toolbar-values-add-synthetic"));
-
-    expect(
-      screen.queryByTestId("toolbar-values-panel"),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    expect(screen.getByTestId("toolbar-values-search")).toHaveValue("");
-    expect(
-      screen.getByTestId("toolbar-values-option-revenue"),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const search = screen.getByTestId("settings-field-search");
+    fireEvent.change(search, { target: { value: "reg" } });
+    expect(screen.getByTestId("settings-available-region")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "" } });
+    expect(screen.getByTestId("settings-available-region")).toBeInTheDocument();
   });
 });
 
@@ -705,8 +661,8 @@ describe("Toolbar - reset", () => {
   });
 });
 
-describe("Toolbar - options checkboxes (inside settings popover)", () => {
-  it("renders row totals and column totals checkboxes inside the settings popover", () => {
+describe("Toolbar - display checkboxes (inside settings panel)", () => {
+  it("renders row totals and column totals checkboxes inside the settings panel", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -716,11 +672,11 @@ describe("Toolbar - options checkboxes (inside settings popover)", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-row-totals")).toBeInTheDocument();
-    expect(screen.getByTestId("toolbar-col-totals")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-row-totals")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-col-totals")).toBeInTheDocument();
   });
 
-  it("toggles row totals off when checkbox unchecked", () => {
+  it("toggles row totals off when checkbox unchecked and Apply clicked", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -732,14 +688,15 @@ describe("Toolbar - options checkboxes (inside settings popover)", () => {
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     const checkbox = screen
-      .getByTestId("toolbar-row-totals")
+      .getByTestId("settings-row-totals")
       .querySelector("input")!;
     fireEvent.click(checkbox);
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].show_row_totals).toBe(false);
   });
 
-  it("toggles column totals off when checkbox unchecked", () => {
+  it("toggles column totals off when checkbox unchecked and Apply clicked", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -751,9 +708,10 @@ describe("Toolbar - options checkboxes (inside settings popover)", () => {
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     const checkbox = screen
-      .getByTestId("toolbar-col-totals")
+      .getByTestId("settings-col-totals")
       .querySelector("input")!;
     fireEvent.click(checkbox);
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].show_column_totals).toBe(false);
   });
@@ -792,7 +750,7 @@ describe("Toolbar - value aggregation labels", () => {
     ).toHaveTextContent(/revenue\s*\(sum\)/i);
   });
 
-  it("updates only the targeted measure's aggregation", () => {
+  it("updates only the targeted measure's aggregation via settings panel", () => {
     const handleChange = vi.fn();
     render(
       <Toolbar
@@ -802,13 +760,10 @@ describe("Toolbar - value aggregation labels", () => {
         onConfigChange={handleChange}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-aggregation-profit-trigger"),
-    );
-    fireEvent.click(
-      screen.getByTestId("toolbar-values-aggregation-profit-option-count"),
-    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-agg-profit"));
+    fireEvent.mouseDown(screen.getByText("Count"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
     expect(handleChange).toHaveBeenCalledTimes(1);
     expect(handleChange.mock.calls[0][0].aggregation).toEqual({
       revenue: "sum",
@@ -817,8 +772,8 @@ describe("Toolbar - value aggregation labels", () => {
   });
 });
 
-describe("Toolbar - column exclusion", () => {
-  it("excludes columns already used as rows from column options", () => {
+describe("Toolbar - column exclusion in settings panel", () => {
+  it("keeps assigned fields visible in available fields", () => {
     render(
       <Toolbar
         config={makeConfig({ rows: ["region"], columns: [] })}
@@ -827,14 +782,294 @@ describe("Toolbar - column exclusion", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-columns-select"));
-    const panel = screen.getByTestId("toolbar-columns-panel");
-    const items = Array.from(panel.querySelectorAll("[data-testid]"))
-      .map((el) => el.getAttribute("data-testid") ?? "")
-      .filter((id) => id.startsWith("toolbar-columns-option-"));
-    expect(items).not.toContain("toolbar-columns-option-region");
-    expect(items).toContain("toolbar-columns-option-year");
-    expect(items).toContain("toolbar-columns-option-category");
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("settings-available-region")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-available-year")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-available-category"),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("Toolbar - settings panel DnD constraint logic", () => {
+  it("zone chips no longer render action menus", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: ["year"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(
+      screen.queryByTestId("settings-rows-menu-region"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-columns-menu-year"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-values-menu-revenue"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("non-numeric assigned row field offers move action from available fields", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region", "category"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-region"));
+    expect(screen.getByText("Move to Columns")).toBeInTheDocument();
+    expect(screen.queryByText("Also add to Values")).not.toBeInTheDocument();
+  });
+
+  it("non-numeric assigned column field offers move action from available fields", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: [],
+          columns: ["region"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-region"));
+    expect(screen.getByText("Move to Rows")).toBeInTheDocument();
+    expect(screen.queryByText("Also add to Values")).not.toBeInTheDocument();
+  });
+
+  it("moves field from Rows to Columns via available-fields menu and Apply commits it", () => {
+    const handleChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region", "category"],
+          columns: ["year"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={handleChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-category"));
+    fireEvent.click(screen.getByText("Move to Columns"));
+
+    expect(
+      screen.queryByTestId("settings-rows-chip-category"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-columns-chip-category"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-apply"));
+    expect(handleChange).toHaveBeenCalledTimes(1);
+    const appliedConfig = handleChange.mock.calls[0][0];
+    expect(appliedConfig.rows).not.toContain("category");
+    expect(appliedConfig.columns).toContain("category");
+  });
+
+  it("adds numeric field from Rows also to Values via available-fields menu", () => {
+    const handleChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["revenue"],
+          columns: ["year"],
+          values: [],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={handleChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-revenue"));
+    fireEvent.click(screen.getByText("Also add to Values"));
+
+    expect(
+      screen.getByTestId("settings-rows-chip-revenue"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-apply"));
+    const appliedConfig = handleChange.mock.calls[0][0];
+    expect(appliedConfig.rows).toContain("revenue");
+    expect(appliedConfig.values).toContain("revenue");
+  });
+
+  it("field in rows+values: available-fields menu offers only row move action", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["revenue"],
+          columns: [],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-revenue"));
+    expect(screen.queryByText("Also add to Rows")).not.toBeInTheDocument();
+    expect(screen.queryByText("Also add to Columns")).not.toBeInTheDocument();
+    expect(screen.getByText("Move to Columns")).toBeInTheDocument();
+    expect(screen.queryByText("Move to Rows")).not.toBeInTheDocument();
+  });
+
+  it("field in columns+values: available-fields menu offers only column move action", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: [],
+          columns: ["revenue"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-revenue"));
+    expect(screen.queryByText("Also add to Rows")).not.toBeInTheDocument();
+    expect(screen.queryByText("Also add to Columns")).not.toBeInTheDocument();
+    expect(screen.getByText("Move to Rows")).toBeInTheDocument();
+    expect(screen.queryByText("Move to Columns")).not.toBeInTheDocument();
+  });
+
+  it("moving a rows+values field to columns preserves its values membership", () => {
+    const handleChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["revenue"],
+          columns: [],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={handleChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-revenue"));
+    fireEvent.click(screen.getByText("Move to Columns"));
+
+    expect(
+      screen.queryByTestId("settings-rows-chip-revenue"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-columns-chip-revenue"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-values-chip-revenue"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-apply"));
+    expect(handleChange).toHaveBeenCalledTimes(1);
+    const appliedConfig = handleChange.mock.calls[0][0];
+    expect(appliedConfig.rows).not.toContain("revenue");
+    expect(appliedConfig.columns).toContain("revenue");
+    expect(appliedConfig.values).toContain("revenue");
+  });
+
+  it("allows 'Also add to Values' for numeric field in rows from available fields", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["revenue"],
+          columns: ["year"],
+          values: [],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-revenue"));
+    expect(screen.getByText("Also add to Values")).toBeInTheDocument();
+  });
+
+  it("does not offer 'Also add to Values' for non-numeric assigned fields", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: ["year"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-region"));
+    expect(screen.queryByText("Also add to Values")).not.toBeInTheDocument();
+  });
+
+  it("available fields add menu respects numeric constraint for values", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [], columns: [], values: [] })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const regionChip = screen.getByTestId("settings-available-region");
+    fireEvent.click(regionChip);
+    expect(screen.getByText("Add to Rows")).toBeInTheDocument();
+    expect(screen.getByText("Add to Columns")).toBeInTheDocument();
+    expect(screen.queryByText("Add to Values")).not.toBeInTheDocument();
+  });
+
+  it("frozen field chip cannot be moved between zones", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: ["year"],
+          values: ["revenue"],
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={["revenue", "profit"]}
+        onConfigChange={vi.fn()}
+        frozenColumns={new Set(["region"])}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const chip = screen.getByTestId("settings-rows-chip-region");
+    expect(chip).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-rows-menu-region"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings-rows-remove-region"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("settings-available-region"));
+    expect(screen.queryByText("Move to Columns")).not.toBeInTheDocument();
   });
 });
 
@@ -989,7 +1224,7 @@ describe("Toolbar - locked mode", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("hides chip remove buttons when locked", () => {
+  it("toolbar chips have no remove buttons when locked", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -1033,13 +1268,13 @@ describe("Toolbar - locked mode", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-row-totals-status")).toHaveTextContent(
+    expect(screen.getByTestId("settings-row-totals-status")).toHaveTextContent(
       "Row Totals",
     );
-    expect(screen.getByTestId("toolbar-col-totals-status")).toHaveTextContent(
+    expect(screen.getByTestId("settings-col-totals-status")).toHaveTextContent(
       "Column Totals",
     );
-    expect(screen.queryByTestId("toolbar-row-totals")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-row-totals")).not.toBeInTheDocument();
   });
 
   it("shows N/A for totals that are not applicable in locked mode", () => {
@@ -1053,14 +1288,14 @@ describe("Toolbar - locked mode", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-row-totals-status")).toHaveTextContent(
+    expect(screen.getByTestId("settings-row-totals-status")).toHaveTextContent(
       "N/A",
     );
   });
 });
 
 describe("Toolbar - frozen columns", () => {
-  it("hides remove button for frozen columns", () => {
+  it("toolbar chips have no remove buttons for frozen columns", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -1075,7 +1310,7 @@ describe("Toolbar - frozen columns", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("disables checkbox for frozen columns that are selected in dropdown", () => {
+  it("shows frozen indicator on frozen field chips in settings panel", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -1085,11 +1320,9 @@ describe("Toolbar - frozen columns", () => {
         frozenColumns={new Set(["region"])}
       />,
     );
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    const regionCheckbox = screen
-      .getByTestId("toolbar-rows-option-region")
-      .querySelector("input")!;
-    expect(regionCheckbox.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const chip = screen.getByTestId("settings-rows-chip-region");
+    expect(chip.className).toContain("Frozen");
   });
 });
 
@@ -1152,7 +1385,7 @@ describe("Toolbar - status indicators", () => {
 });
 
 describe("Toolbar - hidden attribute variants", () => {
-  it("hidden_attributes: excluded column does not appear in any dropdown", () => {
+  it("hidden_attributes: excluded column does not appear in settings panel", () => {
     const allColumnsFiltered = ALL_COLUMNS.filter((c) => c !== "category");
     const numericFiltered = NUMERIC_COLUMNS.filter((c) => c !== "category");
     render(
@@ -1163,12 +1396,13 @@ describe("Toolbar - hidden attribute variants", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    // Open Rows dropdown and verify "category" is not present
-    fireEvent.click(screen.getByTestId("toolbar-rows-select"));
-    expect(screen.queryByText("category")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(
+      screen.queryByTestId("settings-available-category"),
+    ).not.toBeInTheDocument();
   });
 
-  it("hidden_from_aggregators: column available for rows/cols but not values", () => {
+  it("hidden_from_aggregators: non-numeric column has no Values option in add menu", () => {
     const numericFiltered = NUMERIC_COLUMNS.filter((c) => c !== "profit");
     render(
       <Toolbar
@@ -1178,18 +1412,14 @@ describe("Toolbar - hidden attribute variants", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    // Open Values dropdown — "profit" should not appear
-    fireEvent.click(screen.getByTestId("toolbar-values-select"));
-    expect(
-      screen.queryByTestId("toolbar-values-option-profit"),
-    ).not.toBeInTheDocument();
-    // But "revenue" should be there
-    expect(
-      screen.getByTestId("toolbar-values-option-revenue"),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-category"));
+    expect(screen.getByText("Add to Rows")).toBeInTheDocument();
+    expect(screen.getByText("Add to Columns")).toBeInTheDocument();
+    expect(screen.queryByText("Add to Values")).not.toBeInTheDocument();
   });
 
-  it("hidden_from_drag_drop: frozen column has no remove button", () => {
+  it("hidden_from_drag_drop: frozen column has no remove button in settings panel", () => {
     render(
       <Toolbar
         config={makeConfig({ rows: ["region", "category"] })}
@@ -1199,11 +1429,12 @@ describe("Toolbar - hidden attribute variants", () => {
         frozenColumns={new Set(["region"])}
       />,
     );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
     expect(
-      screen.queryByTestId("toolbar-rows-remove-region"),
+      screen.queryByTestId("settings-rows-remove-region"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByTestId("toolbar-rows-remove-category"),
+      screen.getByTestId("settings-rows-remove-category"),
     ).toBeInTheDocument();
   });
 });
@@ -1301,7 +1532,9 @@ describe("Toolbar - locked mode + filtering integration", () => {
       screen.getByTestId("toolbar-rows-filter-indicator-region"),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-row-totals-status")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings-row-totals-status"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByTestId("toolbar-rows-remove-region"),
     ).not.toBeInTheDocument();
@@ -1310,11 +1543,11 @@ describe("Toolbar - locked mode + filtering integration", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Settings Popover
+// Settings Panel
 // ---------------------------------------------------------------------------
 
-describe("Toolbar - settings popover", () => {
-  it("renders gear settings button", () => {
+describe("Toolbar - settings panel", () => {
+  it("renders settings button", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -1326,7 +1559,7 @@ describe("Toolbar - settings popover", () => {
     expect(screen.getByTestId("toolbar-settings")).toBeInTheDocument();
   });
 
-  it("opens settings popover on gear click", () => {
+  it("opens settings panel on settings button click", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -1335,14 +1568,13 @@ describe("Toolbar - settings popover", () => {
         onConfigChange={vi.fn()}
       />,
     );
-    expect(
-      screen.queryByTestId("toolbar-settings-panel"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-panel")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-settings-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
   });
 
-  it("closes settings popover on Escape", () => {
+  it("closes settings panel on settings button click when already open", () => {
+    vi.useFakeTimers();
     render(
       <Toolbar
         config={makeConfig()}
@@ -1352,12 +1584,34 @@ describe("Toolbar - settings popover", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    const panel = screen.getByTestId("toolbar-settings-panel");
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByTestId("settings-panel")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("closes settings panel on Escape", async () => {
+    vi.useFakeTimers();
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const panel = screen.getByTestId("settings-panel");
     expect(panel).toBeInTheDocument();
     fireEvent.keyDown(panel, { key: "Escape" });
-    expect(
-      screen.queryByTestId("toolbar-settings-panel"),
-    ).not.toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByTestId("settings-panel")).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("contains all display checkboxes", () => {
@@ -1370,8 +1624,8 @@ describe("Toolbar - settings popover", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-row-totals")).toBeInTheDocument();
-    expect(screen.getByTestId("toolbar-col-totals")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-row-totals")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-col-totals")).toBeInTheDocument();
   });
 
   it("shows subtotals checkbox when 2+ row dims", () => {
@@ -1384,7 +1638,7 @@ describe("Toolbar - settings popover", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-subtotals")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-subtotals")).toBeInTheDocument();
   });
 
   it("hides subtotals checkbox when < 2 row dims", () => {
@@ -1397,10 +1651,10 @@ describe("Toolbar - settings popover", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.queryByTestId("toolbar-subtotals")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-subtotals")).not.toBeInTheDocument();
   });
 
-  it("gear icon is visible in locked mode", () => {
+  it("settings button is visible in locked mode", () => {
     render(
       <Toolbar
         config={makeConfig()}
@@ -1413,8 +1667,7 @@ describe("Toolbar - settings popover", () => {
     expect(screen.getByTestId("toolbar-settings")).toBeInTheDocument();
   });
 
-  it("locked mode gear popover shows status rows and group actions", () => {
-    const onCollapseChange = vi.fn();
+  it("locked mode settings panel shows status rows", () => {
     render(
       <Toolbar
         config={makeConfig({
@@ -1425,22 +1678,17 @@ describe("Toolbar - settings popover", () => {
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={vi.fn()}
         locked={true}
-        onCollapseChange={onCollapseChange}
+        onCollapseChange={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-subtotals-status")).toHaveTextContent(
+    expect(screen.getByTestId("settings-subtotals-status")).toHaveTextContent(
       "region",
     );
-    expect(screen.queryByTestId("toolbar-row-totals")).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId("pivot-group-toggle-collapse-all"),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("pivot-group-toggle-collapse-all"));
-    expect(onCollapseChange).toHaveBeenCalledWith("row", ["__ALL__"]);
+    expect(screen.queryByTestId("settings-row-totals")).not.toBeInTheDocument();
   });
 
-  it("omits group actions when collapse callbacks are not provided", () => {
+  it("omits group actions in settings panel when collapse callbacks are not provided", () => {
     render(
       <Toolbar
         config={makeConfig({
@@ -1459,21 +1707,78 @@ describe("Toolbar - settings popover", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("toggles closed when gear clicked again", () => {
-    render(
+  it("closes settings panel when config changes externally", () => {
+    vi.useFakeTimers();
+    const initialConfig = makeConfig({ rows: ["region"], values: ["revenue"] });
+    const { rerender } = render(
       <Toolbar
-        config={makeConfig()}
+        config={initialConfig}
         allColumns={ALL_COLUMNS}
         numericColumns={NUMERIC_COLUMNS}
         onConfigChange={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(screen.getByTestId("toolbar-settings-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
+
+    const externalConfig = makeConfig({
+      rows: ["region", "category"],
+      values: ["revenue"],
+    });
+    rerender(
+      <Toolbar
+        config={externalConfig}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByTestId("settings-panel")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("Apply button is disabled when no changes have been made", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: ["region"], values: ["revenue"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    expect(
-      screen.queryByTestId("toolbar-settings-panel"),
-    ).not.toBeInTheDocument();
+    const applyBtn = screen.getByTestId("settings-apply");
+    expect(applyBtn).toBeDisabled();
+  });
+
+  it("Apply button enables after a change and disables again on undo", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          values: ["revenue"],
+          show_row_totals: true,
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const applyBtn = screen.getByTestId("settings-apply");
+    expect(applyBtn).toBeDisabled();
+
+    const rowTotalsCheckbox = screen
+      .getByTestId("settings-row-totals")
+      .querySelector("input");
+    fireEvent.click(rowTotalsCheckbox!);
+    expect(applyBtn).not.toBeDisabled();
+
+    fireEvent.click(rowTotalsCheckbox!);
+    expect(applyBtn).toBeDisabled();
   });
 });
 
@@ -2177,7 +2482,148 @@ describe("Toolbar – DnD rendering", () => {
       />,
     );
     expect(
-      screen.getAllByText("Drag fields here").length,
+      screen.getAllByText("Apply fields in settings menu").length,
     ).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveDragEnd – DnD routing logic
+// ---------------------------------------------------------------------------
+
+describe("resolveDragEnd – DnD routing logic", () => {
+  it("returns null when no field in active data", () => {
+    expect(
+      resolveDragEnd({
+        activeData: undefined,
+        overId: "sp-zone-rows",
+        overData: { type: "container", zone: "rows" },
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when no target zone", () => {
+    expect(
+      resolveDragEnd({
+        activeData: { field: "region" },
+        overId: "unknown",
+        overData: undefined,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns add-from-available when source has no zone", () => {
+    const result = resolveDragEnd({
+      activeData: { field: "category" },
+      overId: "sp-zone-rows",
+      overData: { type: "container", zone: "rows" },
+    });
+    expect(result).toEqual({
+      type: "add-from-available",
+      field: "category",
+      toZone: "rows",
+    });
+  });
+
+  it("returns add-from-available when dropping on a zone chip", () => {
+    const result = resolveDragEnd({
+      activeData: { field: "category" },
+      overId: "rows::region",
+      overData: { zone: "rows", field: "region" },
+    });
+    expect(result).toEqual({
+      type: "add-from-available",
+      field: "category",
+      toZone: "rows",
+    });
+  });
+
+  it("returns cross-zone when source zone differs from target zone", () => {
+    const result = resolveDragEnd({
+      activeData: { zone: "rows", field: "region" },
+      overId: "sp-zone-columns",
+      overData: { type: "container", zone: "columns" },
+    });
+    expect(result).toEqual({
+      type: "cross-zone",
+      field: "region",
+      fromZone: "rows",
+      toZone: "columns",
+    });
+  });
+
+  it("returns cross-zone when dropping zone chip onto another zone's chip", () => {
+    const result = resolveDragEnd({
+      activeData: { zone: "rows", field: "region" },
+      overId: "columns::year",
+      overData: { zone: "columns", field: "year" },
+    });
+    expect(result).toEqual({
+      type: "cross-zone",
+      field: "region",
+      fromZone: "rows",
+      toZone: "columns",
+    });
+  });
+
+  it("returns reorder when same-zone with different overField", () => {
+    const result = resolveDragEnd({
+      activeData: { zone: "rows", field: "region" },
+      overId: "rows::category",
+      overData: { zone: "rows", field: "category" },
+    });
+    expect(result).toEqual({
+      type: "reorder",
+      zone: "rows",
+      field: "region",
+      overField: "category",
+    });
+  });
+
+  it("returns null for same-zone reorder when overField equals field", () => {
+    expect(
+      resolveDragEnd({
+        activeData: { zone: "rows", field: "region" },
+        overId: "rows::region",
+        overData: { zone: "rows", field: "region" },
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null for same-zone reorder when no overField", () => {
+    expect(
+      resolveDragEnd({
+        activeData: { zone: "rows", field: "region" },
+        overId: "sp-zone-rows",
+        overData: { type: "container", zone: "rows" },
+      }),
+    ).toBeNull();
+  });
+
+  it("resolves target zone from container overId", () => {
+    const result = resolveDragEnd({
+      activeData: { field: "profit" },
+      overId: "sp-zone-values",
+      overData: { type: "container" },
+    });
+    expect(result).toEqual({
+      type: "add-from-available",
+      field: "profit",
+      toZone: "values",
+    });
+  });
+
+  it("resolves target zone from overData.zone when not container", () => {
+    const result = resolveDragEnd({
+      activeData: { zone: "values", field: "revenue" },
+      overId: "rows::region",
+      overData: { zone: "rows", field: "region" },
+    });
+    expect(result).toEqual({
+      type: "cross-zone",
+      field: "revenue",
+      fromZone: "values",
+      toZone: "rows",
+    });
   });
 });

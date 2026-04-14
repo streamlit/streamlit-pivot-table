@@ -21,7 +21,7 @@ from pathlib import Path
 
 from playwright.sync_api import Page, expect
 
-from e2e_utils import get_pivot, open_settings_popover
+from e2e_utils import get_pivot, open_settings_panel
 from pivot_table_app_support import _load_main_fixture
 
 ROW_HEADERS_KEY_ASC = ["East", "North", "South", "West"]
@@ -259,7 +259,7 @@ def test_date_hierarchy_uses_adaptive_default_and_enables_comparisons(
 
     menu = open_header_menu(
         page,
-        container.get_by_test_id("header-menu-trigger-revenue").first,
+        container.locator('[data-testid="header-menu-trigger-revenue"]:visible').first,
         "header-menu-revenue",
     )
     expect(menu.get_by_test_id("header-display-diff_from_prev")).to_be_visible(
@@ -306,9 +306,7 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.locator("th")
-        .filter(has_text="2024-W01")
-        .get_by_test_id("header-menu-trigger-order_date"),
+        container.get_by_test_id("header-menu-trigger-order_date").first,
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
@@ -318,7 +316,7 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.get_by_test_id("header-menu-trigger-revenue").first,
+        container.locator('[data-testid="header-menu-trigger-revenue"]:visible').first,
         "header-menu-revenue",
     )
     expect(menu.get_by_test_id("header-display-diff_from_prev")).to_have_count(0)
@@ -578,12 +576,9 @@ def test_subtotal_group_collapse(page_at_app: Page):
     container = get_pivot(page, "test_pivot_subtotals")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    open_settings_popover(page, container)
-    expand_all = page.get_by_test_id("pivot-group-toggle-expand-all")
-    expect(expand_all).to_be_visible(timeout=5000)
+    expand_all = container.get_by_test_id("pivot-group-toggle-expand-all")
+    expand_all.scroll_into_view_if_needed()
     expand_all.evaluate("el => el.click()")
-    page.keyboard.press("Escape")
-    expect(page.get_by_test_id("toolbar-settings-panel")).to_have_count(0, timeout=5000)
 
     rows_before = container.get_by_test_id("pivot-data-row").count()
 
@@ -613,24 +608,20 @@ def test_subtotal_expand_all_collapse_all(page_at_app: Page):
 
     data_rows = container.get_by_test_id("pivot-data-row")
 
-    open_settings_popover(page, container)
-    expand_all = page.get_by_test_id("pivot-group-toggle-expand-all")
-    expect(expand_all).to_be_visible(timeout=5000)
+    expand_all = container.get_by_test_id("pivot-group-toggle-expand-all")
+    expand_all.scroll_into_view_if_needed()
     expand_all.evaluate("el => el.click()")
     rows_expanded = data_rows.count()
 
-    open_settings_popover(page, container)
-    collapse_all = page.get_by_test_id("pivot-group-toggle-collapse-all")
-    expect(collapse_all).to_be_visible(timeout=5000)
+    collapse_all = container.get_by_test_id("pivot-group-toggle-collapse-all")
+    collapse_all.scroll_into_view_if_needed()
     collapse_all.evaluate("el => el.click()")
 
     expect(data_rows).not_to_have_count(rows_expanded, timeout=10000)
     rows_collapsed = data_rows.count()
     assert rows_collapsed < rows_expanded
 
-    open_settings_popover(page, container)
-    expand_all = page.get_by_test_id("pivot-group-toggle-expand-all")
-    expect(expand_all).to_be_visible(timeout=5000)
+    expand_all.scroll_into_view_if_needed()
     expand_all.evaluate("el => el.click()")
 
     expect(data_rows).not_to_have_count(rows_collapsed, timeout=10000)
@@ -788,31 +779,31 @@ def test_drilldown_disabled_no_panel(page_at_app: Page):
     expect(container.get_by_test_id("drilldown-panel")).to_have_count(0)
 
 
-def test_settings_popover_opens_and_closes(page_at_app: Page):
-    """Clicking the gear button opens the settings popover; clicking outside closes it."""
+def test_settings_panel_opens_and_closes(page_at_app: Page):
+    """Clicking the settings button opens the settings panel; clicking outside closes it."""
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
     expect(container.get_by_test_id("toolbar-settings")).to_be_visible()
-    expect(container.get_by_test_id("toolbar-settings-panel")).to_have_count(0)
+    expect(page.get_by_test_id("settings-panel")).to_have_count(0)
 
-    open_settings_popover(page, container)
+    open_settings_panel(page, container)
 
     container.get_by_test_id("pivot-table").click()
     page.wait_for_timeout(500)
-    expect(container.get_by_test_id("toolbar-settings-panel")).to_have_count(0)
+    expect(page.get_by_test_id("settings-panel")).to_have_count(0)
 
 
-def test_settings_popover_escape_closes(page_at_app: Page):
-    """Pressing Escape closes the settings popover."""
+def test_settings_panel_escape_closes(page_at_app: Page):
+    """Pressing Escape closes the settings panel."""
     page = page_at_app
     container = get_pivot(page, "test_pivot")
     expect(container.get_by_test_id("pivot-toolbar")).to_be_visible(timeout=15000)
 
-    panel = open_settings_popover(page, container)
+    panel = open_settings_panel(page, container)
     panel.press("Escape")
-    expect(page.get_by_test_id("toolbar-settings-panel")).to_have_count(0, timeout=5000)
+    expect(page.get_by_test_id("settings-panel")).to_have_count(0, timeout=5000)
 
 
 def test_action_bar_always_visible(page_at_app: Page):
@@ -825,43 +816,47 @@ def test_action_bar_always_visible(page_at_app: Page):
     expect(container.get_by_test_id("toolbar-settings")).to_be_visible()
 
 
-def test_locked_mode_gear_visible_and_functional(page_at_app: Page):
-    """In locked mode, the settings gear opens a viewer-oriented popover."""
+def test_locked_mode_settings_visible_and_functional(page_at_app: Page):
+    """In locked mode, the settings button opens a viewer-oriented panel."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_locked")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     expect(container.get_by_test_id("toolbar-settings")).to_be_visible()
 
-    open_settings_popover(page, container)
-    expect(container.get_by_test_id("toolbar-row-totals-status")).to_be_visible()
-    expect(container.get_by_test_id("toolbar-col-totals-status")).to_be_visible()
+    open_settings_panel(page, container)
+    expect(page.get_by_test_id("settings-row-totals-status")).to_be_visible()
+    expect(page.get_by_test_id("settings-col-totals-status")).to_be_visible()
 
 
 def test_locked_mode_group_actions_still_work(page_at_app: Page):
-    """In locked mode, settings popover group actions still collapse/expand rows."""
+    """In locked mode, toolbar group actions still collapse/expand rows."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_locked_groups")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    button = container.get_by_test_id("toolbar-settings")
-    button.scroll_into_view_if_needed()
-    button.evaluate("el => el.click()")
-    panel = page.get_by_test_id("toolbar-settings-panel")
-    expect(panel).to_be_visible(timeout=5000)
-    panel.get_by_test_id("pivot-group-toggle-expand-all").click()
+    expand_all = container.get_by_test_id("pivot-group-toggle-expand-all")
+    expand_all.scroll_into_view_if_needed()
+    expand_all.evaluate("el => el.click()")
 
     data_rows = container.get_by_test_id("pivot-data-row")
     rows_expanded = data_rows.count()
     assert rows_expanded > 0
 
-    expect(panel.get_by_test_id("toolbar-subtotals-status")).to_be_visible()
-    panel.get_by_test_id("pivot-group-toggle-collapse-all").click()
+    panel = open_settings_panel(page, container)
+    expect(page.get_by_test_id("settings-subtotals-status")).to_be_visible()
+    panel.press("Escape")
+    page.wait_for_timeout(300)
+
+    collapse_all = container.get_by_test_id("pivot-group-toggle-collapse-all")
+    collapse_all.scroll_into_view_if_needed()
+    collapse_all.evaluate("el => el.click()")
     expect(data_rows).not_to_have_count(rows_expanded, timeout=10000)
     rows_collapsed = data_rows.count()
     assert rows_collapsed < rows_expanded
 
-    panel.get_by_test_id("pivot-group-toggle-expand-all").click()
+    expand_all.scroll_into_view_if_needed()
+    expand_all.evaluate("el => el.click()")
     expect(data_rows).to_have_count(rows_expanded, timeout=10000)
 
 
@@ -1020,17 +1015,15 @@ def test_col_group_expand_collapse_all(page_at_app: Page):
 
     header_cells = container.get_by_test_id("pivot-header-cell")
 
-    open_settings_popover(page, container)
-    collapse_all = page.get_by_test_id("pivot-col-group-collapse-all")
-    expect(collapse_all).to_be_visible(timeout=5000)
+    collapse_all = container.get_by_test_id("pivot-col-group-collapse-all")
+    collapse_all.scroll_into_view_if_needed()
     collapse_all.evaluate("el => el.click()")
     expect(header_cells).not_to_have_count(headers_expanded, timeout=10000)
     headers_collapsed = header_cells.count()
     assert headers_collapsed < headers_expanded
 
-    open_settings_popover(page, container)
-    expand_all = page.get_by_test_id("pivot-col-group-expand-all")
-    expect(expand_all).to_be_visible(timeout=5000)
+    expand_all = container.get_by_test_id("pivot-col-group-expand-all")
+    expand_all.scroll_into_view_if_needed()
     expand_all.evaluate("el => el.click()")
     expect(header_cells).not_to_have_count(headers_collapsed, timeout=10000)
 
@@ -1239,3 +1232,404 @@ def test_adaptive_grain_3month_defaults_to_month(page_at_app: Page):
     expect(container.get_by_test_id("pivot-row-dim-label-order-date-2")).to_have_text(
         "Month", timeout=10000
     )
+
+
+# ---------------------------------------------------------------------------
+# Settings Panel: staged commit semantics
+# ---------------------------------------------------------------------------
+
+
+def test_settings_panel_cancel_discards_changes(page_at_app: Page):
+    """Clicking Cancel discards staged changes without applying them."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
+
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
+    panel.get_by_test_id("settings-cancel").click()
+    page.wait_for_timeout(500)
+
+    expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
+
+
+def test_settings_panel_escape_discards_changes(page_at_app: Page):
+    """Pressing Escape discards staged changes without applying them."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
+
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
+    panel.press("Escape")
+    page.wait_for_timeout(500)
+
+    expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
+
+
+def test_settings_panel_click_outside_discards_changes(page_at_app: Page):
+    """Clicking outside the panel discards staged changes."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
+
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
+    container.get_by_test_id("pivot-table").click()
+    page.wait_for_timeout(500)
+
+    expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
+
+
+def test_settings_panel_apply_commits_changes(page_at_app: Page):
+    """Clicking Apply commits staged display toggle changes."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.get_by_test_id("pivot-row-total").first).to_be_visible()
+
+    panel = open_settings_panel(page, container)
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
+    panel.get_by_test_id("settings-apply").click()
+    expect(container.get_by_test_id("pivot-row-total")).to_have_count(0, timeout=10000)
+
+
+def test_settings_panel_apply_disabled_when_no_changes(page_at_app: Page):
+    """Apply button is disabled when no changes have been made."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+    apply_btn = panel.get_by_test_id("settings-apply")
+    expect(apply_btn).to_be_disabled()
+
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
+    expect(apply_btn).to_be_enabled()
+
+    panel.get_by_test_id("settings-row-totals").locator("input").evaluate(
+        "el => el.click()"
+    )
+    expect(apply_btn).to_be_disabled()
+
+
+def test_settings_panel_external_change_closes_panel(page_at_app: Page):
+    """An external config change (e.g. toolbar Swap) closes the panel and discards edits."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+    expect(panel).to_be_visible()
+
+    swap_btn = container.get_by_test_id("toolbar-swap")
+    swap_btn.scroll_into_view_if_needed()
+    swap_btn.evaluate("el => el.click()")
+
+    page.wait_for_timeout(500)
+    expect(page.get_by_test_id("settings-panel")).to_have_count(0, timeout=5000)
+
+
+# ---------------------------------------------------------------------------
+# Toolbar: immediate header removals
+# ---------------------------------------------------------------------------
+
+
+def test_toolbar_row_remove_applies_immediately(page_at_app: Page):
+    """Removing a row chip from the toolbar updates the pivot immediately."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    remove_btn = container.get_by_test_id("toolbar-rows-remove-Region")
+    expect(remove_btn).to_be_visible(timeout=5000)
+    remove_btn.evaluate("el => el.click()")
+
+    expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
+    expect(container.get_by_test_id("toolbar-rows-chip-Region")).to_have_count(
+        0, timeout=10000
+    )
+    expect(container.get_by_text("Apply fields in settings menu").first).to_be_visible(
+        timeout=10000
+    )
+
+
+def test_toolbar_value_remove_applies_immediately(page_at_app: Page):
+    """Removing a value chip from the toolbar updates the pivot immediately."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    remove_btn = container.get_by_test_id("toolbar-values-remove-Revenue")
+    expect(remove_btn).to_be_visible(timeout=5000)
+    remove_btn.evaluate("el => el.click()")
+
+    expect(page.get_by_text("Config change count: 1")).to_be_visible(timeout=10000)
+    expect(container.get_by_test_id("toolbar-values-chip-Revenue")).to_have_count(
+        0, timeout=10000
+    )
+    expect(container.get_by_text("Apply fields in settings menu").first).to_be_visible(
+        timeout=10000
+    )
+
+
+# ---------------------------------------------------------------------------
+# Settings Panel: field assignment via chip menus
+# ---------------------------------------------------------------------------
+
+
+def test_settings_panel_add_field_to_rows(page_at_app: Page):
+    """Adding a field from Available Fields to Rows via chip menu works."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    available_chip = panel.get_by_test_id("settings-available-Category")
+    available_chip.click()
+
+    page.get_by_role("button", name="Add to Rows").click()
+    expect(panel.get_by_test_id("settings-rows-chip-Category")).to_be_visible()
+
+    panel.get_by_test_id("settings-apply").click()
+
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=10000)
+
+
+def test_settings_panel_remove_field_from_zone(page_at_app: Page):
+    """Removing a field from a zone via the chip remove button works."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    expect(panel.get_by_test_id("settings-rows-chip-Region")).to_be_visible()
+
+    panel.get_by_test_id("settings-rows-remove-Region").click()
+
+    expect(panel.get_by_test_id("settings-rows-chip-Region")).to_have_count(0)
+    expect(panel.get_by_test_id("settings-available-Region")).to_be_visible()
+
+    panel.get_by_test_id("settings-cancel").click()
+
+
+def test_settings_panel_synthetic_builder_cancel_stays_in_panel(page_at_app: Page):
+    """Cancelling synthetic measure creation closes only the builder, not the panel."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    panel.get_by_test_id("settings-add-synthetic").click()
+    expect(panel.get_by_test_id("settings-synthetic-builder")).to_be_visible()
+    expect(panel.get_by_test_id("settings-cancel")).to_have_count(0)
+
+    panel.get_by_test_id("settings-synthetic-cancel").click()
+
+    expect(panel).to_be_visible()
+    expect(panel.get_by_test_id("settings-synthetic-builder")).to_have_count(0)
+    expect(panel.get_by_test_id("settings-cancel")).to_be_visible()
+
+    panel.get_by_test_id("settings-cancel").click()
+
+
+def test_settings_panel_move_field_between_zones_via_dnd(page_at_app: Page):
+    """Moving a field from Rows to Columns via DnD works and can be cancelled."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    source = panel.get_by_test_id("settings-rows-chip-Region")
+    target = panel.get_by_test_id("settings-zone-columns")
+    expect(source).to_be_visible()
+    expect(target).to_be_visible()
+
+    _drag_chip(page, source, target)
+
+    expect(panel.get_by_test_id("settings-rows-chip-Region")).to_have_count(0)
+    expect(panel.get_by_test_id("settings-columns-chip-Region")).to_be_visible()
+
+    panel.get_by_test_id("settings-cancel").click()
+
+
+# ---------------------------------------------------------------------------
+# Settings Panel: drag-and-drop
+# ---------------------------------------------------------------------------
+
+
+def _drag_chip(page: Page, source, target):
+    """Perform a pointer-driven drag from source locator to target locator.
+
+    Uses manual mouse events with enough displacement to activate @dnd-kit's
+    PointerSensor (distance >= 5px activation constraint).
+    """
+    source_box = source.bounding_box()
+    target_box = target.bounding_box()
+    assert source_box is not None, "source element not visible"
+    assert target_box is not None, "target element not visible"
+
+    sx = source_box["x"] + source_box["width"] / 2
+    sy = source_box["y"] + source_box["height"] / 2
+    tx = target_box["x"] + target_box["width"] / 2
+    ty = target_box["y"] + target_box["height"] / 2
+
+    page.mouse.move(sx, sy)
+    page.mouse.down()
+    page.mouse.move(sx + 10, sy, steps=3)
+    page.mouse.move(tx, ty, steps=10)
+    page.wait_for_timeout(100)
+    page.mouse.up()
+    page.wait_for_timeout(300)
+
+
+def test_settings_panel_dnd_available_to_rows(page_at_app: Page):
+    """Dragging an available field chip into the Rows drop zone assigns it."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    source = panel.get_by_test_id("settings-available-Category")
+    target = panel.get_by_test_id("settings-zone-rows")
+    expect(source).to_be_visible()
+    expect(target).to_be_visible()
+
+    _drag_chip(page, source, target)
+
+    expect(panel.get_by_test_id("settings-rows-chip-Category")).to_be_visible(
+        timeout=5000
+    )
+    expect(panel.get_by_test_id("settings-available-Category")).to_be_visible()
+
+    panel.get_by_test_id("settings-apply").click()
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=10000)
+
+
+def test_settings_panel_dnd_available_to_values(page_at_app: Page):
+    """Dragging a numeric available field into Values assigns it."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    source = panel.get_by_test_id("settings-available-Profit")
+    target = panel.get_by_test_id("settings-zone-values")
+    expect(source).to_be_visible()
+    expect(target).to_be_visible()
+
+    _drag_chip(page, source, target)
+
+    expect(panel.get_by_test_id("settings-values-chip-Profit")).to_be_visible(
+        timeout=5000
+    )
+    panel.get_by_test_id("settings-cancel").click()
+
+
+def test_settings_panel_dnd_cross_zone_move(page_at_app: Page):
+    """Dragging a chip from Rows zone to Columns zone moves it."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    source = panel.get_by_test_id("settings-rows-chip-Region")
+    target = panel.get_by_test_id("settings-zone-columns")
+    expect(source).to_be_visible()
+    expect(target).to_be_visible()
+
+    _drag_chip(page, source, target)
+
+    expect(panel.get_by_test_id("settings-rows-chip-Region")).to_have_count(
+        0, timeout=5000
+    )
+    expect(panel.get_by_test_id("settings-columns-chip-Region")).to_be_visible()
+
+    panel.get_by_test_id("settings-cancel").click()
+
+
+# ---------------------------------------------------------------------------
+# Settings Panel: additive dual-zone flows
+# ---------------------------------------------------------------------------
+
+
+def test_settings_panel_also_add_to_values(page_at_app: Page):
+    """'Also add to Values' keeps field in current zone and adds to Values."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    # First add a numeric field to Rows so we can test dual-zone
+    avail = panel.get_by_test_id("settings-available-Profit")
+    avail.click()
+    page.get_by_role("button", name="Add to Rows").click()
+    expect(panel.get_by_test_id("settings-rows-chip-Profit")).to_be_visible()
+
+    panel.get_by_test_id("settings-available-Profit").click()
+    page.get_by_role("button", name="Also add to Values").click()
+
+    expect(panel.get_by_test_id("settings-rows-chip-Profit")).to_be_visible()
+    expect(panel.get_by_test_id("settings-values-chip-Profit")).to_be_visible()
+
+    panel.get_by_test_id("settings-apply").click()
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=10000)
+
+
+def test_settings_panel_also_add_to_rows_from_available_fields(page_at_app: Page):
+    """'Also add to Rows' from Available Fields puts field in both zones."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    panel.get_by_test_id("settings-available-Revenue").click()
+    page.get_by_role("button", name="Also add to Rows").click()
+
+    expect(panel.get_by_test_id("settings-values-chip-Revenue")).to_be_visible()
+    expect(panel.get_by_test_id("settings-rows-chip-Revenue")).to_be_visible()
+
+    panel.get_by_test_id("settings-cancel").click()
+
+
+def test_settings_panel_also_add_to_columns_from_available_fields(page_at_app: Page):
+    """'Also add to Columns' from Available Fields puts field in both zones."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    panel.get_by_test_id("settings-available-Revenue").click()
+    page.get_by_role("button", name="Also add to Columns").click()
+
+    expect(panel.get_by_test_id("settings-values-chip-Revenue")).to_be_visible()
+    expect(panel.get_by_test_id("settings-columns-chip-Revenue")).to_be_visible()
+
+    panel.get_by_test_id("settings-cancel").click()
