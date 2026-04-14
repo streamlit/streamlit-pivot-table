@@ -282,7 +282,9 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.get_by_test_id("header-menu-trigger-order_date").first,
+        container.locator(
+            '[data-testid="header-menu-trigger-order_date"]:visible'
+        ).first,
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
@@ -295,7 +297,9 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.get_by_test_id("header-menu-trigger-order_date").first,
+        container.locator(
+            '[data-testid="header-menu-trigger-order_date"]:visible'
+        ).first,
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
@@ -306,7 +310,9 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.get_by_test_id("header-menu-trigger-order_date").first,
+        container.locator(
+            '[data-testid="header-menu-trigger-order_date"]:visible'
+        ).first,
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
@@ -347,7 +353,9 @@ def test_temporal_hierarchy_toggle_collapses_and_expands(page_at_app: Page):
     expect(container.get_by_text("Q4 2024")).to_be_visible(timeout=5000)
 
     # Collapse 2024 by clicking the +/- toggle button.
-    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024 = container.locator(
+        '[data-testid="temporal-toggle-order-date-2024"]:visible'
+    ).first
     toggle_2024.click()
 
     # After collapse: quarter leaf headers under 2024 should be hidden,
@@ -364,7 +372,9 @@ def test_temporal_hierarchy_toggle_collapses_and_expands(page_at_app: Page):
     expect(container.get_by_text("Q1 2025")).to_be_visible(timeout=5000)
 
     # Re-expand 2024.
-    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024 = container.locator(
+        '[data-testid="temporal-toggle-order-date-2024"]:visible'
+    ).first
     toggle_2024.click()
 
     # All quarter columns should be visible again.
@@ -391,7 +401,9 @@ def test_temporal_hierarchy_collapsed_cells_suppress_comparison(page_at_app: Pag
     expect(data_cells.first).to_be_visible(timeout=5000)
 
     # Collapse 2024.
-    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024 = container.locator(
+        '[data-testid="temporal-toggle-order-date-2024"]:visible'
+    ).first
     toggle_2024.click()
 
     # The collapsed aggregate cells should NOT contain comparison indicators.
@@ -410,7 +422,9 @@ def test_temporal_hierarchy_collapsed_cells_suppress_comparison(page_at_app: Pag
     ), f"Collapsed cell should not show comparison indicator, got: {first_collapse_text}"
 
     # Re-expand to restore state for other tests.
-    toggle_2024 = container.get_by_test_id("temporal-toggle-order-date-2024")
+    toggle_2024 = container.locator(
+        '[data-testid="temporal-toggle-order-date-2024"]:visible'
+    ).first
     toggle_2024.click()
     expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
 
@@ -433,7 +447,9 @@ def test_temporal_hierarchy_multidim_per_instance_collapse(page_at_app: Page):
     expect(eu_header).to_be_visible(timeout=5000)
 
     # Collapse the first 2024 instance (should be one region only).
-    first_toggle = container.get_by_test_id("temporal-toggle-order-date-2024").first
+    first_toggle = container.locator(
+        '[data-testid="temporal-toggle-order-date-2024"]:visible'
+    ).first
     first_toggle.click()
 
     # At least one collapsed cell should appear.
@@ -450,7 +466,9 @@ def test_temporal_hierarchy_multidim_per_instance_collapse(page_at_app: Page):
     expect(second_header).to_have_attribute("aria-expanded", "true", timeout=5000)
 
     # Re-expand.
-    first_toggle = container.get_by_test_id("temporal-toggle-order-date-2024").first
+    first_toggle = container.locator(
+        '[data-testid="temporal-toggle-order-date-2024"]:visible'
+    ).first
     first_toggle.click()
     expect(container.get_by_test_id("pivot-temporal-collapse-cell")).to_have_count(
         0, timeout=5000
@@ -517,13 +535,22 @@ def test_mixed_row_dimension_collapse_preserves_temporal_state(page_at_app: Page
         1, timeout=10000
     )
 
-    container.get_by_test_id("pivot-group-toggle-US").click()
+    us_total_row = container.locator("tr").filter(has_text="US Total")
+    expect(us_total_row).to_have_count(1, timeout=5000)
+    us_group_toggle = us_total_row.get_by_test_id("pivot-group-toggle-US")
+    us_group_toggle.dispatch_event("click")
+    expect(us_group_toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
     expect(container.get_by_text("US Total")).to_be_visible(timeout=5000)
     expect(container.get_by_test_id("pivot-temporal-parent-row")).to_have_count(
         0, timeout=5000
     )
 
-    container.get_by_test_id("pivot-group-toggle-US").click()
+    us_total_row = container.locator("tr").filter(has_text="US Total")
+    expect(us_total_row).to_have_count(1, timeout=5000)
+    us_group_toggle = us_total_row.get_by_test_id("pivot-group-toggle-US")
+    expect(us_group_toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
+    us_group_toggle.dispatch_event("click")
+    expect(us_group_toggle).to_have_attribute("aria-expanded", "true", timeout=5000)
     expect(container.get_by_test_id("pivot-temporal-parent-row")).to_have_count(
         1, timeout=10000
     )

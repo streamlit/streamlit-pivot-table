@@ -17,6 +17,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import { useState } from "react";
 import TableRenderer, {
   computeRowHeaderSpans,
   computeColSlots,
@@ -292,6 +293,118 @@ describe("TableRenderer - rendering", () => {
     expect(
       screen.getAllByTestId("pivot-row-header-spacer").length,
     ).toBeGreaterThan(0);
+  });
+
+  it("preserves collapsed temporal row groups across outer subtotal collapse cycles", () => {
+    const data: DataRecord[] = [
+      { region: "US", order_date: "2024-01-03", revenue: 100 },
+      { region: "US", order_date: "2024-02-10", revenue: 150 },
+      { region: "US", order_date: "2025-01-12", revenue: 200 },
+      { region: "EU", order_date: "2024-01-08", revenue: 80 },
+    ];
+    const collapseKey = makeKeyString(
+      buildModifiedRowKey(["US", "2024-01"], 1, "order_date", "2024").slice(
+        0,
+        2,
+      ),
+    );
+    const initialConfig = makeConfig({
+      rows: ["region", "order_date"],
+      values: ["revenue"],
+      show_subtotals: ["region"],
+      collapsed_temporal_row_groups: { order_date: [collapseKey] },
+    });
+
+    function Harness() {
+      const [config, setConfig] = useState(initialConfig);
+      const pd = new PivotData(data, config, {
+        columnTypes: new Map([["order_date", "date"]]),
+      });
+
+      return (
+        <TableRenderer
+          pivotData={pd}
+          config={config}
+          onConfigChange={(next) => setConfig(next)}
+          onCollapseChange={(axis, collapsed) =>
+            setConfig((prev) => ({
+              ...prev,
+              [axis === "row" ? "collapsed_groups" : "collapsed_col_groups"]:
+                collapsed,
+            }))
+          }
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    expect(screen.getByTestId("pivot-temporal-parent-row")).toBeInTheDocument();
+
+    const usSubtotalToggle = screen.getByTestId("pivot-group-toggle-US");
+    expect(usSubtotalToggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(usSubtotalToggle);
+    expect(usSubtotalToggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByTestId("pivot-temporal-parent-row"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(usSubtotalToggle);
+    expect(usSubtotalToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("pivot-temporal-parent-row")).toBeInTheDocument();
+  });
+
+  it("preserves temporal collapse after collapsing and re-expanding outer row group", () => {
+    const data: DataRecord[] = [
+      { region: "US", order_date: "2024-01-03", revenue: 100 },
+      { region: "US", order_date: "2024-02-10", revenue: 150 },
+      { region: "US", order_date: "2025-01-12", revenue: 200 },
+      { region: "EU", order_date: "2024-01-08", revenue: 80 },
+    ];
+    const initialConfig = makeConfig({
+      rows: ["region", "order_date"],
+      values: ["revenue"],
+      show_subtotals: ["region"],
+    });
+
+    function Harness() {
+      const [config, setConfig] = useState(initialConfig);
+      const pd = new PivotData(data, config, {
+        columnTypes: new Map([["order_date", "date"]]),
+      });
+
+      return (
+        <TableRenderer
+          pivotData={pd}
+          config={config}
+          onConfigChange={(next) => setConfig(next)}
+          onCollapseChange={(axis, collapsed) =>
+            setConfig((prev) => ({
+              ...prev,
+              [axis === "row" ? "collapsed_groups" : "collapsed_col_groups"]:
+                collapsed,
+            }))
+          }
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const usTemporalToggle = screen.getByTestId(
+      "pivot-temporal-row-toggle-order_date-2024",
+    );
+    fireEvent.click(usTemporalToggle);
+    expect(screen.getByTestId("pivot-temporal-parent-row")).toBeInTheDocument();
+
+    const usSubtotalToggle = screen.getByTestId("pivot-group-toggle-US");
+    fireEvent.click(usSubtotalToggle);
+    expect(
+      screen.queryByTestId("pivot-temporal-parent-row"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(usSubtotalToggle);
+    expect(screen.getByTestId("pivot-temporal-parent-row")).toBeInTheDocument();
   });
 
   it("renders data cells with correct values", () => {
