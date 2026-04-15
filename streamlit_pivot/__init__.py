@@ -1706,6 +1706,37 @@ def _validate_list_field(
     return filtered
 
 
+def _normalize_string_list_param(param_name: str, value: Any) -> list[str] | None:
+    """Normalize numpy-backed string lists to plain Python string lists."""
+    if value is None:
+        return None
+
+    original_type_name = type(value).__name__
+    if not isinstance(value, list):
+        try:
+            import numpy as np
+
+            if isinstance(value, np.ndarray):
+                value = value.tolist()
+        except ImportError:
+            pass
+
+    if not isinstance(value, list):
+        raise TypeError(
+            f"{param_name} must be a list of strings, got {original_type_name}"
+        )
+
+    normalized: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise TypeError(
+                f"{param_name} must be a list of strings, got {original_type_name}"
+            )
+        normalized.append(str(item))
+
+    return normalized
+
+
 def _default_config(
     rows: list[str] | None = None,
     columns: list[str] | None = None,
@@ -2132,6 +2163,9 @@ def st_pivot_table(
             f"data must be a DataFrame-like object (Pandas/Polars DataFrame, "
             f"dict, list, NumPy array, etc.), got {type(data).__name__}: {exc}"
         ) from exc
+    rows = _normalize_string_list_param("rows", rows)
+    columns = _normalize_string_list_param("columns", columns)
+    values = _normalize_string_list_param("values", values)
     if not isinstance(show_totals, bool):
         raise TypeError(f"show_totals must be a bool, got {type(show_totals).__name__}")
     if execution_mode not in {"auto", "client_only", "threshold_hybrid"}:

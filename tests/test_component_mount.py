@@ -15,6 +15,7 @@
 
 """Python-side mount/payload tests for st_pivot_table()."""
 
+import numpy as np
 import pandas as pd
 
 
@@ -39,6 +40,31 @@ def test_mount_normalizes_partial_aggregation_map(
         "Profit": "sum",
     }
     assert result["config"]["aggregation"] == {"Revenue": "avg", "Profit": "sum"}
+
+
+def test_mount_normalizes_numpy_string_lists_to_builtin_strings(
+    sample_df, pivot_module, mount_recorder
+):
+    calls = mount_recorder()
+
+    result = pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=np.array(["Region"]),
+        columns=np.array(["Year"]),
+        values=list(np.array(["Revenue"])),
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config["rows"] == ["Region"]
+    assert sent_config["columns"] == ["Year"]
+    assert sent_config["values"] == ["Revenue"]
+    assert all(type(field) is str for field in sent_config["rows"])
+    assert all(type(field) is str for field in sent_config["columns"])
+    assert all(type(field) is str for field in sent_config["values"])
+    assert list(sent_config["aggregation"]) == ["Revenue"]
+    assert type(next(iter(sent_config["aggregation"]))) is str
+    assert result["config"]["values"] == ["Revenue"]
 
 
 def test_mount_includes_optional_payload_fields_and_callbacks(

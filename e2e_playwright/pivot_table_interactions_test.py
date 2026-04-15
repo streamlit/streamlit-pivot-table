@@ -80,6 +80,24 @@ def click_and_wait_for_visible(locator, target, timeout: int = 10000) -> None:
                 raise
 
 
+def click_and_wait_for_sort(panel, column_name: str, expected_aria_sort: str) -> None:
+    """Click a drilldown sort button and retry once if the header state does not update."""
+    for attempt in range(2):
+        button = _drilldown_sort_button(panel, column_name)
+        header = _drilldown_sort_header(panel, column_name)
+        button.evaluate(
+            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+        )
+        try:
+            expect(header).to_have_attribute(
+                "aria-sort", expected_aria_sort, timeout=5000
+            )
+            return
+        except AssertionError:
+            if attempt == 1:
+                raise
+
+
 def open_header_menu(page: Page, trigger_locator, menu_test_id: str):
     """Open a header menu and wait for it to become visible."""
     expect(trigger_locator).to_be_visible(timeout=5000)
@@ -1284,11 +1302,8 @@ def test_drilldown_client_sort_orders_full_result_before_pagination(page_at_app:
     page = page_at_app
     _, panel = _open_drilldown_with_pagination(page, "test_pivot_drilldown_pagination")
 
-    revenue_header = _drilldown_sort_header(panel, "Revenue")
-    _drilldown_sort_button(panel, "Revenue").click()
-    expect(revenue_header).to_have_attribute("aria-sort", "ascending", timeout=5000)
-    _drilldown_sort_button(panel, "Revenue").click()
-    expect(revenue_header).to_have_attribute("aria-sort", "descending", timeout=5000)
+    click_and_wait_for_sort(panel, "Revenue", "ascending")
+    click_and_wait_for_sort(panel, "Revenue", "descending")
 
     # Fixture values for Alpha/2023 are 10..709 inclusive, so descending page 1
     # starts at 709 and descending page 2 starts at 209 after the first 500 rows.
@@ -1341,8 +1356,8 @@ def test_drilldown_hybrid_sort_orders_full_result_before_pagination(page_at_app:
         page, "test_pivot_drilldown_pagination_hybrid"
     )
 
-    _drilldown_sort_button(panel, "Revenue").click()
-    _drilldown_sort_button(panel, "Revenue").click()
+    click_and_wait_for_sort(panel, "Revenue", "ascending")
+    click_and_wait_for_sort(panel, "Revenue", "descending")
 
     panel = page.get_by_test_id("drilldown-panel")
     expect(panel).to_be_visible(timeout=30000)

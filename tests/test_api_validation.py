@@ -15,6 +15,7 @@
 
 """Python-side validation tests for the public API."""
 
+import numpy as np
 import pytest
 
 
@@ -43,6 +44,36 @@ def test_missing_value_column_raises(pivot_module, sample_df):
             sample_df,
             key="pivot",
             values=["DoesNotExist"],
+        )
+
+
+def test_accepts_numpy_arrays_for_rows_columns_and_values(
+    pivot_module, sample_df, mount_recorder
+):
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=np.array(["Region"]),
+        columns=np.array(["Year"]),
+        values=np.array(["Revenue"]),
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config["rows"] == ["Region"]
+    assert sent_config["columns"] == ["Year"]
+    assert sent_config["values"] == ["Revenue"]
+
+
+def test_numpy_value_arrays_still_reject_non_string_entries(pivot_module, sample_df):
+    with pytest.raises(TypeError, match="values must be a list of strings"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=np.array([1]),
         )
 
 
