@@ -498,7 +498,7 @@ const Toolbar: FC<ToolbarProps> = ({
 
   // Zone card content helpers
   const syntheticMeasures = config.synthetic_measures ?? [];
-  const emptyHint = "Apply fields in settings menu";
+  const emptyHint = locked ? undefined : "Apply fields in settings menu";
 
   return (
     <div
@@ -606,7 +606,7 @@ const Toolbar: FC<ToolbarProps> = ({
 
       <div
         ref={utilGroupRef}
-        className={`${styles.utilGroup} ${locked || settingsOpen ? styles.utilGroupPinned : ""}`}
+        className={`${styles.utilGroup} ${settingsOpen ? styles.utilGroupPinned : ""}`}
         role="toolbar"
         aria-label="Table actions"
         onKeyDown={(e) => {
@@ -861,8 +861,10 @@ const ZoneCard: FC<ZoneCardProps> = ({
   aggTestIdPrefix,
   displayLabelForField,
   isValues,
-  emptyHint = "Drag fields here",
+  emptyHint,
 }): ReactElement => {
+  const resolvedEmptyHint =
+    emptyHint ?? (disabled ? undefined : "Drag fields here");
   const { setNodeRef: setDroppableRef } = useDroppable({
     id: zoneId,
     data: { type: "container" },
@@ -958,9 +960,9 @@ const ZoneCard: FC<ZoneCardProps> = ({
                 </span>
               ))}
           </div>
-        ) : (
-          <div className={styles.emptyDropZone}>{emptyHint}</div>
-        )}
+        ) : resolvedEmptyHint ? (
+          <div className={styles.emptyDropZone}>{resolvedEmptyHint}</div>
+        ) : null}
       </SortableContext>
     </div>
   );

@@ -478,8 +478,13 @@
 
 /* Grouping dimension column header styling */
 .groupingDimHeader {
-  font-weight: 700;
+  font-weight: inherit;
   border-bottom-width: 2px;
+}
+
+.headerCell.rowHeaderPrimary,
+.headerCell.rowHeaderSecondary {
+  font-weight: 500;
 }
 
 /* --- Dimension-level collapse toggle --- */

@@ -1667,6 +1667,21 @@ describe("Toolbar - settings panel", () => {
     expect(screen.getByTestId("toolbar-settings")).toBeInTheDocument();
   });
 
+  it("does not pin the utility menu open just because locked mode is enabled", () => {
+    render(
+      <Toolbar
+        config={makeConfig()}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        locked={true}
+      />,
+    );
+    expect(
+      screen.getByRole("toolbar", { name: "Table actions" }).className,
+    ).not.toContain("utilGroupPinned");
+  });
+
   it("locked mode settings panel shows status rows", () => {
     render(
       <Toolbar
@@ -2484,6 +2499,22 @@ describe("Toolbar – DnD rendering", () => {
     expect(
       screen.getAllByText("Apply fields in settings menu").length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("hides the empty drop zone placeholder in locked mode", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [], columns: [], values: [] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        locked={true}
+      />,
+    );
+    expect(
+      screen.queryByText("Apply fields in settings menu"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Drag fields here")).not.toBeInTheDocument();
   });
 });
 
