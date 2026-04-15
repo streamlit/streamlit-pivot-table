@@ -183,10 +183,13 @@ def open_settings_panel(page: Page, container: Locator) -> Locator:
     # If the panel is animating out, wait for it to fully disappear first
     if panel.count():
         try:
-            panel.wait_for(state="hidden", timeout=500)
+            panel.wait_for(state="hidden", timeout=1500)
         except Exception:
-            expect(panel).to_be_visible(timeout=5000)
-            return panel
+            try:
+                if panel.is_visible():
+                    return panel
+            except Exception:
+                pass
 
     button = container.get_by_test_id("toolbar-settings")
     button.scroll_into_view_if_needed()

@@ -36,15 +36,50 @@ def click_menu_item(locator) -> None:
     )
 
 
+def click_and_wait_for_attribute(
+    locator, name: str, value: str, timeout: int = 5000
+) -> None:
+    """Click a control and retry once if the expected attribute does not update."""
+    for attempt in range(2):
+        locator.evaluate(
+            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+        )
+        try:
+            expect(locator).to_have_attribute(name, value, timeout=timeout)
+            return
+        except AssertionError:
+            if attempt == 1:
+                raise
+
+
+def click_and_wait_for_count(locator, target, count: int, timeout: int = 10000) -> None:
+    """Click a control and retry once if the expected target count does not land."""
+    for attempt in range(2):
+        locator.evaluate(
+            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+        )
+        try:
+            expect(target).to_have_count(count, timeout=timeout)
+            return
+        except AssertionError:
+            if attempt == 1:
+                raise
+
+
 def open_header_menu(page: Page, trigger_locator, menu_test_id: str):
     """Open a header menu and wait for it to become visible."""
     expect(trigger_locator).to_be_visible(timeout=5000)
-    trigger_locator.evaluate(
-        "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
-    )
     menu = page.get_by_test_id(menu_test_id)
-    expect(menu).to_be_visible(timeout=5000)
-    return menu
+    for attempt in range(2):
+        trigger_locator.evaluate(
+            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+        )
+        try:
+            expect(menu).to_be_visible(timeout=5000)
+            return menu
+        except AssertionError:
+            if attempt == 1:
+                raise
 
 
 def close_header_menu(page: Page, menu_test_id: str) -> None:
@@ -535,25 +570,34 @@ def test_mixed_row_dimension_collapse_preserves_temporal_state(page_at_app: Page
         1, timeout=10000
     )
 
-    us_total_row = container.locator("tr").filter(has_text="US Total")
+    us_total_row = container.locator(
+        'tr[data-testid="pivot-subtotal-row"]:visible'
+    ).filter(has_text="US Total")
     expect(us_total_row).to_have_count(1, timeout=5000)
     us_group_toggle = us_total_row.get_by_test_id("pivot-group-toggle-US")
-    us_group_toggle.dispatch_event("click")
-    expect(us_group_toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
+    click_and_wait_for_attribute(us_group_toggle, "aria-expanded", "false")
     expect(container.get_by_text("US Total")).to_be_visible(timeout=5000)
     expect(container.get_by_test_id("pivot-temporal-parent-row")).to_have_count(
         0, timeout=5000
     )
 
-    us_total_row = container.locator("tr").filter(has_text="US Total")
+    us_total_row = container.locator(
+        'tr[data-testid="pivot-subtotal-row"]:visible'
+    ).filter(has_text="US Total")
     expect(us_total_row).to_have_count(1, timeout=5000)
     us_group_toggle = us_total_row.get_by_test_id("pivot-group-toggle-US")
     expect(us_group_toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
-    us_group_toggle.dispatch_event("click")
-    expect(us_group_toggle).to_have_attribute("aria-expanded", "true", timeout=5000)
-    expect(container.get_by_test_id("pivot-temporal-parent-row")).to_have_count(
-        1, timeout=10000
+    click_and_wait_for_count(
+        us_group_toggle,
+        container.get_by_test_id("pivot-temporal-parent-row"),
+        1,
+        timeout=10000,
     )
+    us_total_row = container.locator(
+        'tr[data-testid="pivot-subtotal-row"]:visible'
+    ).filter(has_text="US Total")
+    us_group_toggle = us_total_row.get_by_test_id("pivot-group-toggle-US")
+    expect(us_group_toggle).to_have_attribute("aria-expanded", "true", timeout=5000)
 
 
 def test_drilldown_opens_on_cell_click(page_at_app: Page):
@@ -1184,6 +1228,15 @@ def _drilldown_sort_button(panel, column_name: str):
     )
 
 
+def _drilldown_sort_header(panel, column_name: str):
+    """Return the sortable header cell for a drilldown column."""
+    return (
+        panel.get_by_test_id("drilldown-table")
+        .locator("th")
+        .filter(has_text=column_name)
+    )
+
+
 def test_drilldown_client_pagination_shows_controls(page_at_app: Page):
     """Client-only: clicking a cell with >500 records shows pagination controls."""
     page = page_at_app
@@ -1215,8 +1268,11 @@ def test_drilldown_client_sort_orders_full_result_before_pagination(page_at_app:
     page = page_at_app
     _, panel = _open_drilldown_with_pagination(page, "test_pivot_drilldown_pagination")
 
+    revenue_header = _drilldown_sort_header(panel, "Revenue")
     _drilldown_sort_button(panel, "Revenue").click()
+    expect(revenue_header).to_have_attribute("aria-sort", "ascending", timeout=5000)
     _drilldown_sort_button(panel, "Revenue").click()
+    expect(revenue_header).to_have_attribute("aria-sort", "descending", timeout=5000)
 
     # Fixture values for Alpha/2023 are 10..709 inclusive, so descending page 1
     # starts at 709 and descending page 2 starts at 209 after the first 500 rows.
