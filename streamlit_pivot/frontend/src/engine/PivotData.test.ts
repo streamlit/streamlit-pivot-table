@@ -1897,6 +1897,18 @@ describe("PivotData - hybrid agg remap", () => {
     expect(pd.getAggregator(["EU"], ["2023"]).value()).toBe(5);
   });
 
+  it("count remap preserves zero for empty intersections", () => {
+    const countData: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 3 },
+      { region: "EU", year: "2024", revenue: 5 },
+    ];
+    const cfg = makeConfig({ aggregation: "count" });
+    const pd = new PivotData(countData, cfg, {
+      hybridAggRemap: { revenue: "sum" },
+    });
+    expect(pd.getAggregator(["US"], ["2024"]).value()).toBe(0);
+  });
+
   it("count_distinct leaf cells with remap show pre-computed value", () => {
     const data: DataRecord[] = [
       { region: "US", year: "2023", revenue: 7 },

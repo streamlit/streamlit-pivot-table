@@ -293,6 +293,23 @@ describe("DrilldownPanel — server mode (hybrid drill-down)", () => {
     );
     expect(screen.getByText(/No matching records found/)).toBeInTheDocument();
   });
+
+  it("renders year-like integer columns without locale grouping", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={[{ region: "", year: 2024, revenue: 5, order: "N1" }]}
+        serverColumns={["region", "year", "revenue", "order"]}
+        serverTotalCount={1}
+        columnTypes={new Map([["year", "integer"]])}
+      />,
+    );
+    expect(screen.getByText("2024")).toBeInTheDocument();
+    expect(screen.queryByText("2,024")).not.toBeInTheDocument();
+  });
 });
 
 describe("DrilldownPanel — server pagination", () => {
@@ -862,6 +879,26 @@ describe("DrilldownPanel — cell alignment", () => {
     const cells = row.querySelectorAll("td");
     expect(cells[0].style.textAlign).toBe("right"); // region override
     expect(cells[2].style.textAlign).toBe("center"); // revenue override
+  });
+
+  it("does not right-align year-like integer columns", () => {
+    const pd = makePivotData();
+    render(
+      <DrilldownPanel
+        pivotData={pd}
+        payload={makePayload()}
+        onClose={vi.fn()}
+        serverRecords={[{ region: "", year: 2024, revenue: 5, order: "N1" }]}
+        serverColumns={["region", "year", "revenue", "order"]}
+        serverTotalCount={1}
+        columnTypes={new Map([["year", "integer"]])}
+      />,
+    );
+    const row = screen
+      .getByTestId("drilldown-table")
+      .querySelector("tbody tr")!;
+    const cells = row.querySelectorAll("td");
+    expect(cells[1].style.textAlign).toBe("");
   });
 });
 

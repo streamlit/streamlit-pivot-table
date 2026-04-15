@@ -375,11 +375,14 @@ def _prepare_threshold_hybrid_frame(
     named: dict[str, pd.NamedAgg] = {}
     avg_fields: list[str] = []
     numeric_coerce_fields: list[str] = []
+    count_like_fields: list[str] = []
 
     for vf in value_fields:
         agg = aggregation.get(vf, "sum")
         if agg in _NUMERIC_COERCE_AGGS:
             numeric_coerce_fields.append(vf)
+        if agg in ("count", "count_distinct"):
+            count_like_fields.append(vf)
         if agg == "avg":
             avg_fields.append(vf)
             named[f"{vf}__sum"] = pd.NamedAgg(column=vf, aggfunc="sum")
@@ -412,6 +415,8 @@ def _prepare_threshold_hybrid_frame(
             ser = filtered_df[vf]
             if agg in _NUMERIC_COERCE_AGGS:
                 ser = _coerce_measure_series(ser, vf, null_handling)
+            elif agg in ("count", "count_distinct"):
+                ser = _resolve_count_series(ser, vf, null_handling)
             if agg == "avg":
                 cnt = int(ser.count())
                 row[vf] = float(ser.sum() / cnt) if cnt else float("nan")
@@ -452,6 +457,8 @@ def _prepare_threshold_hybrid_frame(
         working[dim] = _resolve_dim_value_series(working[dim], col_type, mode, grain)
     for vf in numeric_coerce_fields:
         working[vf] = _coerce_measure_series(working[vf], vf, null_handling)
+    for vf in count_like_fields:
+        working[vf] = _resolve_count_series(working[vf], vf, null_handling)
 
     out = (
         working.groupby(group_fields, dropna=False, observed=True, sort=False)
@@ -661,6 +668,13 @@ def _coerce_measure_series(series: Any, field: str, null_handling: Any) -> Any:
     if _get_null_mode(field, null_handling) == "zero":
         return numeric.fillna(0)
     return numeric
+
+
+def _resolve_count_series(series: Any, field: str, null_handling: Any) -> Any:
+    """Preserve values for count-like aggs, zero-filling nulls when requested."""
+    if _get_null_mode(field, null_handling) == "zero":
+        return series.fillna(0)
+    return series
 
 
 def _extract_styler_formats(

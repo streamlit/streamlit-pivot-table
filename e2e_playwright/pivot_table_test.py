@@ -350,6 +350,30 @@ def test_scalar_aggregation_roundtrip_persists_and_python_override_wins(
     )
 
 
+def test_numpy_backed_configs_render_without_frontend_validation_errors(
+    page_at_app: Page,
+):
+    """NumPy-derived string lists render like normal string-list configs."""
+    page = page_at_app
+
+    numpy_str_list = get_pivot(page, "test_pivot_numpy_list")
+    expect(numpy_str_list.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+    expect(numpy_str_list.get_by_test_id("pivot-data-cell").first).to_be_visible(
+        timeout=5000
+    )
+    expect(numpy_str_list.get_by_test_id("toolbar-rows-chips")).to_contain_text(
+        "Region"
+    )
+    expect(numpy_str_list.get_by_test_id("toolbar-columns-chips")).to_contain_text(
+        "Year"
+    )
+    expect(numpy_str_list.get_by_test_id("toolbar-values-chips")).to_contain_text(
+        "Revenue"
+    )
+
+    expect(page.locator("text=must contain only strings")).to_have_count(0)
+
+
 def test_toolbar_swap_rows_columns(page_at_app: Page):
     """Swapping rows and columns transposes the pivot layout."""
     page = page_at_app

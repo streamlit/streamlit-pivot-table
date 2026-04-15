@@ -119,6 +119,14 @@ describe("CountAggregator", () => {
     expect(agg.value()).toBe(3);
   });
 
+  it("ignores NaN values", () => {
+    const agg = createAggregator("count");
+    agg.push(1);
+    agg.push(Number.NaN);
+    agg.push(0);
+    expect(agg.value()).toBe(2);
+  });
+
   it("returns 0 for all nulls", () => {
     const agg = createAggregator("count");
     agg.push(null);
@@ -247,6 +255,12 @@ describe("CountDistinctAggregator", () => {
     const agg = createAggregator("count_distinct");
     [1, 2, 2, 3].forEach((v) => agg.push(v));
     expect(agg.value()).toBe(3);
+  });
+
+  it("ignores NaN values", () => {
+    const agg = createAggregator("count_distinct");
+    [1, Number.NaN, 1, 2].forEach((v) => agg.push(v));
+    expect(agg.value()).toBe(2);
   });
 
   it("returns null for empty input", () => {

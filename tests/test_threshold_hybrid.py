@@ -874,6 +874,44 @@ def test_prepare_hybrid_frame_count_distinct_does_not_coerce(pivot_module):
     assert int(result["v"].values[0]) == 2
 
 
+def test_prepare_hybrid_frame_count_zero_treats_null_as_zero(pivot_module):
+    df = pd.DataFrame(
+        {
+            "r": ["x", "x", "x"],
+            "v": [10.0, None, 20.0],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "count"},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(df, cfg, null_handling="zero")
+    assert int(result["v"].values[0]) == 3
+
+
+def test_prepare_hybrid_frame_count_distinct_zero_treats_null_as_zero(pivot_module):
+    df = pd.DataFrame(
+        {
+            "r": ["x", "x", "x", "x"],
+            "v": [10.0, None, 20.0, 10.0],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "count_distinct"},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(df, cfg, null_handling="zero")
+    assert int(result["v"].values[0]) == 3
+
+
 def test_prepare_hybrid_frame_no_groups_coerces_non_numeric(pivot_module):
     """No-group path should also coerce non-numeric strings for numeric aggs."""
     df = pd.DataFrame(

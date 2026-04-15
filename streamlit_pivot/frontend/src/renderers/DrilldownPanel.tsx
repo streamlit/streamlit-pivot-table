@@ -145,6 +145,12 @@ function formatCellValue(
   if (colType === "date") return formatDateValue(value);
   if (typeof value === "number") {
     if (Number.isNaN(value)) return "";
+    const looksLikeYearField = /(^|[_\s])years?($|[_\s])/i.test(column);
+    const looksLikeYearValue =
+      Number.isInteger(value) && value >= 1000 && value <= 9999;
+    if (colType === "integer" && looksLikeYearField && looksLikeYearValue) {
+      return String(value);
+    }
     const pattern = numberFormat?.[column] ?? numberFormat?.["__all__"];
     if (pattern) return formatWithPattern(value, pattern);
     return formatNumber(value);
@@ -155,10 +161,21 @@ function formatCellValue(
 function getCellAlign(
   value: unknown,
   column: string,
+  columnTypes?: ColumnTypeMap,
   columnAlignment?: Record<string, string>,
 ): React.CSSProperties["textAlign"] | undefined {
   const explicit = columnAlignment?.[column];
   if (explicit) return explicit as React.CSSProperties["textAlign"];
+  const colType = columnTypes?.get(column);
+  const looksLikeYearField = /(^|[_\s])years?($|[_\s])/i.test(column);
+  const looksLikeYearValue =
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1000 &&
+    value <= 9999;
+  if (colType === "integer" && looksLikeYearField && looksLikeYearValue) {
+    return undefined;
+  }
   if (typeof value === "number" && !Number.isNaN(value)) return "right";
   return undefined;
 }
@@ -442,6 +459,7 @@ const DrilldownPanel: FC<DrilldownPanelProps> = ({
                       const align = getCellAlign(
                         record[col],
                         col,
+                        columnTypes,
                         columnAlignment,
                       );
                       return (

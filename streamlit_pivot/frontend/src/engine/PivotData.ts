@@ -429,6 +429,12 @@ export class PivotData {
     );
   }
 
+  private _emptyAggregatorForField(valField: string): Aggregator {
+    return getAggregatorFactory(
+      getAggregationForField(valField, this._config),
+    ).create();
+  }
+
   // ---------------------------------------------------------------------------
   // Filtering
   // ---------------------------------------------------------------------------
@@ -1124,7 +1130,7 @@ export class PivotData {
     const keyStr = `${makeKeyString(rowKey)}\x01${makeKeyString(colKey)}\x01${field}`;
     const agg = this._cellAggs.get(keyStr);
     if (!agg) {
-      return this._factoryForField(field).create();
+      return this._emptyAggregatorForField(field);
     }
     return agg;
   }
@@ -1145,7 +1151,7 @@ export class PivotData {
     }
     const agg = this._rowTotalAggs.get(keyStr);
     if (!agg) {
-      return this._factoryForField(field).create();
+      return this._emptyAggregatorForField(field);
     }
     return agg;
   }
@@ -1166,7 +1172,7 @@ export class PivotData {
     }
     const agg = this._colTotalAggs.get(keyStr);
     if (!agg) {
-      return this._factoryForField(field).create();
+      return this._emptyAggregatorForField(field);
     }
     return agg;
   }
@@ -1187,7 +1193,7 @@ export class PivotData {
     }
     const agg = this._grandTotalAggs.get(field);
     if (!agg) {
-      return this._factoryForField(field).create();
+      return this._emptyAggregatorForField(field);
     }
     return agg;
   }

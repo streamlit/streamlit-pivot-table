@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import streamlit as st
 
 from streamlit_pivot import st_pivot_table
@@ -120,6 +121,18 @@ def render_app(data):
         columns=["Year"],
         values=["Revenue", "Profit"],
         aggregation=st.session_state["scalar_roundtrip_aggregation"],
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("NumPy list Pivot")
+    st_pivot_table(
+        df,
+        key="test_pivot_numpy_list",
+        rows=list(np.array(["Region"])),
+        columns=list(np.array(["Year"])),
+        values=list(np.array(["Revenue"])),
+        aggregation="sum",
         interactive=True,
         on_config_change=noop,
     )

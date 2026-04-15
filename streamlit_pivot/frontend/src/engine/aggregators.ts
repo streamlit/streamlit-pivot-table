@@ -47,6 +47,10 @@ function toNumber(v: unknown): number | null {
   return null;
 }
 
+function isMissingCountValue(value: unknown): boolean {
+  return value == null || (typeof value === "number" && Number.isNaN(value));
+}
+
 class SumAggregator implements Aggregator {
   private _sum = 0;
   private _count = 0;
@@ -94,7 +98,7 @@ class AvgAggregator implements Aggregator {
 class CountAggregator implements Aggregator {
   private _count = 0;
   push(value: unknown): void {
-    if (value != null) {
+    if (!isMissingCountValue(value)) {
       this._count++;
     }
   }
@@ -158,7 +162,7 @@ class CountDistinctAggregator implements Aggregator {
   private _set = new Set<string>();
   private _count = 0;
   push(value: unknown): void {
-    if (value != null) {
+    if (!isMissingCountValue(value)) {
       this._set.add(String(value));
       this._count++;
     }

@@ -44,7 +44,6 @@ TOOLBAR_SCRIPT = Path(__file__).parent / "pivot_table_toolbar_app.py"
 INTERACTIONS_SCRIPT = Path(__file__).parent / "pivot_table_interactions_app.py"
 DATA_SCRIPT = Path(__file__).parent / "pivot_table_data_app.py"
 GOLDEN_SCRIPT = Path(__file__).parent / "pivot_table_golden_app.py"
-NUMPY_INPUT_SCRIPT = Path(__file__).parent / "pivot_table_numpy_input_app.py"
 
 PIVOT_KEYS = [
     "test_pivot",
@@ -82,6 +81,7 @@ TOOLBAR_PIVOT_KEYS = [
     "test_pivot_subtotals",
     "test_pivot_cond_fmt",
     "test_pivot_scalar_roundtrip",
+    "test_pivot_numpy_list",
 ]
 
 # Must match the exact order of st_pivot_table(key=...) calls in
@@ -144,11 +144,6 @@ GOLDEN_PIVOT_KEYS = [
     "golden_export",
 ]
 
-NUMPY_INPUT_PIVOT_KEYS = [
-    "numpy_array_pivot",
-    "numpy_str_list_pivot",
-]
-
 APP_CONFIGS = {
     "default": {"script": SCRIPT, "pivot_keys": PIVOT_KEYS},
     "pivot_table_test.py": {"script": TOOLBAR_SCRIPT, "pivot_keys": TOOLBAR_PIVOT_KEYS},
@@ -160,10 +155,6 @@ APP_CONFIGS = {
     "pivot_table_golden_test.py": {
         "script": GOLDEN_SCRIPT,
         "pivot_keys": GOLDEN_PIVOT_KEYS,
-    },
-    "pivot_table_numpy_input_test.py": {
-        "script": NUMPY_INPUT_SCRIPT,
-        "pivot_keys": NUMPY_INPUT_PIVOT_KEYS,
     },
 }
 
