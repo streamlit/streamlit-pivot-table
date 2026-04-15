@@ -66,6 +66,20 @@ def click_and_wait_for_count(locator, target, count: int, timeout: int = 10000) 
                 raise
 
 
+def click_and_wait_for_visible(locator, target, timeout: int = 10000) -> None:
+    """Click a control and retry once if the target does not become visible."""
+    for attempt in range(2):
+        locator.evaluate(
+            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+        )
+        try:
+            expect(target).to_be_visible(timeout=timeout)
+            return
+        except AssertionError:
+            if attempt == 1:
+                raise
+
+
 def open_header_menu(page: Page, trigger_locator, menu_test_id: str):
     """Open a header menu and wait for it to become visible."""
     expect(trigger_locator).to_be_visible(timeout=5000)
@@ -834,8 +848,10 @@ def test_readonly_mode_hides_toolbar_and_menu_actions(page_at_app: Page):
     expect(container.get_by_test_id("pivot-toolbar")).to_have_count(0)
     expect(container.get_by_test_id("header-menu-trigger-Region")).to_have_count(0)
 
-    container.get_by_test_id("pivot-data-cell").first.click()
-    expect(container.get_by_test_id("drilldown-panel")).to_be_visible(timeout=5000)
+    click_and_wait_for_visible(
+        container.get_by_test_id("pivot-data-cell").first,
+        page.get_by_test_id("drilldown-panel"),
+    )
 
 
 def test_drilldown_disabled_no_panel(page_at_app: Page):

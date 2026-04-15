@@ -979,6 +979,26 @@ def test_prepare_hybrid_frame_separate_mode_null_filter(pivot_module):
     assert float(result["revenue"].values[0]) == 600.0
 
 
+def test_prepare_threshold_hybrid_frame_avg_zero_treats_null_as_zero(pivot_module):
+    df = pd.DataFrame(
+        {
+            "region": ["EU", "EU"],
+            "year": ["2024", "2024"],
+            "revenue": [None, 200.0],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "avg"},
+        "synthetic_measures": [],
+    }
+    result = pivot_module._prepare_threshold_hybrid_frame(df, cfg, null_handling="zero")
+    assert float(result["revenue"].iloc[0]) == 100.0
+
+
 def test_prepare_hybrid_frame_no_filters_unchanged(pivot_module):
     """No filters produces same output as before."""
     df = pd.DataFrame(
@@ -1074,6 +1094,20 @@ class TestComputeHybridTotals:
         sidecar = pivot_module._compute_hybrid_totals(df, self._cfg("avg"), None)
         assert sidecar is not None
         assert abs(sidecar["grand"]["revenue"] - df["revenue"].mean()) < 1e-9
+
+    def test_zero_null_handling_affects_avg(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "region": ["EU", "EU"],
+                "year": ["2024", "2024"],
+                "revenue": [None, 200.0],
+            }
+        )
+        sidecar = pivot_module._compute_hybrid_totals(df, self._cfg("avg"), "zero")
+        assert sidecar is not None
+        assert sidecar["grand"]["revenue"] == 100.0
+        row_vals = {tuple(e["key"]): e["values"]["revenue"] for e in sidecar["row"]}
+        assert row_vals[("EU",)] == 100.0
 
     def test_respects_filters(self, pivot_module, df):
         cfg = self._cfg("median", filters={"region": {"include": ["US"]}})

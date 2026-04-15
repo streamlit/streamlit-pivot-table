@@ -590,6 +590,24 @@ describe("PivotData - null handling", () => {
     expect(pd.getAggregator(["EU"], ["2024"]).count()).toBe(2);
   });
 
+  it("zero mode treats NaN values as 0 for averages", () => {
+    const pd = new PivotData(
+      [
+        { region: "EU", year: "2024", revenue: Number.NaN },
+        { region: "EU", year: "2024", revenue: 200 },
+      ],
+      makeConfig({
+        rows: ["region"],
+        columns: ["year"],
+        values: ["revenue"],
+        aggregation: { revenue: "avg" },
+      }),
+      { nullHandling: "zero" },
+    );
+    expect(pd.getAggregator(["EU"], ["2024"]).value()).toBe(100);
+    expect(pd.getAggregator(["EU"], ["2024"]).count()).toBe(2);
+  });
+
   it("separate mode creates (null) bucket for dimension values", () => {
     const pd = new PivotData(
       DATA_WITH_NULLS,
@@ -1754,6 +1772,41 @@ describe("PivotData - hybrid sidecar override", () => {
     const totals = makeHybridTotals(cfg, { revenue: 42.5 });
     const pd = new PivotData(SAMPLE_DATA, cfg, { hybridTotals: totals });
     expect(pd.getGrandTotal("revenue").value()).toBe(42.5);
+  });
+
+  it("accepts Python-style sidecar fingerprints with empty date_grains objects", () => {
+    const cfg = makeConfig({ aggregation: { revenue: "avg" } });
+    const hybridRows = [
+      { region: "East", year: "2024", revenue: 5 },
+      { region: "", year: "2024", revenue: 5 },
+      { region: "West", year: "2024", revenue: 7 },
+    ];
+    const totals: HybridTotals = {
+      sidecar_fingerprint: JSON.stringify({
+        adaptive_date_grains: {},
+        aggregation: { revenue: "avg" },
+        auto_date_hierarchy: true,
+        columns: ["year"],
+        date_grains: {},
+        filters: {},
+        null_handling: "zero",
+        rows: ["region"],
+        show_subtotals: false,
+        values: ["revenue"],
+      }),
+      grand: { revenue: 5.5 },
+      row: [
+        { key: ["East"], values: { revenue: 5 } },
+        { key: [""], values: { revenue: 5 } },
+        { key: ["West"], values: { revenue: 7 } },
+      ],
+      col: [{ key: ["2024"], values: { revenue: 5.5 } }],
+    };
+    const pd = new PivotData(hybridRows, cfg, {
+      hybridTotals: totals,
+      nullHandling: "zero",
+    });
+    expect(pd.getGrandTotal("revenue").value()).toBe(5.5);
   });
 
   it("getRowTotal uses sidecar value when available", () => {

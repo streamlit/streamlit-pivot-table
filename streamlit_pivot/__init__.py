@@ -411,7 +411,7 @@ def _prepare_threshold_hybrid_frame(
             agg = aggregation.get(vf, "sum")
             ser = filtered_df[vf]
             if agg in _NUMERIC_COERCE_AGGS:
-                ser = pd.to_numeric(ser, errors="coerce")
+                ser = _coerce_measure_series(ser, vf, null_handling)
             if agg == "avg":
                 cnt = int(ser.count())
                 row[vf] = float(ser.sum() / cnt) if cnt else float("nan")
@@ -451,7 +451,7 @@ def _prepare_threshold_hybrid_frame(
         col_type = column_types.get(dim) if column_types else None
         working[dim] = _resolve_dim_value_series(working[dim], col_type, mode, grain)
     for vf in numeric_coerce_fields:
-        working[vf] = pd.to_numeric(working[vf], errors="coerce")
+        working[vf] = _coerce_measure_series(working[vf], vf, null_handling)
 
     out = (
         working.groupby(group_fields, dropna=False, observed=True, sort=False)
@@ -653,6 +653,14 @@ def _resolve_dim_value_series(
     if null_handling_mode == "separate":
         return series.fillna("(null)").replace("", "(null)").astype(str)
     return series.fillna("").astype(str)
+
+
+def _coerce_measure_series(series: Any, field: str, null_handling: Any) -> Any:
+    """Coerce measure values and zero-fill nulls when requested."""
+    numeric = pd.to_numeric(series, errors="coerce")
+    if _get_null_mode(field, null_handling) == "zero":
+        return numeric.fillna(0)
+    return numeric
 
 
 def _extract_styler_formats(
@@ -942,15 +950,26 @@ def _build_sidecar_fingerprint(
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
 
-def _sidecar_agg_func(agg: str, series: Any) -> Any:
+def _sidecar_agg_func(
+    agg: str,
+    series: Any,
+    field: str | None = None,
+    null_handling: Any = None,
+) -> Any:
     """Compute a single aggregate on a pandas Series for sidecar totals.
 
     Applies pd.to_numeric coercion for numeric aggs to match the frontend's
     toNumber() semantics (non-numeric strings are dropped).
     """
     if agg == "count_distinct":
+        if field is not None and _get_null_mode(field, null_handling) == "zero":
+            return series.fillna(0).nunique()
         return series.nunique()
-    numeric = pd.to_numeric(series, errors="coerce")
+    numeric = (
+        _coerce_measure_series(series, field, null_handling)
+        if field is not None
+        else pd.to_numeric(series, errors="coerce")
+    )
     if agg == "avg":
         return numeric.mean()
     if agg == "median":
@@ -970,6 +989,7 @@ def _sidecar_groupby_agg(
     df: Any,
     group_cols: list[str],
     sidecar_fields: dict[str, str],
+    null_handling: Any = None,
 ) -> list[dict[str, Any]]:
     """GroupBy + aggregate for sidecar total entries."""
     if not group_cols or not sidecar_fields:
@@ -981,7 +1001,7 @@ def _sidecar_groupby_agg(
         key = [str(k) for k in key]
         values: dict[str, int | float | None] = {}
         for field, agg in sidecar_fields.items():
-            val = _sidecar_agg_func(agg, group_df[field])
+            val = _sidecar_agg_func(agg, group_df[field], field, null_handling)
             values[field] = _normalize_sidecar_value(val)
         entries.append({"key": key, "values": values})
     return entries
@@ -1062,12 +1082,18 @@ def _compute_hybrid_totals(
 
     grand: dict[str, int | float | None] = {}
     for field, agg in sidecar_fields.items():
-        val = _sidecar_agg_func(agg, working[field])
+        val = _sidecar_agg_func(agg, working[field], field, null_handling)
         grand[field] = _normalize_sidecar_value(val)
 
-    row_entries = _sidecar_groupby_agg(working, rows, sidecar_fields) if rows else []
+    row_entries = (
+        _sidecar_groupby_agg(working, rows, sidecar_fields, null_handling)
+        if rows
+        else []
+    )
     col_entries = (
-        _sidecar_groupby_agg(working, columns, sidecar_fields) if columns else []
+        _sidecar_groupby_agg(working, columns, sidecar_fields, null_handling)
+        if columns
+        else []
     )
 
     result: dict[str, Any] = {
@@ -1093,7 +1119,7 @@ def _compute_hybrid_totals(
                 cp_key = parts[len(rows) :]
                 vals: dict[str, int | float | None] = {}
                 for field, agg in sidecar_fields.items():
-                    v = _sidecar_agg_func(agg, group_df[field])
+                    v = _sidecar_agg_func(agg, group_df[field], field, null_handling)
                     vals[field] = _normalize_sidecar_value(v)
                 col_prefix_entries.append(
                     {"key": cp_key, "row": row_key, "values": vals}
@@ -1110,7 +1136,7 @@ def _compute_hybrid_totals(
             )
             vals_grand: dict[str, int | float | None] = {}
             for field, agg in sidecar_fields.items():
-                v = _sidecar_agg_func(agg, group_df[field])
+                v = _sidecar_agg_func(agg, group_df[field], field, null_handling)
                 vals_grand[field] = _normalize_sidecar_value(v)
             col_prefix_grand_entries.append({"key": cp_key, "values": vals_grand})
 
@@ -1169,7 +1195,9 @@ def _compute_hybrid_totals(
                         )
                         vals_tp: dict[str, int | float | None] = {}
                         for field, agg in sidecar_fields.items():
-                            v = _sidecar_agg_func(agg, group_df[field])
+                            v = _sidecar_agg_func(
+                                agg, group_df[field], field, null_handling
+                            )
                             vals_tp[field] = _normalize_sidecar_value(v)
                         temporal_parent_entries.append(
                             {
@@ -1195,7 +1223,9 @@ def _compute_hybrid_totals(
                     )
                     vals_tp_g: dict[str, int | float | None] = {}
                     for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(agg, group_df[field])
+                        v = _sidecar_agg_func(
+                            agg, group_df[field], field, null_handling
+                        )
                         vals_tp_g[field] = _normalize_sidecar_value(v)
                     temporal_parent_grand_entries.append(
                         {
@@ -1262,7 +1292,9 @@ def _compute_hybrid_totals(
                         col_key = col_key_builder(parts[len(rows) :])
                         vals_trp: dict[str, int | float | None] = {}
                         for field, agg in sidecar_fields.items():
-                            v = _sidecar_agg_func(agg, group_df[field])
+                            v = _sidecar_agg_func(
+                                agg, group_df[field], field, null_handling
+                            )
                             vals_trp[field] = _normalize_sidecar_value(v)
                         temporal_row_parent_entries.append(
                             {
@@ -1352,7 +1384,9 @@ def _compute_hybrid_totals(
                     )
                     vals_trp_g: dict[str, int | float | None] = {}
                     for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(agg, group_df[field])
+                        v = _sidecar_agg_func(
+                            agg, group_df[field], field, null_handling
+                        )
                         vals_trp_g[field] = _normalize_sidecar_value(v)
                     temporal_row_parent_grand_entries.append(
                         {
@@ -1390,7 +1424,9 @@ def _compute_hybrid_totals(
                     ck = parts[depth:]
                     vals_sub: dict[str, int | float | None] = {}
                     for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(agg, group_df[field])
+                        v = _sidecar_agg_func(
+                            agg, group_df[field], field, null_handling
+                        )
                         vals_sub[field] = _normalize_sidecar_value(v)
                     subtotal_entries.append({"key": rp, "col": ck, "values": vals_sub})
 
@@ -1402,7 +1438,7 @@ def _compute_hybrid_totals(
                 parts = [str(p) for p in parts]
                 vals_rt: dict[str, int | float | None] = {}
                 for field, agg in sidecar_fields.items():
-                    v = _sidecar_agg_func(agg, group_df[field])
+                    v = _sidecar_agg_func(agg, group_df[field], field, null_handling)
                     vals_rt[field] = _normalize_sidecar_value(v)
                 subtotal_entries.append({"key": parts, "col": [], "values": vals_rt})
 
@@ -1420,7 +1456,9 @@ def _compute_hybrid_totals(
                     cp_c = parts_c[depth:]
                     vals_cross: dict[str, int | float | None] = {}
                     for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(agg, group_df[field])
+                        v = _sidecar_agg_func(
+                            agg, group_df[field], field, null_handling
+                        )
                         vals_cross[field] = _normalize_sidecar_value(v)
                     cross_subtotal_entries.append(
                         {"key": rp_c, "col_prefix": cp_c, "values": vals_cross}

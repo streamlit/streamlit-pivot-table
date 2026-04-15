@@ -132,7 +132,7 @@ export function buildSidecarFingerprint(
             a.localeCompare(b),
           ),
         )
-      : undefined,
+      : {},
     filters: Object.fromEntries(
       Object.entries(filters)
         .sort(([a], [b]) => a.localeCompare(b))
@@ -559,7 +559,7 @@ export class PivotData {
   }
 
   private _resolveAggValue(field: string, raw: unknown): unknown {
-    if (raw == null) {
+    if (raw == null || (typeof raw === "number" && Number.isNaN(raw))) {
       const mode = getNullMode(field, this._options.nullHandling);
       return mode === "zero" ? 0 : raw;
     }
