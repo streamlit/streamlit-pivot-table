@@ -353,6 +353,50 @@ def render_app(data):
         on_config_change=noop,
     )
 
+    st.subheader("Hierarchy Layout")
+    st_pivot_table(
+        df,
+        key="test_pivot_hierarchy",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        row_layout="hierarchy",
+        show_subtotals=True,
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("Hierarchy Layout – Per-Measure Row Totals")
+    st_pivot_table(
+        df,
+        key="test_pivot_hierarchy_totals",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation="sum",
+        row_layout="hierarchy",
+        show_totals=True,
+        show_row_totals=["Revenue"],
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("Hierarchy Layout – Locked")
+    st_pivot_table(
+        df,
+        key="test_pivot_hierarchy_locked",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        row_layout="hierarchy",
+        show_subtotals=True,
+        locked=True,
+        interactive=True,
+        on_config_change=noop,
+    )
+
     drill_df = _make_drilldown_pagination_data()
 
     st.subheader("Drilldown Pagination (Client)")

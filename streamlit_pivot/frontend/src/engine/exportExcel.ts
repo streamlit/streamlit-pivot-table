@@ -17,7 +17,7 @@
 
 import type { ExportGrid, ExportCell, ValueFieldColumns } from "./exportData";
 import type {
-  ConditionalFormatRule,
+  AnyConditionalFormatRule,
   ColorScaleRule,
   DataBarsRule,
   ThresholdRule,
@@ -248,7 +248,7 @@ function applyConditionalFormatting(
       opts: import("exceljs").ConditionalFormattingOptions,
     ) => void;
   },
-  rules: ConditionalFormatRule[],
+  rules: AnyConditionalFormatRule[],
   valueFieldCols: ValueFieldColumns[],
   headerRowCount: number,
   totalRowCount: number,

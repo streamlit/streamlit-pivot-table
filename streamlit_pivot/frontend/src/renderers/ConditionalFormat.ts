@@ -17,7 +17,7 @@
 
 import type { PivotData } from "../engine/PivotData";
 import type {
-  ConditionalFormatRule,
+  AnyConditionalFormatRule,
   ColorScaleRule,
   DataBarsRule,
   ThresholdRule,
@@ -142,15 +142,15 @@ function contrastTextColor(bgRgb: RGB): string {
 // Style computation
 // ---------------------------------------------------------------------------
 
-function isColorScale(rule: ConditionalFormatRule): rule is ColorScaleRule {
+function isColorScale(rule: AnyConditionalFormatRule): rule is ColorScaleRule {
   return rule.type === "color_scale";
 }
 
-function isDataBars(rule: ConditionalFormatRule): rule is DataBarsRule {
+function isDataBars(rule: AnyConditionalFormatRule): rule is DataBarsRule {
   return rule.type === "data_bars";
 }
 
-function isThreshold(rule: ConditionalFormatRule): rule is ThresholdRule {
+function isThreshold(rule: AnyConditionalFormatRule): rule is ThresholdRule {
   return rule.type === "threshold";
 }
 
@@ -161,7 +161,7 @@ function isThreshold(rule: ConditionalFormatRule): rule is ThresholdRule {
 export function computeCellStyle(
   value: number | null,
   valField: string,
-  rules: ConditionalFormatRule[],
+  rules: AnyConditionalFormatRule[],
   pivotData: PivotData,
   isTotal: boolean,
 ): React.CSSProperties | undefined {

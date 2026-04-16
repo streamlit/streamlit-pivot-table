@@ -1197,8 +1197,8 @@ def test_filter_empty_state_and_recovery(page_at_app: Page):
     assert recovered_rows.count() > 0
 
 
-def test_child_toggle_disabled_when_parent_collapsed(page_at_app: Page):
-    """Collapsing Region disables the Category toggle (no role=button, shows tooltip)."""
+def test_child_toggle_reflects_parent_collapsed_state(page_at_app: Page):
+    """Collapsing Region keeps Category toggle interactive but shows collapsed state."""
     page = page_at_app
     container = get_pivot(page, "test_pivot_dim_toggle")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
@@ -1207,13 +1207,220 @@ def test_child_toggle_disabled_when_parent_collapsed(page_at_app: Page):
     category_toggle = container.get_by_test_id("pivot-dim-toggle-row-1-category")
 
     expect(category_toggle).to_have_attribute("role", "button")
+    expect(category_toggle).to_have_attribute("aria-expanded", "true")
 
     region_toggle.click()
     page.wait_for_timeout(1500)
     expect(region_toggle).to_have_attribute("aria-expanded", "false")
 
-    expect(category_toggle).not_to_have_attribute("role", "button", timeout=5000)
-    expect(category_toggle).to_have_attribute("title", "Expand Region first")
+    expect(category_toggle).to_have_attribute("role", "button", timeout=5000)
+    expect(category_toggle).to_have_attribute("aria-expanded", "false")
+
+
+# ---------------------------------------------------------------------------
+# Hierarchy Layout
+# ---------------------------------------------------------------------------
+
+
+def test_hierarchy_layout_renders_breadcrumbs_and_subtotals(page_at_app: Page):
+    """Hierarchy layout renders a single row-header column with breadcrumbs and subtotal rows."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    breadcrumbs = container.locator("[data-testid^='pivot-row-dim-breadcrumb-']")
+    expect(breadcrumbs.first).to_be_visible()
+
+    subtotals = container.get_by_test_id("pivot-subtotal-row")
+    expect(subtotals.first).to_be_visible()
+
+    data_rows = container.get_by_test_id("pivot-data-row")
+    expect(data_rows.first).to_be_visible()
+    first_row_headers = data_rows.first.locator("th")
+    expect(first_row_headers).to_have_count(1)
+
+
+def test_hierarchy_layout_breadcrumb_collapse(page_at_app: Page):
+    """Clicking a hierarchy breadcrumb toggle collapses groups at that level."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    data_rows_before = container.get_by_test_id("pivot-data-row").count()
+
+    region_toggle = container.get_by_test_id("pivot-dim-toggle-row-0-region")
+    expect(region_toggle).to_have_attribute("aria-expanded", "true")
+    region_toggle.click()
+    page.wait_for_timeout(1500)
+
+    expect(region_toggle).to_have_attribute("aria-expanded", "false")
+    data_rows_after = container.get_by_test_id("pivot-data-row").count()
+    assert data_rows_after < data_rows_before
+
+
+def test_hierarchy_layout_subtotal_group_collapse(page_at_app: Page):
+    """Collapsing a group via its subtotal-row toggle hides child data rows."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    rows_before = container.get_by_test_id("pivot-data-row").count()
+
+    toggle = container.locator(
+        "[data-testid^='pivot-group-toggle-']"
+        ":not([data-testid$='-expand-all'])"
+        ":not([data-testid$='-collapse-all'])"
+    ).first
+    expect(toggle).to_have_attribute("aria-expanded", "true")
+    toggle.click()
+    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=10000)
+
+    rows_after = container.get_by_test_id("pivot-data-row").count()
+    assert rows_after < rows_before
+    expect(container.get_by_test_id("pivot-subtotal-row").first).to_be_visible()
+
+
+def test_hierarchy_layout_expand_collapse_all(page_at_app: Page):
+    """Collapse All hides child rows; Expand All restores them in hierarchy mode."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expand_all = container.get_by_test_id("pivot-group-toggle-expand-all")
+    expand_all.scroll_into_view_if_needed()
+    expand_all.evaluate("el => el.click()")
+
+    data_rows = container.get_by_test_id("pivot-data-row")
+    rows_expanded = data_rows.count()
+    assert rows_expanded > 0
+
+    collapse_all = container.get_by_test_id("pivot-group-toggle-collapse-all")
+    collapse_all.scroll_into_view_if_needed()
+    collapse_all.evaluate("el => el.click()")
+
+    expect(data_rows).not_to_have_count(rows_expanded, timeout=10000)
+    rows_collapsed = data_rows.count()
+    assert rows_collapsed < rows_expanded
+
+    expand_all.scroll_into_view_if_needed()
+    expand_all.evaluate("el => el.click()")
+    expect(data_rows).not_to_have_count(rows_collapsed, timeout=10000)
+
+
+def test_hierarchy_layout_indented_row_headers(page_at_app: Page):
+    """Data rows in hierarchy mode have a single row header with depth-based indentation."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    data_rows = container.get_by_test_id("pivot-data-row")
+    expect(data_rows.first).to_be_visible(timeout=5000)
+
+    for row in data_rows.all()[:4]:
+        headers = row.locator("th")
+        expect(headers).to_have_count(1)
+
+    first_header = data_rows.first.locator("th")
+    padding = first_header.evaluate(
+        "el => parseInt(window.getComputedStyle(el.querySelector('span, div') || el).paddingLeft || '0')"
+    )
+    assert padding >= 0
+
+
+def test_hierarchy_header_menu_no_subtotal_toggle(page_at_app: Page):
+    """In hierarchy mode, the row-dimension header menu omits the subtotal toggle."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    trigger = container.locator("[data-testid^='header-menu-trigger-region']").first
+    expect(trigger).to_be_visible(timeout=5000)
+
+    menu = open_header_menu(page, trigger, "header-menu-Region")
+    expect(menu.get_by_test_id("header-menu-sort")).to_be_visible()
+    expect(menu.get_by_test_id("header-menu-subtotals")).to_have_count(0)
+
+    close_header_menu(page, "header-menu-Region")
+
+
+def test_hierarchy_per_measure_row_totals_excluded_shows_dash(page_at_app: Page):
+    """In hierarchy mode, excluded measures in row totals show a dash placeholder."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy_totals")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    excluded = container.locator('[data-testid="pivot-excluded-total"]')
+    expect(excluded.first).to_be_visible()
+    expect(excluded.first).to_have_text("–")
+
+    corner = container.get_by_test_id("pivot-row-dim-label-hierarchy")
+    expect(corner).to_be_visible()
+
+
+def test_settings_switch_table_to_hierarchy_layout(page_at_app: Page):
+    """Switching row layout from Table to Hierarchy via settings panel applies correctly."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_subtotals")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    expect(container.get_by_test_id("pivot-row-dim-label-hierarchy")).to_have_count(0)
+
+    panel = open_settings_panel(page, container)
+    hierarchy_btn = panel.get_by_test_id("settings-row-layout-hierarchy")
+    expect(hierarchy_btn).to_be_visible()
+    hierarchy_btn.click()
+
+    panel.get_by_test_id("settings-apply").click()
+
+    expect(container.get_by_test_id("pivot-row-dim-label-hierarchy")).to_be_visible(
+        timeout=10000
+    )
+
+    breadcrumbs = container.locator("[data-testid^='pivot-row-dim-breadcrumb-']")
+    expect(breadcrumbs.first).to_be_visible(timeout=5000)
+
+
+def test_settings_hierarchy_forces_subtotals_and_disables_repeat_labels(
+    page_at_app: Page,
+):
+    """In hierarchy mode, subtotals checkbox is forced on and repeat labels is disabled."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_subtotals")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+    hierarchy_btn = panel.get_by_test_id("settings-row-layout-hierarchy")
+    hierarchy_btn.click()
+
+    subtotals_input = panel.get_by_test_id("settings-subtotals").locator("input")
+    expect(subtotals_input).to_be_checked()
+    expect(subtotals_input).to_be_disabled()
+
+    repeat_input = panel.get_by_test_id("settings-repeat-labels").locator("input")
+    expect(repeat_input).to_be_disabled()
+
+    panel.get_by_test_id("settings-cancel").click()
+
+
+def test_hierarchy_locked_mode_status_strings(page_at_app: Page):
+    """Locked hierarchy pivot shows correct status labels in the settings panel."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_hierarchy_locked")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    expect(panel.get_by_test_id("settings-subtotals-status")).to_contain_text(
+        "Always On in Hierarchy"
+    )
+    expect(panel.get_by_test_id("settings-row-layout-status")).to_contain_text(
+        "Hierarchy"
+    )
+    expect(panel.get_by_test_id("settings-repeat-labels-status")).to_contain_text(
+        "N/A in Hierarchy"
+    )
+
+    panel.press("Escape")
 
 
 # ---------------------------------------------------------------------------

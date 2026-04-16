@@ -25,7 +25,7 @@ import {
   within,
 } from "@testing-library/react";
 import Toolbar, { applyDragMove } from "./Toolbar";
-import { resolveDragEnd } from "./SettingsPanel";
+import { canDropFieldToZone, resolveDragEnd } from "./SettingsPanel";
 import { PivotData, type DataRecord } from "../engine/PivotData";
 import { makeConfig } from "../test-utils";
 
@@ -1652,8 +1652,9 @@ describe("Toolbar - settings panel", () => {
     );
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     expect(screen.getByTestId("settings-row-layout")).toBeInTheDocument();
-    expect(screen.getByTestId("settings-row-layout-select")).toHaveTextContent(
-      "Table",
+    expect(screen.getByTestId("settings-row-layout-table")).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
   });
 
@@ -1672,8 +1673,7 @@ describe("Toolbar - settings panel", () => {
     );
 
     fireEvent.click(screen.getByTestId("toolbar-settings"));
-    fireEvent.click(screen.getByTestId("settings-row-layout-select"));
-    fireEvent.click(screen.getByTestId("settings-row-layout-select-hierarchy"));
+    fireEvent.click(screen.getByTestId("settings-row-layout-hierarchy"));
     fireEvent.click(screen.getByTestId("settings-apply"));
 
     const nextConfig = onConfigChange.mock.calls[0]?.[0];
@@ -2442,7 +2442,12 @@ describe("applyDragMove – config cleanup: conditional_formatting", () => {
     const cfg = makeConfig({
       values: ["revenue", "profit"],
       conditional_formatting: [
-        { type: "color_scale", apply_to: ["revenue", "profit"] },
+        {
+          type: "color_scale",
+          apply_to: ["revenue", "profit"],
+          min_color: "#ffffff",
+          max_color: "#ff0000",
+        },
       ],
     });
     const result = applyDragMove({
@@ -2453,14 +2458,26 @@ describe("applyDragMove – config cleanup: conditional_formatting", () => {
       numericColumns: NUMERIC_COLUMNS,
     });
     expect(result!.conditional_formatting).toEqual([
-      { type: "color_scale", apply_to: ["profit"] },
+      {
+        type: "color_scale",
+        apply_to: ["profit"],
+        min_color: "#ffffff",
+        max_color: "#ff0000",
+      },
     ]);
   });
 
   it("removes rule entirely when apply_to becomes empty", () => {
     const cfg = makeConfig({
       values: ["revenue", "profit"],
-      conditional_formatting: [{ type: "color_scale", apply_to: ["revenue"] }],
+      conditional_formatting: [
+        {
+          type: "color_scale",
+          apply_to: ["revenue"],
+          min_color: "#ffffff",
+          max_color: "#ff0000",
+        },
+      ],
     });
     const result = applyDragMove({
       sourceZone: "values",
@@ -2727,5 +2744,166 @@ describe("resolveDragEnd – DnD routing logic", () => {
       fromZone: "values",
       toZone: "rows",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DnD drop validation – canDropFieldToZone via applyDragMove
+// ---------------------------------------------------------------------------
+
+describe("canDropFieldToZone", () => {
+  it("rejects non-numeric fields for values", () => {
+    expect(
+      canDropFieldToZone({
+        field: "region",
+        toZone: "values",
+        numericFields: new Set(NUMERIC_COLUMNS),
+        rowFields: [],
+        columnFields: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects dragging a column field into rows from outside columns", () => {
+    expect(
+      canDropFieldToZone({
+        field: "year",
+        fromZone: "values",
+        toZone: "rows",
+        numericFields: new Set([...NUMERIC_COLUMNS, "year"]),
+        rowFields: [],
+        columnFields: ["year"],
+      }),
+    ).toBe(false);
+  });
+
+  it("allows moving a field directly from columns to rows", () => {
+    expect(
+      canDropFieldToZone({
+        field: "year",
+        fromZone: "columns",
+        toZone: "rows",
+        numericFields: new Set([...NUMERIC_COLUMNS, "year"]),
+        rowFields: [],
+        columnFields: ["year"],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("applyDragMove – DnD drop validation", () => {
+  it("rejects non-numeric field dragged from available to values", () => {
+    const cfg = makeConfig({ rows: [], columns: [], values: [] });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "values",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("allows numeric field dragged from available to values", () => {
+    const cfg = makeConfig({ rows: [], columns: [], values: [] });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "values",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.values).toContain("revenue");
+  });
+
+  it("rejects field in columns dragged to rows from non-columns zone", () => {
+    const cfg = makeConfig({
+      rows: [],
+      columns: ["year"],
+      values: ["revenue", "year"] as string[],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "year",
+      config: cfg,
+      numericColumns: [...NUMERIC_COLUMNS, "year"],
+    });
+    expect(result).toBeNull();
+  });
+
+  it("rejects field in rows dragged to columns from non-rows zone", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: [],
+      values: ["revenue", "region"] as string[],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: [...NUMERIC_COLUMNS, "region"],
+    });
+    expect(result).toBeNull();
+  });
+
+  it("allows field moved directly from rows to columns", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows).not.toContain("region");
+    expect(result!.columns).toContain("region");
+  });
+
+  it("allows field moved directly from columns to rows", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: ["year", "category"],
+      values: ["revenue"],
+    });
+    const result = applyDragMove({
+      sourceZone: "columns",
+      targetZone: "rows",
+      field: "year",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.columns).not.toContain("year");
+    expect(result!.rows).toContain("year");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Settings panel – DnD invalid zone visual feedback
+// ---------------------------------------------------------------------------
+
+describe("Toolbar - settings panel DnD invalid zone rendering", () => {
+  it("shows invalid message on values zone when non-numeric field is assigned via menu", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [], columns: [], values: [] })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const regionChip = screen.getByTestId("settings-available-region");
+    fireEvent.click(regionChip);
+    expect(screen.queryByText("Add to Values")).not.toBeInTheDocument();
+    expect(screen.getByText("Add to Rows")).toBeInTheDocument();
   });
 });

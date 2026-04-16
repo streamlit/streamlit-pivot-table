@@ -146,6 +146,15 @@ export type DragEndAction =
   | { type: "add-from-available"; field: string; toZone: ZoneKey }
   | null;
 
+export interface CanDropFieldToZoneParams {
+  field: string;
+  fromZone?: ZoneKey;
+  toZone: ZoneKey;
+  numericFields: Set<string>;
+  rowFields: string[];
+  columnFields: string[];
+}
+
 export function resolveDragEnd(params: DragEndParams): DragEndAction {
   const { activeData, overId, overData } = params;
   const sourceZone = activeData?.zone as ZoneKey | undefined;
@@ -174,6 +183,26 @@ export function resolveDragEnd(params: DragEndParams): DragEndAction {
     };
   }
   return { type: "add-from-available", field, toZone: targetZone };
+}
+
+export function canDropFieldToZone({
+  field,
+  fromZone,
+  toZone,
+  numericFields,
+  rowFields,
+  columnFields,
+}: CanDropFieldToZoneParams): boolean {
+  if (toZone === "values" && !numericFields.has(field)) return false;
+  if (
+    toZone === "rows" &&
+    fromZone !== "columns" &&
+    columnFields.includes(field)
+  )
+    return false;
+  if (toZone === "columns" && fromZone !== "rows" && rowFields.includes(field))
+    return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,12 +510,16 @@ interface DropZoneProps {
   zoneId: ZoneKey;
   children: React.ReactNode;
   isActive?: boolean;
+  isInvalid?: boolean;
+  invalidMessage?: string;
 }
 
 const DropZone: FC<DropZoneProps> = ({
   zoneId,
   children,
   isActive,
+  isInvalid,
+  invalidMessage,
 }): ReactElement => {
   const { setNodeRef } = useDroppable({
     id: `sp-zone-${zoneId}`,
@@ -495,10 +528,13 @@ const DropZone: FC<DropZoneProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className={`${styles.zoneArea} ${isActive ? styles.zoneAreaActive : ""}`}
+      className={`${styles.zoneArea} ${isActive ? styles.zoneAreaActive : ""} ${isInvalid ? styles.zoneAreaInvalid : ""}`}
       data-testid={`settings-zone-${zoneId}`}
     >
       {children}
+      {isInvalid && invalidMessage && (
+        <span className={styles.zoneInvalidHint}>{invalidMessage}</span>
+      )}
     </div>
   );
 };
@@ -529,7 +565,6 @@ const DraggableAvailableChip: FC<DraggableAvailableChipProps> = ({
         chipRef?.(node);
       }}
       className={`${styles.availableChip} ${isAssigned ? styles.availableChipAssigned : ""} ${isDragging ? styles.availableChipDragging : ""}`}
-      style={isDragging ? { opacity: 0.3 } : undefined}
       onClick={onToggleMenu}
       data-testid={`settings-available-${field}`}
       {...attributes}
@@ -1115,6 +1150,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
 
   // DnD state
   const [dragActiveZone, setDragActiveZone] = useState<string | null>(null);
+  const [dragActiveZoneInvalid, setDragActiveZoneInvalid] = useState(false);
 
   // External config change detection
   const configFingerprintRef = useRef(stringifyPivotConfig(config));
@@ -1577,6 +1613,19 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     zone?: string;
   } | null>(null);
 
+  const canDropToZone = useCallback(
+    (field: string, fromZone: ZoneKey | undefined, toZone: ZoneKey): boolean =>
+      canDropFieldToZone({
+        field,
+        fromZone,
+        toZone,
+        numericFields: numericSet,
+        rowFields: localRows,
+        columnFields: localCols,
+      }),
+    [numericSet, localCols, localRows],
+  );
+
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const data = event.active.data.current as
       | { field?: string; zone?: string }
@@ -1587,31 +1636,66 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     setAddMenuField(null);
   }, []);
 
-  const handleDragOver = useCallback((event: DragOverEvent) => {
-    const { over } = event;
-    if (!over) {
-      setDragActiveZone(null);
-      return;
-    }
-    const targetZone =
-      over.data.current?.zone ??
-      (over.data.current?.type === "container"
-        ? String(over.id).replace("sp-zone-", "")
-        : null);
-    setDragActiveZone(targetZone);
-  }, []);
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { active, over } = event;
+      if (!over) {
+        setDragActiveZone(null);
+        setDragActiveZoneInvalid(false);
+        return;
+      }
+      const targetZone =
+        over.data.current?.zone ??
+        (over.data.current?.type === "container"
+          ? String(over.id).replace("sp-zone-", "")
+          : null);
+      const activeData = active.data.current as
+        | { field?: string; zone?: string }
+        | undefined;
+      const isValidDrop =
+        activeData?.field && targetZone
+          ? canDropToZone(
+              activeData.field,
+              activeData.zone as ZoneKey | undefined,
+              targetZone as ZoneKey,
+            )
+          : true;
+      setDragActiveZone(targetZone);
+      setDragActiveZoneInvalid(!isValidDrop);
+    },
+    [canDropToZone],
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
       setDragActiveZone(null);
+      setDragActiveZoneInvalid(false);
       setDragOverlay(null);
       if (!over) return;
 
+      const activeData = active.data.current as
+        | { zone?: string; field?: string }
+        | undefined;
+      const targetZone =
+        over.data.current?.zone ??
+        (over.data.current?.type === "container"
+          ? String(over.id).replace("sp-zone-", "")
+          : null);
+      if (
+        activeData?.field &&
+        targetZone &&
+        !canDropToZone(
+          activeData.field,
+          activeData.zone as ZoneKey | undefined,
+          targetZone as ZoneKey,
+        )
+      ) {
+        return;
+      }
+
       const action = resolveDragEnd({
-        activeData: active.data.current as
-          | { zone?: string; field?: string }
-          | undefined,
+        activeData,
         overId: over.id,
         overData: over.data.current as
           | { zone?: string; type?: string; field?: string }
@@ -1639,11 +1723,12 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
         addToZone(action.field, action.toZone);
       }
     },
-    [moveToZone, addToZone],
+    [moveToZone, addToZone, canDropToZone],
   );
 
   const handleDragCancel = useCallback(() => {
     setDragActiveZone(null);
+    setDragActiveZoneInvalid(false);
     setDragOverlay(null);
   }, []);
 
@@ -1968,7 +2053,11 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
 
           {/* Rows zone */}
           <span className={styles.sectionTitle}>Rows</span>
-          <DropZone zoneId="rows" isActive={dragActiveZone === "rows"}>
+          <DropZone
+            zoneId="rows"
+            isActive={dragActiveZone === "rows" && !dragActiveZoneInvalid}
+            isInvalid={dragActiveZone === "rows" && dragActiveZoneInvalid}
+          >
             <SortableContext
               items={rowSortableIds}
               strategy={horizontalListSortingStrategy}
@@ -1990,10 +2079,43 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
               )}
             </SortableContext>
           </DropZone>
+          {localRows.length > 0 && (
+            <div
+              className={styles.rowLayoutControl}
+              data-testid="settings-row-layout"
+            >
+              <span className={styles.rowLayoutLabel}>Row Layout:</span>
+              <div
+                className={styles.segmentedControl}
+                role="group"
+                aria-label="Row layout"
+              >
+                {ROW_LAYOUT_OPTIONS.map((option) => {
+                  const isActive = localRowLayout === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`${styles.segmentedOption} ${isActive ? styles.segmentedOptionActive : ""}`}
+                      aria-pressed={isActive}
+                      onClick={() => handleRowLayoutChange(option.value)}
+                      data-testid={`settings-row-layout-${option.value}`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Columns zone */}
           <span className={styles.sectionTitle}>Columns</span>
-          <DropZone zoneId="columns" isActive={dragActiveZone === "columns"}>
+          <DropZone
+            zoneId="columns"
+            isActive={dragActiveZone === "columns" && !dragActiveZoneInvalid}
+            isInvalid={dragActiveZone === "columns" && dragActiveZoneInvalid}
+          >
             <SortableContext
               items={colSortableIds}
               strategy={horizontalListSortingStrategy}
@@ -2018,7 +2140,12 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
 
           {/* Values zone */}
           <span className={styles.sectionTitle}>Values</span>
-          <DropZone zoneId="values" isActive={dragActiveZone === "values"}>
+          <DropZone
+            zoneId="values"
+            isActive={dragActiveZone === "values" && !dragActiveZoneInvalid}
+            isInvalid={dragActiveZone === "values" && dragActiveZoneInvalid}
+            invalidMessage="Only numeric fields can be added to Values"
+          >
             <SortableContext
               items={valSortableIds}
               strategy={horizontalListSortingStrategy}
@@ -2222,7 +2349,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
             </div>
           )}
 
-          <DragOverlay dropAnimation={{ duration: 200 }}>
+          <DragOverlay dropAnimation={null}>
             {dragOverlay ? (
               <span
                 className={`${dragOverlay.zone ? styles.zoneChip : styles.availableChip} ${styles.dragOverlayChip}`}
@@ -2301,17 +2428,6 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                   : "Subtotals"}
               </span>
             </label>
-          )}
-          {localRows.length > 0 && (
-            <div data-testid="settings-row-layout">
-              <BuilderSelect<RowLayout>
-                value={localRowLayout}
-                options={ROW_LAYOUT_OPTIONS}
-                onChange={handleRowLayoutChange}
-                testId="settings-row-layout-select"
-                ariaLabel="Row layout"
-              />
-            </div>
           )}
           {localRows.length >= 2 && (
             <label

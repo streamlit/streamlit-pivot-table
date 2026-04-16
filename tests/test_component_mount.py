@@ -15,8 +15,26 @@
 
 """Python-side mount/payload tests for st_pivot_table()."""
 
+import sys
+from importlib import import_module
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
+
+
+def test_component_registers_deterministic_entry_assets():
+    sys.modules.pop("streamlit_pivot", None)
+    try:
+        with patch("streamlit.components.v2.component") as component_factory:
+            import_module("streamlit_pivot")
+
+        component_factory.assert_called_once()
+        kwargs = component_factory.call_args.kwargs
+        assert kwargs["js"] == "index.js"
+        assert kwargs["css"] == "index.css"
+    finally:
+        sys.modules.pop("streamlit_pivot", None)
 
 
 def test_mount_normalizes_partial_aggregation_map(
@@ -641,3 +659,146 @@ def test_adaptive_grains_computed_from_source_filtered_data(
     )
     data = calls[0]["data"]
     assert data["adaptive_date_grains"]["order_date"] == "day"
+
+
+# ---------------------------------------------------------------------------
+# row_layout validation
+# ---------------------------------------------------------------------------
+
+
+def test_row_layout_rejects_invalid_value(sample_df, pivot_module, mount_recorder):
+    """row_layout must be 'table' or 'hierarchy'."""
+    import pytest
+
+    mount_recorder()
+    with pytest.raises(ValueError, match="row_layout"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            values=["Revenue"],
+            row_layout="tree",
+        )
+
+
+def test_row_layout_hierarchy_forces_show_subtotals(
+    sample_df, pivot_module, mount_recorder
+):
+    """row_layout='hierarchy' auto-enables show_subtotals even when not specified."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        row_layout="hierarchy",
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config["row_layout"] == "hierarchy"
+    assert sent_config["show_subtotals"] is True
+
+
+def test_row_layout_hierarchy_preserves_explicit_subtotals_list(
+    pivot_module, mount_recorder
+):
+    """row_layout='hierarchy' with an explicit show_subtotals list keeps the list."""
+    df = pd.DataFrame(
+        {
+            "Region": ["East", "East", "West", "West"],
+            "Category": ["A", "B", "A", "B"],
+            "SubCat": ["x", "y", "x", "y"],
+            "Year": [2023, 2024, 2023, 2024],
+            "Revenue": [100, 150, 200, 250],
+        }
+    )
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        df,
+        key="pivot",
+        rows=["Region", "Category", "SubCat"],
+        columns=["Year"],
+        values=["Revenue"],
+        row_layout="hierarchy",
+        show_subtotals=["Region"],
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config["row_layout"] == "hierarchy"
+    assert sent_config["show_subtotals"] == ["Region"]
+
+
+def test_row_layout_table_default_no_subtotals(sample_df, pivot_module, mount_recorder):
+    """Default row_layout='table' does not auto-enable subtotals."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config.get("row_layout", "table") == "table"
+    assert sent_config.get("show_subtotals", False) is False
+
+
+# ---------------------------------------------------------------------------
+# Hybrid subtotal sidecar with hierarchy
+# ---------------------------------------------------------------------------
+
+
+def test_threshold_hybrid_hierarchy_includes_subtotals_sidecar(
+    sample_df, pivot_module, mount_recorder
+):
+    """hierarchy layout in hybrid mode produces subtotal sidecar entries."""
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="median",
+        execution_mode="threshold_hybrid",
+        row_layout="hierarchy",
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "threshold_hybrid"
+    assert "hybrid_totals" in payload
+    totals = payload["hybrid_totals"]
+    assert "subtotals" in totals
+    assert len(totals["subtotals"]) > 0
+
+
+def test_threshold_hybrid_subtotals_list_generates_all_depths(
+    sample_df, pivot_module, mount_recorder
+):
+    """show_subtotals=['Region'] still generates sidecar entries (truthy list)."""
+    calls = mount_recorder()
+    large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+
+    pivot_module.st_pivot_table(
+        large_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="median",
+        execution_mode="threshold_hybrid",
+        show_subtotals=["Region"],
+    )
+
+    payload = calls[0]["data"]
+    assert payload["execution_mode"] == "threshold_hybrid"
+    totals = payload["hybrid_totals"]
+    assert "subtotals" in totals
+    assert len(totals["subtotals"]) > 0

@@ -1818,8 +1818,11 @@ def _default_config(
         cfg["date_grains"] = dict(sorted(date_grains.items()))
     if not sticky_headers:
         cfg["sticky_headers"] = False
-    if show_subtotals:
-        validated: bool | list[str] = show_subtotals
+    effective_subtotals: bool | list[str] = show_subtotals
+    if row_layout == "hierarchy" and not show_subtotals:
+        effective_subtotals = True
+    if effective_subtotals:
+        validated: bool | list[str] = effective_subtotals
         if isinstance(validated, list):
             validated = _validate_list_field(
                 validated, _rows[:-1], "show_subtotals", "rows"
@@ -1927,8 +1930,8 @@ class PivotTableResult(TypedDict, total=False):
 # See component_manifest_handler.py line 65 for the join logic.
 _component = st.components.v2.component(
     "streamlit-pivot.streamlit_pivot",
-    js="index-*.js",
-    css="index-*.css",
+    js="index.js",
+    css="index.css",
     html='<div class="react-root"></div>',
 )
 

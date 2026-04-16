@@ -254,7 +254,13 @@
 .chipRow {
   display: flex;
   flex-wrap: wrap;
+  align-content: flex-start;
   gap: 4px;
+  max-height: 64px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  scrollbar-gutter: stable;
 }
 
 .valueChipGroup {

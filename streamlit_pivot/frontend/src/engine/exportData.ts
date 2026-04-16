@@ -21,7 +21,7 @@ import type {
   DateGrain,
   PivotConfigV1,
   ShowValuesAs,
-  ConditionalFormatRule,
+  AnyConditionalFormatRule,
 } from "./types";
 import {
   getEffectiveDateGrain,
@@ -103,7 +103,7 @@ export interface ExportGrid {
   /** Mapping of value fields to their column indices (for conditional formatting). */
   valueFieldColumns?: ValueFieldColumns[];
   /** Conditional formatting rules from the pivot config. */
-  conditionalFormatting?: ConditionalFormatRule[];
+  conditionalFormatting?: AnyConditionalFormatRule[];
 }
 
 const HIERARCHY_EXPORT_INDENT = "  ";

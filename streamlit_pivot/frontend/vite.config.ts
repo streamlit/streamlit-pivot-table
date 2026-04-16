@@ -17,7 +17,7 @@
 
 import react from "@vitejs/plugin-react";
 import process from "node:process";
-import { defineConfig, loadEnv, UserConfig } from "vite";
+import { defineConfig, UserConfig } from "vite";
 
 /**
  * Vite configuration for Streamlit Custom Component v2 development using React.
@@ -27,6 +27,12 @@ import { defineConfig, loadEnv, UserConfig } from "vite";
 export default defineConfig(() => {
   const isProd = process.env.NODE_ENV === "production";
   const isDev = !isProd;
+  // Keep the component entry filenames deterministic in both dev and prod.
+  // Streamlit resolves component assets by filename, so hashed entry filenames
+  // can leave stale matches behind when the build directory is reused.
+  const entryFileName = "index";
+  const chunkFileNames = isDev ? "chunk-[name].js" : "chunk-[hash].js";
+  const assetFileNames = "[name][extname]";
 
   return {
     base: "./",
@@ -44,7 +50,7 @@ export default defineConfig(() => {
         entry: "./src/index.tsx",
         name: "MyComponent",
         formats: ["es"],
-        fileName: "index-[hash]",
+        fileName: entryFileName,
       },
       rollupOptions: {
         output: {
@@ -52,7 +58,8 @@ export default defineConfig(() => {
           // plus the main bundle, both named index-*. Streamlit CCv2 matches
           // `js="index-*.js"` and requires exactly one file. Use chunkFileNames
           // to push non-entry chunks to a different naming pattern.
-          chunkFileNames: "chunk-[hash].js",
+          chunkFileNames,
+          assetFileNames,
         },
       },
       ...(!isDev && {

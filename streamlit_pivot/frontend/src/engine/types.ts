@@ -74,7 +74,7 @@ export interface PivotConfigV1 {
   /** Phase 3b: display mode per value field (raw, % of total/row/col). */
   show_values_as?: Record<string, ShowValuesAs>;
   /** Phase 3c: conditional formatting rules applied to value cells. */
-  conditional_formatting?: ConditionalFormatRule[];
+  conditional_formatting?: AnyConditionalFormatRule[];
   /** Phase 3a: serialized column group keys currently collapsed. */
   collapsed_col_groups?: string[];
   /** Per-field collapsed temporal parent groups (stringified modified column keys). */
@@ -417,6 +417,11 @@ export interface ThresholdRule extends ConditionalFormatRule {
   type: "threshold";
   conditions: ThresholdCondition[];
 }
+
+export type AnyConditionalFormatRule =
+  | ColorScaleRule
+  | DataBarsRule
+  | ThresholdRule;
 
 export const DEFAULT_CONFIG: PivotConfigV1 = {
   version: CONFIG_SCHEMA_VERSION,
@@ -928,7 +933,7 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       }
     }
     result.conditional_formatting =
-      cfRules as unknown as ConditionalFormatRule[];
+      cfRules as unknown as AnyConditionalFormatRule[];
   }
   if (
     o.number_format !== undefined &&

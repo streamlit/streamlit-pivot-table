@@ -553,9 +553,40 @@ export function applyTemporalRowCollapse(
     }
   }
   if (collapsedSets.size === 0 && !hierarchyMode) return entries;
+  if (
+    collapsedSets.size === 0 &&
+    hierarchyMode &&
+    temporalInfos.every((t) => t.hierarchyLevels.length <= 1)
+  ) {
+    return entries;
+  }
 
   const result: VisibleRowEntry[] = [];
   const emittedCollapse = new Set<string>();
+
+  const emitTemporalParent = (
+    entryKey: string[],
+    tInfo: TemporalRowInfo,
+    parentBucket: string,
+    grain: DateGrain,
+    collapsePrefix: string[],
+    dedupeKey: string,
+  ): void => {
+    if (emittedCollapse.has(dedupeKey)) return;
+    emittedCollapse.add(dedupeKey);
+    result.push({
+      type: "temporal_parent",
+      key: [...entryKey.slice(0, tInfo.dimIndex), parentBucket],
+      level: tInfo.dimIndex,
+      temporalParent: {
+        field: tInfo.field,
+        parentBucket,
+        parentGrain: grain,
+        modifiedRowKey: collapsePrefix,
+        rowDimIndex: tInfo.dimIndex,
+      },
+    });
+  };
 
   for (const entry of entries) {
     let collapsed = false;
@@ -586,38 +617,26 @@ export function applyTemporalRowCollapse(
           entry.key.slice(0, tInfo.dimIndex),
         );
         const dedupeKey = `${tInfo.field}\x01${parentBucket}\x01${outerPrefixStr}`;
-        if (hierarchyMode && !emittedCollapse.has(dedupeKey)) {
-          emittedCollapse.add(dedupeKey);
-          result.push({
-            type: "temporal_parent",
-            key: [...entry.key.slice(0, tInfo.dimIndex), parentBucket],
-            level: tInfo.dimIndex,
-            temporalParent: {
-              field: tInfo.field,
-              parentBucket,
-              parentGrain: tInfo.hierarchyLevels[lvl]!,
-              modifiedRowKey: collapsePrefix,
-              rowDimIndex: tInfo.dimIndex,
-            },
-          });
+        if (hierarchyMode) {
+          emitTemporalParent(
+            entry.key,
+            tInfo,
+            parentBucket,
+            tInfo.hierarchyLevels[lvl]!,
+            collapsePrefix,
+            dedupeKey,
+          );
         }
         if (!collapsedKeys?.has(collapseKey)) continue;
 
-        if (!emittedCollapse.has(dedupeKey)) {
-          emittedCollapse.add(dedupeKey);
-          result.push({
-            type: "temporal_parent",
-            key: [...entry.key.slice(0, tInfo.dimIndex), parentBucket],
-            level: tInfo.dimIndex,
-            temporalParent: {
-              field: tInfo.field,
-              parentBucket,
-              parentGrain: tInfo.hierarchyLevels[lvl]!,
-              modifiedRowKey: collapsePrefix,
-              rowDimIndex: tInfo.dimIndex,
-            },
-          });
-        }
+        emitTemporalParent(
+          entry.key,
+          tInfo,
+          parentBucket,
+          tInfo.hierarchyLevels[lvl]!,
+          collapsePrefix,
+          dedupeKey,
+        );
         collapsed = true;
         break;
       }

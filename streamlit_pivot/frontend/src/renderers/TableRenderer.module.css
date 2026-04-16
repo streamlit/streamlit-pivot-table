@@ -273,7 +273,7 @@
   gap: 4px;
 }
 
-.headerCellInner:has(.headerMenuBtn) {
+.headerCellInner:has(.headerMenuBtn):not(:has(.headerMenuBtnInline)) {
   padding-right: 20px;
 }
 
@@ -518,6 +518,15 @@
   font-weight: 500;
 }
 
+.hierarchyDataRow th.rowHeaderCell,
+.hierarchySubtotalRow th.rowHeaderCell {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 10%,
+    var(--st-background-color)
+  );
+}
+
 .hierarchySubtotalRow td:not(.totalsCol),
 .hierarchySubtotalRow th {
   background-color: var(--st-background-color);
@@ -525,7 +534,7 @@
 }
 
 .hierarchySubtotalRow .subtotalHeaderCell {
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .hierarchySubtotalRow[data-level="0"] td:not(.totalsCol),
@@ -533,7 +542,7 @@
 .hierarchySubtotalRow[data-level="0"] .subtotalHeaderCell {
   background-color: color-mix(
     in srgb,
-    var(--st-secondary-background-color) 22%,
+    var(--st-secondary-background-color) 18%,
     var(--st-background-color)
   );
 }
@@ -558,6 +567,60 @@
 /* Grouping dimension cell tinting — distinguish non-leaf from leaf cells */
 .groupingDimCell {
   background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-background-color));
+  font-weight: 600;
+}
+
+/* In hierarchy mode, keep only the top grouping level emphasized.
+   Lower grouping levels rely on indentation and group boundaries instead of fill. */
+.hierarchyDataRow th.groupingDimCell {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 10%,
+    var(--st-background-color)
+  );
+  font-weight: 400;
+}
+
+.hierarchyDataRow th.groupingDimCell[data-dim-index="0"] {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 18%,
+    var(--st-background-color)
+  );
+  font-weight: 600;
+}
+
+/* The hierarchy pane tint is more specific than the generic row hover rule,
+   so re-apply hover explicitly for hierarchy row-header cells. */
+.pivotTable tbody tr.hierarchyDataRow:hover th.rowHeaderCell {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 24%,
+    var(--st-background-color)
+  );
+}
+
+.pivotTable tbody tr.hierarchySubtotalRow:hover td:not(.totalsCol),
+.pivotTable tbody tr.hierarchySubtotalRow:hover th.rowHeaderCell,
+.pivotTable tbody tr.hierarchySubtotalRow:hover th.subtotalHeaderCell {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 24%,
+    var(--st-background-color)
+  );
+}
+
+.hierarchySubtotalRow th.groupingDimCell {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 10%,
+    var(--st-background-color)
+  );
+  font-weight: 400;
+}
+
+.hierarchySubtotalRow[data-level="0"] th.groupingDimCell,
+.hierarchySubtotalRow[data-level="0"] th.rowHeaderCell {
   font-weight: 600;
 }
 

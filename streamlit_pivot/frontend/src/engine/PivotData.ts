@@ -1441,38 +1441,38 @@ export class PivotData {
     const result: GroupedRow[] = [];
     const numLevels = rowDims.length;
 
-    const visit = (keys: string[][], level: number, prefix: string[]): void => {
-      if (keys.length === 0) return;
+    const visit = (
+      startIdx: number,
+      endIdx: number,
+      level: number,
+      prefix: string[],
+    ): void => {
+      if (startIdx >= endIdx) return;
       if (level >= numLevels - 1) {
-        for (const key of keys) {
-          result.push({ type: "data", key, level: numLevels - 1 });
+        for (let i = startIdx; i < endIdx; i++) {
+          result.push({ type: "data", key: rowKeys[i]!, level: numLevels - 1 });
         }
         return;
       }
 
-      let idx = 0;
-      while (idx < keys.length) {
-        const currentValue = keys[idx]![level] ?? "";
+      let idx = startIdx;
+      while (idx < endIdx) {
+        const currentValue = rowKeys[idx]![level] ?? "";
         const groupPrefix = [...prefix, currentValue];
         let end = idx + 1;
-        while (
-          end < keys.length &&
-          keys[end]!.slice(0, level + 1).every(
-            (v, prefixIdx) => v === groupPrefix[prefixIdx],
-          )
-        ) {
+        while (end < endIdx && rowKeys[end]![level] === currentValue) {
           end++;
         }
 
         result.push({ type: "subtotal", key: groupPrefix, level });
         if (!collapsed.has(makeKeyString(groupPrefix))) {
-          visit(keys.slice(idx, end), level + 1, groupPrefix);
+          visit(idx, end, level + 1, groupPrefix);
         }
         idx = end;
       }
     };
 
-    visit(rowKeys, 0, []);
+    visit(0, rowKeys.length, 0, []);
     return result;
   }
 

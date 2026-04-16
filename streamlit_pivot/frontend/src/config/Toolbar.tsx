@@ -73,6 +73,7 @@ import {
   parseItemId,
 } from "./DndFieldChip";
 import SettingsPanel, {
+  canDropFieldToZone,
   InlineAggPicker,
   cleanupConfigAfterFieldChanges,
 } from "./SettingsPanel";
@@ -180,19 +181,18 @@ export function applyDragMove({
   }
 
   // Cross-zone move
-  if (targetZone === "values" && !numericColumns.includes(field)) return null;
   if (
-    targetZone === "rows" &&
-    config.columns.includes(field) &&
-    sourceZone !== "columns"
-  )
+    !canDropFieldToZone({
+      field,
+      fromZone: sourceZone,
+      toZone: targetZone,
+      numericFields: new Set(numericColumns),
+      rowFields: config.rows,
+      columnFields: config.columns,
+    })
+  ) {
     return null;
-  if (
-    targetZone === "columns" &&
-    config.rows.includes(field) &&
-    sourceZone !== "rows"
-  )
-    return null;
+  }
 
   const updated: PivotConfigV1 = {
     ...config,

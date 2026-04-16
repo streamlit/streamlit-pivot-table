@@ -63,3 +63,6 @@ perf_baseline.json
 
 # Local analysis reports
 reports/
+
+# Local Streamlit secrets/config
+.streamlit/

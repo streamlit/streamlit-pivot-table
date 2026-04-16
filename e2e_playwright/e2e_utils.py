@@ -107,6 +107,9 @@ INTERACTIONS_PIVOT_KEYS = [
     "test_pivot_date_hierarchy_rows_mixed",
     "test_pivot_adaptive_year",
     "test_pivot_adaptive_month",
+    "test_pivot_hierarchy",
+    "test_pivot_hierarchy_totals",
+    "test_pivot_hierarchy_locked",
     "test_pivot_drilldown_pagination",
     "test_pivot_drilldown_pagination_hybrid",
 ]
