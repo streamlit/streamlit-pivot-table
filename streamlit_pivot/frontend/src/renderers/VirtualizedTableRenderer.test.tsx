@@ -163,6 +163,40 @@ describe("VirtualizedTableRenderer", () => {
     expect(cellText).not.toMatch(/^R\d+$/);
   });
 
+  it("renders hierarchy layout with a single row header column", () => {
+    const records = [
+      { region: "US", category: "A", year: "2024", revenue: 100 },
+      { region: "US", category: "B", year: "2024", revenue: 150 },
+      { region: "EU", category: "A", year: "2024", revenue: 200 },
+    ];
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pivotData = new PivotData(records, config);
+
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={300}
+      />,
+    );
+
+    expect(
+      screen.getByTestId("pivot-row-dim-label-hierarchy"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pivot-row-dim-breadcrumb-region-0"),
+    ).toBeInTheDocument();
+    const firstDataRow = screen.getAllByTestId("pivot-data-row")[0];
+    expect(
+      firstDataRow.querySelectorAll('th[data-testid="pivot-row-header"]'),
+    ).toHaveLength(1);
+  });
+
   it("wide column counts stay DOM-bounded (500+ columns)", () => {
     const records = makeRecords(4, 600);
     const config = makeConfig({ show_totals: false });

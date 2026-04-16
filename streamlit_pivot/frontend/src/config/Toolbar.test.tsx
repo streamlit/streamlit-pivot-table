@@ -1641,6 +1641,74 @@ describe("Toolbar - settings panel", () => {
     expect(screen.getByTestId("settings-subtotals")).toBeInTheDocument();
   });
 
+  it("shows row layout control when rows are configured", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: ["region"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("settings-row-layout")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-row-layout-select")).toHaveTextContent(
+      "Table",
+    );
+  });
+
+  it("applies hierarchy row layout and clears repeat labels", () => {
+    const onConfigChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region", "category"],
+          repeat_row_labels: true,
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={onConfigChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-row-layout-select"));
+    fireEvent.click(screen.getByTestId("settings-row-layout-select-hierarchy"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
+
+    const nextConfig = onConfigChange.mock.calls[0]?.[0];
+    expect(nextConfig).toEqual(
+      expect.objectContaining({
+        row_layout: "hierarchy",
+      }),
+    );
+    expect(nextConfig).not.toHaveProperty("repeat_row_labels");
+  });
+
+  it("marks subtotals as always on in hierarchy mode", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region", "category"],
+          row_layout: "hierarchy",
+          show_subtotals: false,
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("settings-subtotals")).toHaveTextContent(
+      "Subtotals (always on in hierarchy)",
+    );
+    const subtotalsCheckbox = screen
+      .getByTestId("settings-subtotals")
+      .querySelector("input");
+    expect(subtotalsCheckbox).toBeDisabled();
+  });
+
   it("hides subtotals checkbox when < 2 row dims", () => {
     render(
       <Toolbar
@@ -1699,6 +1767,9 @@ describe("Toolbar - settings panel", () => {
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     expect(screen.getByTestId("settings-subtotals-status")).toHaveTextContent(
       "region",
+    );
+    expect(screen.getByTestId("settings-row-layout-status")).toHaveTextContent(
+      "Table",
     );
     expect(screen.queryByTestId("settings-row-totals")).not.toBeInTheDocument();
   });

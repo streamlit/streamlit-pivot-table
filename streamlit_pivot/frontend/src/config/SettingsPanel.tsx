@@ -52,6 +52,7 @@ import {
   type AggregationConfig,
   type AggregationType,
   type PivotConfigV1,
+  type RowLayout,
   type SyntheticMeasureConfig,
   showRowTotals as resolveShowRowTotals,
   showColumnTotals as resolveShowColumnTotals,
@@ -122,6 +123,10 @@ const SYNTHETIC_OPERATION_OPTIONS = [
 ] as const;
 const SYNTHETIC_FORMAT_PREVIEW_NUMBER = 12345.678;
 const SYNTHETIC_FORMAT_PREVIEW_PERCENT = 0.1234;
+const ROW_LAYOUT_OPTIONS = [
+  { value: "table", label: "Table" },
+  { value: "hierarchy", label: "Hierarchy" },
+] as const satisfies readonly BuilderSelectOption<RowLayout>[];
 
 type ZoneKey = "rows" | "columns" | "values";
 
@@ -908,6 +913,10 @@ function formatBooleanStatus(value: boolean): string {
   return value ? "On" : "Off";
 }
 
+function formatRowLayoutStatus(value: RowLayout | undefined): string {
+  return value === "hierarchy" ? "Hierarchy" : "Table";
+}
+
 function formatTotalsStatus(
   isEnabled: boolean,
   isUnavailable: boolean,
@@ -975,7 +984,20 @@ const LockedView: FC<{
           >
             <span className={styles.statusLabel}>Subtotals</span>
             <span className={styles.statusValue}>
-              {formatSubtotalsStatus(config.show_subtotals)}
+              {config.row_layout === "hierarchy"
+                ? "Always On in Hierarchy"
+                : formatSubtotalsStatus(config.show_subtotals)}
+            </span>
+          </div>
+        )}
+        {config.rows.length > 0 && (
+          <div
+            className={styles.statusRow}
+            data-testid="settings-row-layout-status"
+          >
+            <span className={styles.statusLabel}>Row Layout</span>
+            <span className={styles.statusValue}>
+              {formatRowLayoutStatus(config.row_layout)}
             </span>
           </div>
         )}
@@ -986,7 +1008,9 @@ const LockedView: FC<{
           >
             <span className={styles.statusLabel}>Repeat Labels</span>
             <span className={styles.statusValue}>
-              {formatBooleanStatus(!!config.repeat_row_labels)}
+              {config.row_layout === "hierarchy"
+                ? "N/A in Hierarchy"
+                : formatBooleanStatus(!!config.repeat_row_labels)}
             </span>
           </div>
         )}
@@ -1071,6 +1095,9 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   const [localShowSubtotals, setLocalShowSubtotals] = useState(
     config.show_subtotals,
   );
+  const [localRowLayout, setLocalRowLayout] = useState<RowLayout>(
+    config.row_layout ?? "table",
+  );
   const [localRepeatLabels, setLocalRepeatLabels] = useState(
     !!config.repeat_row_labels,
   );
@@ -1103,6 +1130,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       setLocalShowRowTotals(config.show_row_totals ?? config.show_totals);
       setLocalShowColTotals(config.show_column_totals ?? config.show_totals);
       setLocalShowSubtotals(config.show_subtotals);
+      setLocalRowLayout(config.row_layout ?? "table");
       setLocalRepeatLabels(!!config.repeat_row_labels);
       setLocalStickyHeaders(config.sticky_headers !== false);
       setSearchQuery("");
@@ -1402,6 +1430,13 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     setLocalRepeatLabels((v) => !v);
   }, []);
 
+  const handleRowLayoutChange = useCallback((value: RowLayout) => {
+    setLocalRowLayout(value);
+    if (value === "hierarchy") {
+      setLocalRepeatLabels(false);
+    }
+  }, []);
+
   const toggleStickyHeaders = useCallback(() => {
     setLocalStickyHeaders((v) => !v);
   }, []);
@@ -1648,13 +1683,18 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       show_row_totals: localShowRowTotals,
       show_column_totals: localShowColTotals,
       show_subtotals: subtotalsValue,
-      repeat_row_labels: localRepeatLabels || undefined,
+      row_layout: localRowLayout,
+      repeat_row_labels:
+        localRowLayout === "table" && localRepeatLabels ? true : undefined,
       sticky_headers: localStickyHeaders,
     };
 
     // Cleanup after subtotals off
     if (!subtotalsValue) {
       delete newConfig.collapsed_groups;
+      delete newConfig.repeat_row_labels;
+    }
+    if (localRowLayout === "hierarchy") {
       delete newConfig.repeat_row_labels;
     }
 
@@ -1676,6 +1716,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localShowRowTotals,
     localShowColTotals,
     localShowSubtotals,
+    localRowLayout,
     localRepeatLabels,
     localStickyHeaders,
     onConfigChange,
@@ -1716,6 +1757,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       JSON.stringify(config.show_subtotals)
     )
       return true;
+    if (localRowLayout !== (config.row_layout ?? "table")) return true;
     if (localRepeatLabels !== !!config.repeat_row_labels) return true;
     if (localStickyHeaders !== (config.sticky_headers !== false)) return true;
     return false;
@@ -1729,6 +1771,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localShowRowTotals,
     localShowColTotals,
     localShowSubtotals,
+    localRowLayout,
     localRepeatLabels,
     localStickyHeaders,
   ]);
@@ -2246,11 +2289,29 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                   if (el) el.indeterminate = subtotalsIndeterminate;
                 }}
                 type="checkbox"
-                checked={subtotalsChecked}
+                checked={
+                  localRowLayout === "hierarchy" ? true : subtotalsChecked
+                }
                 onChange={toggleSubtotals}
+                disabled={localRowLayout === "hierarchy"}
               />
-              <span>Subtotals</span>
+              <span>
+                {localRowLayout === "hierarchy"
+                  ? "Subtotals (always on in hierarchy)"
+                  : "Subtotals"}
+              </span>
             </label>
+          )}
+          {localRows.length > 0 && (
+            <div data-testid="settings-row-layout">
+              <BuilderSelect<RowLayout>
+                value={localRowLayout}
+                options={ROW_LAYOUT_OPTIONS}
+                onChange={handleRowLayoutChange}
+                testId="settings-row-layout-select"
+                ariaLabel="Row layout"
+              />
+            </div>
           )}
           {localRows.length >= 2 && (
             <label
@@ -2261,6 +2322,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                 type="checkbox"
                 checked={localRepeatLabels}
                 onChange={toggleRepeatLabels}
+                disabled={localRowLayout === "hierarchy"}
               />
               <span>Repeat Labels</span>
             </label>

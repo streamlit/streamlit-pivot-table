@@ -37,6 +37,8 @@
 
 export const CONFIG_SCHEMA_VERSION = 1;
 
+export type RowLayout = "table" | "hierarchy";
+
 export interface PivotConfigV1 {
   version: 1;
   rows: string[];
@@ -65,6 +67,8 @@ export interface PivotConfigV1 {
   show_subtotals?: boolean | string[];
   /** Phase 3a: repeat row labels on every row instead of spanning. */
   repeat_row_labels?: boolean;
+  /** Row header presentation mode: multi-column table vs compact hierarchy tree. */
+  row_layout?: RowLayout;
   /** Phase 3a: serialized group keys currently collapsed (managed by frontend). */
   collapsed_groups?: string[];
   /** Phase 3b: display mode per value field (raw, % of total/row/col). */
@@ -427,6 +431,7 @@ export const DEFAULT_CONFIG: PivotConfigV1 = {
   show_column_totals: true,
   empty_cell_value: "-",
   interactive: true,
+  row_layout: "table",
 };
 
 /**
@@ -834,6 +839,12 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
   if (subtotals !== false) result.show_subtotals = subtotals;
   if (typeof o.repeat_row_labels === "boolean")
     result.repeat_row_labels = o.repeat_row_labels;
+  if (o.row_layout !== undefined) {
+    if (o.row_layout !== "table" && o.row_layout !== "hierarchy") {
+      throw new Error('\'row_layout\' must be "table" or "hierarchy"');
+    }
+    result.row_layout = o.row_layout;
+  }
   if (Array.isArray(o.collapsed_groups))
     result.collapsed_groups = o.collapsed_groups as string[];
   if (Array.isArray(o.collapsed_col_groups))

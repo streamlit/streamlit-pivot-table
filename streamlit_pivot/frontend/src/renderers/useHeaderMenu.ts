@@ -245,6 +245,7 @@ export function useHeaderMenu({
   const menuOnSubtotalToggle =
     onConfigChange &&
     menuTarget?.axis === "row" &&
+    config.row_layout !== "hierarchy" &&
     menuTarget.dimension !== config.rows[config.rows.length - 1] &&
     config.rows.length >= 2
       ? handleSubtotalToggle

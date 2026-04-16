@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import type { PivotData } from "./PivotData";
+import type { PivotData, GroupedRow } from "./PivotData";
 import type {
   ColumnTypeMap,
   DateGrain,
@@ -36,6 +36,15 @@ import {
   showTotalForMeasure,
 } from "./types";
 import { formatWithPattern, formatPercent, normalizeToUTC } from "./formatters";
+import { formatTemporalParentLabel } from "./dateGrouping";
+import {
+  applyTemporalRowCollapse,
+  computeRowHeaderLevels,
+  computeTemporalRowInfos,
+  projectVisibleRowEntries,
+  type ProjectedRowEntry,
+  type VisibleRowEntry,
+} from "../renderers/temporalHierarchy";
 
 export type ExportFormat = "csv" | "tsv" | "clipboard" | "xlsx";
 export type ExportContent = "formatted" | "raw";
@@ -95,6 +104,20 @@ export interface ExportGrid {
   valueFieldColumns?: ValueFieldColumns[];
   /** Conditional formatting rules from the pivot config. */
   conditionalFormatting?: ConditionalFormatRule[];
+}
+
+const HIERARCHY_EXPORT_INDENT = "  ";
+
+function indentHierarchyLabel(label: string, depth: number): string {
+  return `${HIERARCHY_EXPORT_INDENT.repeat(Math.max(depth, 0))}${label}`;
+}
+
+function getDeepestVisibleProjectedIndex(entry: ProjectedRowEntry): number {
+  for (let idx = entry.headerValues.length - 1; idx >= 0; idx--) {
+    if (!entry.headerVisible[idx] || entry.headerSpacer[idx]) continue;
+    return idx;
+  }
+  return -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +385,82 @@ function cell(
   return c;
 }
 
+function buildHierarchyExportLabel(
+  entry: VisibleRowEntry | ProjectedRowEntry,
+  config: PivotConfigV1,
+  pivotData: PivotData,
+  rowHeaderLevels?: ReturnType<typeof computeRowHeaderLevels>,
+  columnTypes?: ColumnTypeMap,
+  adaptiveDateGrains?: Record<string, DateGrain>,
+): { display: string; kind: CellKind; raw: Date | null } {
+  if ("headerValues" in entry && rowHeaderLevels) {
+    const idx = getDeepestVisibleProjectedIndex(entry);
+    if (idx >= 0) {
+      const mapping = rowHeaderLevels[idx];
+      const value = entry.headerValues[idx] ?? "";
+      const temporalPattern =
+        config.dimension_format?.[mapping?.field ?? ""] ??
+        config.dimension_format?.["__all__"];
+      const formatted =
+        value !== ""
+          ? mapping?.isTemporal
+            ? formatTemporalParentLabel(value, mapping.grain, temporalPattern)
+            : pivotData.formatDimLabel(mapping?.field ?? "", value)
+          : "(empty)";
+      const label = formatted;
+      return {
+        display: indentHierarchyLabel(label, idx),
+        kind: entry.type === "data" ? "data" : "subtotal",
+        raw: null,
+      };
+    }
+  }
+
+  if (entry.type === "subtotal") {
+    const depth = entry.level;
+    const dimName = config.rows[depth] ?? "";
+    const rawLabel = entry.key[depth] ?? "";
+    const label = rawLabel
+      ? pivotData.formatDimLabel(dimName, rawLabel)
+      : "(empty)";
+    return {
+      display: indentHierarchyLabel(label, depth),
+      kind: "subtotal",
+      raw: null,
+    };
+  }
+
+  const rowKey = entry.key;
+  const depth = Math.max(rowKey.length - 1, 0);
+  const dimName = config.rows[depth] ?? "";
+  const dimKey = rowKey[depth] ?? "";
+  const display = dimKey
+    ? pivotData.formatDimLabel(dimName, dimKey)
+    : "(empty)";
+  const colType = columnTypes?.get(dimName);
+  if (colType === "datetime" || colType === "date") {
+    const grain = getEffectiveDateGrain(
+      config,
+      dimName,
+      colType,
+      adaptiveDateGrains?.[dimName],
+    );
+    const rawVal = pivotData.getRawDimValue(dimName, dimKey);
+    const exportDate =
+      !grain && rawVal !== undefined ? toExportDate(rawVal) : null;
+    return {
+      display: indentHierarchyLabel(display, depth),
+      kind: "data",
+      raw: exportDate,
+    };
+  }
+  return {
+    display: indentHierarchyLabel(display, depth),
+    kind: "data",
+    raw: null,
+  };
+}
+
 /**
  * Walk the PivotData structure and produce a rich intermediate representation
  * with typed cells, raw values, merge spans, and number format codes.
@@ -385,9 +484,14 @@ export function buildExportIR(
   const hasMultipleValues = values.length > 1;
   const includeRowTotals = showRowTotals(config);
   const includeColTotals = showColumnTotals(config);
+  const rowTotalValues = values.filter((valField) =>
+    showTotalForMeasure(config, valField, "row"),
+  );
+  const includeVisibleRowTotals = includeRowTotals && rowTotalValues.length > 0;
   const rowDims = config.rows;
   const colDims = config.columns;
-  const numRowDimCols = Math.max(rowDims.length, 1);
+  const hierarchyMode = config.row_layout === "hierarchy";
+  const numRowDimCols = hierarchyMode ? 1 : Math.max(rowDims.length, 1);
   const colsPerKey = hasMultipleValues ? values.length : 1;
 
   const grid: ExportCell[][] = [];
@@ -397,20 +501,38 @@ export function buildExportIR(
   for (let level = 0; level < colDims.length; level++) {
     const row: ExportCell[] = [];
     if (level === 0) {
-      for (let d = 0; d < rowDims.length; d++) {
+      if (hierarchyMode) {
         row.push(
           cell(
-            getDimensionLabel(
-              config,
-              rowDims[d]!,
-              columnTypes?.get(rowDims[d]!),
-              adaptiveDateGrains?.[rowDims[d]!],
-            ),
+            rowDims.length === 1
+              ? getDimensionLabel(
+                  config,
+                  rowDims[0]!,
+                  columnTypes?.get(rowDims[0]!),
+                  adaptiveDateGrains?.[rowDims[0]!],
+                )
+              : rowDims.length > 1
+                ? "Rows"
+                : "",
             "header",
           ),
         );
+      } else {
+        for (let d = 0; d < rowDims.length; d++) {
+          row.push(
+            cell(
+              getDimensionLabel(
+                config,
+                rowDims[d]!,
+                columnTypes?.get(rowDims[d]!),
+                adaptiveDateGrains?.[rowDims[d]!],
+              ),
+              "header",
+            ),
+          );
+        }
+        if (rowDims.length === 0) row.push(cell("", "header"));
       }
-      if (rowDims.length === 0) row.push(cell("", "header"));
     } else {
       for (let d = 0; d < numRowDimCols; d++) {
         row.push(cell("", "header"));
@@ -430,11 +552,15 @@ export function buildExportIR(
         row.push(cell(label, "header"));
       }
     }
-    if (includeRowTotals) {
+    if (includeVisibleRowTotals) {
       const label = level === 0 ? "Total" : "";
       if (hasMultipleValues) {
-        row.push(cell(label, "header", null, { mergeRight: colsPerKey - 1 }));
-        for (let v = 1; v < colsPerKey; v++) {
+        row.push(
+          cell(label, "header", null, {
+            mergeRight: rowTotalValues.length - 1,
+          }),
+        );
+        for (let v = 1; v < rowTotalValues.length; v++) {
           row.push(cell(label, "header"));
         }
       } else {
@@ -456,8 +582,8 @@ export function buildExportIR(
         row.push(cell(getRenderedValueLabel(config, val), "header"));
       }
     }
-    if (includeRowTotals) {
-      for (const val of values) {
+    if (includeVisibleRowTotals) {
+      for (const val of rowTotalValues) {
         row.push(cell(getRenderedValueLabel(config, val), "header"));
       }
     }
@@ -468,18 +594,36 @@ export function buildExportIR(
   // No column dimensions: single header row
   if (colDims.length === 0) {
     const row: ExportCell[] = [];
-    for (let d = 0; d < rowDims.length; d++) {
+    if (hierarchyMode) {
       row.push(
         cell(
-          getDimensionLabel(
-            config,
-            rowDims[d]!,
-            columnTypes?.get(rowDims[d]!),
-            adaptiveDateGrains?.[rowDims[d]!],
-          ),
+          rowDims.length === 1
+            ? getDimensionLabel(
+                config,
+                rowDims[0]!,
+                columnTypes?.get(rowDims[0]!),
+                adaptiveDateGrains?.[rowDims[0]!],
+              )
+            : rowDims.length > 1
+              ? "Rows"
+              : "",
           "header",
         ),
       );
+    } else {
+      for (let d = 0; d < rowDims.length; d++) {
+        row.push(
+          cell(
+            getDimensionLabel(
+              config,
+              rowDims[d]!,
+              columnTypes?.get(rowDims[d]!),
+              adaptiveDateGrains?.[rowDims[d]!],
+            ),
+            "header",
+          ),
+        );
+      }
     }
     if (hasMultipleValues) {
       for (const val of values) {
@@ -493,7 +637,7 @@ export function buildExportIR(
         ),
       );
     }
-    if (includeRowTotals) {
+    if (includeVisibleRowTotals) {
       row.push(cell("Total", "header"));
     }
     grid.push(row);
@@ -501,24 +645,58 @@ export function buildExportIR(
   }
 
   // --- Data rows ---
-  const groupedRows = config.show_subtotals
-    ? pivotData.getGroupedRowKeys(true)
-    : rowKeys.map((key) => ({ type: "data" as const, key, level: 0 }));
+  const baseGroupedRows: GroupedRow[] =
+    config.show_subtotals || hierarchyMode
+      ? hierarchyMode
+        ? pivotData.getHierarchyRowKeys(true)
+        : pivotData.getGroupedRowKeys(true)
+      : rowKeys.map((key) => ({ type: "data" as const, key, level: 0 }));
+  const rowTemporalInfos =
+    hierarchyMode && rowDims.length > 0
+      ? computeTemporalRowInfos(config, columnTypes, adaptiveDateGrains)
+      : [];
+  const rowHeaderLevels =
+    hierarchyMode && rowTemporalInfos.length > 0
+      ? computeRowHeaderLevels(config, rowTemporalInfos)
+      : undefined;
+  const rowEntries: Array<GroupedRow | ProjectedRowEntry> =
+    hierarchyMode && rowTemporalInfos.length > 0
+      ? projectVisibleRowEntries(
+          applyTemporalRowCollapse(baseGroupedRows, rowTemporalInfos, config),
+          config,
+          rowHeaderLevels!,
+          rowTemporalInfos,
+        )
+      : baseGroupedRows;
 
-  for (const groupedRow of groupedRows) {
+  for (const groupedRow of rowEntries) {
     const row: ExportCell[] = [];
 
+    if (hierarchyMode) {
+      const labelInfo = buildHierarchyExportLabel(
+        groupedRow,
+        config,
+        pivotData,
+        rowHeaderLevels,
+        columnTypes,
+        adaptiveDateGrains,
+      );
+      row.push(cell(labelInfo.display, labelInfo.kind, labelInfo.raw));
+    }
+
     if (groupedRow.type === "subtotal") {
-      for (let d = 0; d < numRowDimCols; d++) {
-        if (d < groupedRow.key.length) {
-          const sk = groupedRow.key[d];
-          const sdn = rowDims[d] ?? "";
-          const sdisplay = sk ? pivotData.formatDimLabel(sdn, sk) : "";
-          row.push(cell(sdisplay, "subtotal"));
-        } else if (d === groupedRow.key.length) {
-          row.push(cell("Subtotal", "subtotal"));
-        } else {
-          row.push(cell("", "subtotal"));
+      if (!hierarchyMode) {
+        for (let d = 0; d < numRowDimCols; d++) {
+          if (d < groupedRow.key.length) {
+            const sk = groupedRow.key[d];
+            const sdn = rowDims[d] ?? "";
+            const sdisplay = sk ? pivotData.formatDimLabel(sdn, sk) : "";
+            row.push(cell(sdisplay, "subtotal"));
+          } else if (d === groupedRow.key.length) {
+            row.push(cell("Subtotal", "subtotal"));
+          } else {
+            row.push(cell("", "subtotal"));
+          }
         }
       }
       for (const colKey of colKeys) {
@@ -560,75 +738,127 @@ export function buildExportIR(
           );
         }
       }
-      if (includeRowTotals) {
+      if (includeVisibleRowTotals) {
+        for (const valField of rowTotalValues) {
+          const agg = pivotData.getSubtotalAggregator(
+            groupedRow.key,
+            [],
+            valField,
+          );
+          const rawValue = agg.value();
+          const comparisonMode = getPeriodComparisonMode(config, valField);
+          const fmt = formatExportTotalValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            mode,
+            "row",
+            agg,
+            comparisonMode
+              ? pivotData.getSubtotalComparisonValue(
+                  groupedRow.key,
+                  [],
+                  valField,
+                  comparisonMode,
+                )
+              : undefined,
+          );
+          row.push(
+            cell(fmt.display, "subtotal", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
+          );
+        }
+      }
+    } else if (groupedRow.type === "temporal_parent") {
+      for (const colKey of colKeys) {
         for (const valField of values) {
-          if (!showTotalForMeasure(config, valField, "row")) {
-            row.push(cell("", "subtotal"));
-          } else {
-            const agg = pivotData.getSubtotalAggregator(
-              groupedRow.key,
-              [],
-              valField,
-            );
-            const rawValue = agg.value();
-            const comparisonMode = getPeriodComparisonMode(config, valField);
-            const fmt = formatExportTotalValue(
-              rawValue,
-              valField,
-              config,
-              pivotData,
-              mode,
-              "row",
-              agg,
-              comparisonMode
-                ? pivotData.getSubtotalComparisonValue(
-                    groupedRow.key,
-                    [],
-                    valField,
-                    comparisonMode,
-                  )
-                : undefined,
-            );
-            row.push(
-              cell(fmt.display, "subtotal", fmt.raw, {
-                numberFormat: fmt.numberFormat,
-              }),
-            );
-          }
+          const agg = pivotData.getTemporalRowSubtotal(
+            groupedRow.temporalParent.modifiedRowKey,
+            colKey,
+            valField,
+          );
+          const rawValue = agg.value();
+          const fmt = formatExportTotalValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            mode,
+            null,
+            agg,
+            undefined,
+            undefined,
+          );
+          row.push(
+            cell(fmt.display, "subtotal", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
+          );
+        }
+      }
+      if (includeVisibleRowTotals) {
+        for (const valField of rowTotalValues) {
+          const agg = pivotData.getTemporalRowSubtotalGrand(
+            groupedRow.temporalParent.modifiedRowKey,
+            valField,
+          );
+          const rawValue = agg.value();
+          const fmt = formatExportTotalValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            mode,
+            "row",
+            agg,
+            undefined,
+            undefined,
+          );
+          row.push(
+            cell(fmt.display, "subtotal", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
+          );
         }
       }
     } else {
       const rowKey = groupedRow.key;
-      for (let d = 0; d < numRowDimCols; d++) {
-        const dimKey = rowKey[d] ?? "";
-        const dimName = rowDims[d] ?? "";
-        const display = dimKey ? pivotData.formatDimLabel(dimName, dimKey) : "";
-        const colType = columnTypes?.get(dimName);
-        if (colType === "datetime" || colType === "date") {
-          const grain = getEffectiveDateGrain(
-            config,
-            dimName,
-            colType,
-            adaptiveDateGrains?.[dimName],
-          );
-          const rawVal = pivotData.getRawDimValue(dimName, dimKey);
-          const exportDate =
-            !grain && rawVal !== undefined ? toExportDate(rawVal) : null;
-          row.push(
-            cell(
-              display,
-              "data",
-              exportDate,
-              exportDate
-                ? {
-                    numberFormat:
-                      colType === "date" ? "yyyy-mm-dd" : "yyyy-mm-dd hh:mm",
-                  }
-                : undefined,
-            ),
-          );
-        } else {
-          row.push(cell(display, "data"));
+      if (!hierarchyMode) {
+        for (let d = 0; d < numRowDimCols; d++) {
+          const dimKey = rowKey[d] ?? "";
+          const dimName = rowDims[d] ?? "";
+          const display = dimKey
+            ? pivotData.formatDimLabel(dimName, dimKey)
+            : "";
+          const colType = columnTypes?.get(dimName);
+          if (colType === "datetime" || colType === "date") {
+            const grain = getEffectiveDateGrain(
+              config,
+              dimName,
+              colType,
+              adaptiveDateGrains?.[dimName],
+            );
+            const rawVal = pivotData.getRawDimValue(dimName, dimKey);
+            const exportDate =
+              !grain && rawVal !== undefined ? toExportDate(rawVal) : null;
+            row.push(
+              cell(
+                display,
+                "data",
+                exportDate,
+                exportDate
+                  ? {
+                      numberFormat:
+                        colType === "date" ? "yyyy-mm-dd" : "yyyy-mm-dd hh:mm",
+                    }
+                  : undefined,
+              ),
+            );
+          } else {
+            row.push(cell(display, "data"));
+          }
         }
       }
       for (const colKey of colKeys) {
@@ -651,36 +881,32 @@ export function buildExportIR(
           );
         }
       }
-      if (includeRowTotals) {
-        for (const valField of values) {
-          if (!showTotalForMeasure(config, valField, "row")) {
-            row.push(cell("", "data"));
-          } else {
-            const agg = pivotData.getRowTotal(rowKey, valField);
-            const rawValue = agg.value();
-            const comparisonMode = getPeriodComparisonMode(config, valField);
-            const fmt = formatExportTotalValue(
-              rawValue,
-              valField,
-              config,
-              pivotData,
-              mode,
-              "row",
-              agg,
-              comparisonMode
-                ? pivotData.getRowTotalComparisonValue(
-                    rowKey,
-                    valField,
-                    comparisonMode,
-                  )
-                : undefined,
-            );
-            row.push(
-              cell(fmt.display, "row-total", fmt.raw, {
-                numberFormat: fmt.numberFormat,
-              }),
-            );
-          }
+      if (includeVisibleRowTotals) {
+        for (const valField of rowTotalValues) {
+          const agg = pivotData.getRowTotal(rowKey, valField);
+          const rawValue = agg.value();
+          const comparisonMode = getPeriodComparisonMode(config, valField);
+          const fmt = formatExportTotalValue(
+            rawValue,
+            valField,
+            config,
+            pivotData,
+            mode,
+            "row",
+            agg,
+            comparisonMode
+              ? pivotData.getRowTotalComparisonValue(
+                  rowKey,
+                  valField,
+                  comparisonMode,
+                )
+              : undefined,
+          );
+          row.push(
+            cell(fmt.display, "row-total", fmt.raw, {
+              numberFormat: fmt.numberFormat,
+            }),
+          );
         }
       }
     }
@@ -726,8 +952,8 @@ export function buildExportIR(
         }
       }
     }
-    if (includeRowTotals) {
-      for (const valField of values) {
+    if (includeVisibleRowTotals) {
+      for (const valField of rowTotalValues) {
         if (!showTotalForMeasure(config, valField, "grand")) {
           row.push(cell("", "grand-total"));
         } else {
@@ -755,7 +981,7 @@ export function buildExportIR(
   }
 
   // --- Row dimension merging (mergeDown) ---
-  if (!config.repeat_row_labels && rowDims.length > 0) {
+  if (!hierarchyMode && !config.repeat_row_labels && rowDims.length > 0) {
     const dataStartRow = headerRowCount;
     for (let d = 0; d < rowDims.length; d++) {
       let spanStart = dataStartRow;

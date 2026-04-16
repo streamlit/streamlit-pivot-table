@@ -1235,6 +1235,25 @@ describe("PivotData - subtotals (Phase 3a)", () => {
     ]);
   });
 
+  it("getHierarchyRowKeys returns parent rows before children", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      multiRowConfig({ row_layout: "hierarchy" }),
+    );
+    const grouped = pd.getHierarchyRowKeys();
+    const entries = grouped.map(
+      (g) => `${g.type}[${g.level}]:${g.key.join("/")}`,
+    );
+    expect(entries).toEqual([
+      "subtotal[0]:EU",
+      "data[1]:EU/DE",
+      "data[1]:EU/FR",
+      "subtotal[0]:US",
+      "data[1]:US/CA",
+      "data[1]:US/NY",
+    ]);
+  });
+
   it("collapsed groups hide children but keep subtotal row", () => {
     const pd = new PivotData(
       MULTI_ROW_DATA,

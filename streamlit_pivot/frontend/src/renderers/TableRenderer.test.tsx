@@ -16,7 +16,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { useState } from "react";
 import TableRenderer, {
   computeRowHeaderSpans,
@@ -76,6 +76,43 @@ describe("TableRenderer - rendering", () => {
     expect(rowHeaders[1]).toHaveTextContent("US");
   });
 
+  it("renders a single hierarchy row column with parent subtotal rows", () => {
+    const data: DataRecord[] = [
+      { region: "US", category: "A", year: "2024", revenue: 100 },
+      { region: "US", category: "B", year: "2024", revenue: 150 },
+      { region: "EU", category: "A", year: "2024", revenue: 200 },
+    ];
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(data, config);
+
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+
+    expect(
+      screen.getByTestId("pivot-row-dim-label-hierarchy"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pivot-row-dim-breadcrumb-region-0"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByTestId("pivot-subtotal-row").length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getAllByTestId("pivot-subtotal-row")[0]).toHaveTextContent(
+      "EU",
+    );
+    expect(container.textContent).not.toContain("US Total");
+    const firstDataRow = screen.getAllByTestId("pivot-data-row")[0];
+    expect(
+      firstDataRow.querySelectorAll('th[data-testid="pivot-row-header"]'),
+    ).toHaveLength(1);
+  });
+
   it("shows auto-grouped date labels for temporal dimensions", () => {
     const data: DataRecord[] = [
       { order_date: "2024-01-03", region: "US", revenue: 100 },
@@ -117,6 +154,127 @@ describe("TableRenderer - rendering", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Q1 2024")).toBeInTheDocument();
     expect(screen.getByText("Jan 2024")).toBeInTheDocument();
+  });
+
+  it("materializes temporal parent rows in hierarchy layout", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+    ];
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+
+    render(<TableRenderer pivotData={pd} config={config} />);
+
+    expect(
+      screen.getAllByTestId("pivot-temporal-parent-row").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("2024")).toBeInTheDocument();
+  });
+
+  it("renders temporal breadcrumb toggles for hierarchy levels", () => {
+    const data: DataRecord[] = [
+      {
+        order_date: "2024-01-03",
+        region: "US",
+        customer: "Acme",
+        revenue: 100,
+      },
+      {
+        order_date: "2024-01-10",
+        region: "US",
+        customer: "Globex",
+        revenue: 120,
+      },
+      {
+        order_date: "2024-02-10",
+        region: "EU",
+        customer: "Initech",
+        revenue: 150,
+      },
+    ];
+    const config = makeConfig({
+      rows: ["order_date", "region", "customer"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByTestId("pivot-dim-toggle-row-0-order-date"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pivot-dim-toggle-row-1-order-date"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pivot-dim-toggle-row-2-order-date"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pivot-dim-toggle-row-3-region"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("pivot-dim-toggle-row-4-customer"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a toggle for temporal leaf rows that have descendants", () => {
+    const data: DataRecord[] = [
+      {
+        order_date: "2024-01-03",
+        region: "Europe",
+        customer: "Initech",
+        revenue: 100,
+      },
+      {
+        order_date: "2024-01-09",
+        region: "Europe",
+        customer: "Umbrella",
+        revenue: 120,
+      },
+    ];
+    const config = makeConfig({
+      rows: ["order_date", "region", "customer"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+        onConfigChange={vi.fn()}
+      />,
+    );
+
+    const janCell = screen.getByText("Jan 2024").closest("th");
+    expect(janCell).not.toBeNull();
+    expect(
+      janCell?.querySelector("button[data-testid^='pivot-group-toggle-']"),
+    ).not.toBeNull();
   });
 
   it("renders a synthetic parent row when a row temporal group is collapsed", () => {
@@ -465,6 +623,31 @@ describe("TableRenderer - multiple values", () => {
     render(<TableRenderer pivotData={pd} config={config} />);
     const valueLabels = screen.getAllByTestId("pivot-value-label");
     expect(valueLabels.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("omits unchecked measures from the right-side total group", () => {
+    const config = makeConfig({
+      values: ["revenue", "profit"],
+      show_row_totals: ["revenue"],
+    });
+    const pd = createPivotData(SAMPLE_DATA, config);
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+
+    const headerRows = container.querySelectorAll("thead tr");
+    const totalGroupHeader = headerRows[0]
+      ?.lastElementChild as HTMLTableCellElement | null;
+    const totalValueHeader = headerRows[1]
+      ?.lastElementChild as HTMLTableCellElement | null;
+
+    expect(totalGroupHeader?.textContent).toContain("Total");
+    expect(totalGroupHeader?.colSpan).toBe(1);
+    expect(totalValueHeader?.textContent).toContain("revenue");
+    expect(totalValueHeader?.textContent).not.toContain("profit");
+    expect(
+      screen.queryByTestId("pivot-excluded-total"),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -824,6 +1007,74 @@ describe("TableRenderer - header menu triggers", () => {
     fireEvent.click(trigger);
     expect(screen.getByTestId("header-menu-year")).toBeInTheDocument();
   });
+
+  it("renders breadcrumb menu triggers in hierarchy mode", () => {
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onSortChange={vi.fn()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByTestId("header-menu-trigger-region-0"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("header-menu-trigger-category-1"),
+    ).toBeInTheDocument();
+  });
+
+  it("opens row header menu from a hierarchy breadcrumb trigger", () => {
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onSortChange={vi.fn()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("header-menu-trigger-region-0"));
+    expect(screen.getByTestId("header-menu-region")).toBeInTheDocument();
+  });
+
+  it("omits subtotals toggle from hierarchy breadcrumb menus", () => {
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onSortChange={vi.fn()}
+        onFilterChange={vi.fn()}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("header-menu-trigger-region-0"));
+    expect(screen.getByTestId("header-menu-region")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("header-menu-subtotals"),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("TableRenderer - visual state cues", () => {
@@ -1165,6 +1416,28 @@ describe("TableRenderer - redundant toggle removal", () => {
     expect(collapsed.length).toBeGreaterThan(0);
   });
 
+  it("does not collapse when clicking hierarchy subtotal text", () => {
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    const firstSubtotalRow = screen.getAllByTestId("pivot-subtotal-row")[0];
+    fireEvent.click(within(firstSubtotalRow).getByText("EU"));
+    expect(onCollapseChange).not.toHaveBeenCalled();
+  });
+
   it("3-level hierarchy with full subtotals has no toggle on data rows", () => {
     const config = makeConfig({
       rows: ["region", "category", "product"],
@@ -1442,6 +1715,31 @@ describe("Dimension toggle - click behavior", () => {
     expect(collapsed).not.toContain("__ALL__");
     expect(collapsed).toEqual([]);
   });
+
+  it("expanding a deeper hierarchy breadcrumb clears collapsed parents", () => {
+    const onCollapseChange = vi.fn();
+    const onConfigChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: ["EU", "US"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+        onConfigChange={onConfigChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-1-category"));
+    expect(onConfigChange).toHaveBeenCalledTimes(1);
+    expect(onConfigChange.mock.calls[0][0].collapsed_groups).toEqual([]);
+  });
 });
 
 describe("Dimension toggle - aria attributes", () => {
@@ -1498,6 +1796,28 @@ describe("Dimension toggle - aria attributes", () => {
     );
     const btn = screen.getByTestId("pivot-dim-toggle-row-0-region");
     expect(btn).toHaveAttribute("aria-label", "Collapse all region groups");
+  });
+
+  it("shows deeper hierarchy breadcrumbs as collapsed when an ancestor is collapsed", () => {
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: ["EU", "US"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={vi.fn()}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    const btn = screen.getByTestId("pivot-dim-toggle-row-1-category");
+    expect(btn).toHaveAttribute("aria-expanded", "false");
   });
 });
 
@@ -1752,7 +2072,7 @@ describe("per-attribute totals", () => {
     excludedCells.forEach((cell) => expect(cell).toHaveTextContent("–"));
   });
 
-  it("excluded measure in row total shows dash", () => {
+  it("excluded measure in row total is omitted", () => {
     const config = makeConfig({
       values: ["revenue", "profit"],
       show_row_totals: ["revenue"],
@@ -1782,13 +2102,12 @@ describe("per-attribute totals", () => {
 
     const revenueTotal = screen.getByTestId("pivot-row-total");
     expect(revenueTotal).toHaveTextContent(/\d/);
-
-    const excludedCells = screen.getAllByTestId("pivot-excluded-total");
-    expect(excludedCells.length).toBe(1);
-    expect(excludedCells[0]).toHaveTextContent("–");
+    expect(
+      screen.queryByTestId("pivot-excluded-total"),
+    ).not.toBeInTheDocument();
   });
 
-  it("excluded total cells are non-interactive", () => {
+  it("remaining row total cells stay interactive when a measure is omitted", () => {
     const config = makeConfig({
       values: ["revenue", "profit"],
       show_row_totals: ["revenue"],
@@ -1816,14 +2135,12 @@ describe("per-attribute totals", () => {
       </table>,
     );
 
-    const excludedCells = screen.getAllByTestId("pivot-excluded-total");
-    expect(excludedCells.length).toBe(1);
-    const cell = excludedCells[0];
-    expect(cell).not.toHaveAttribute("onClick");
-    expect(cell).not.toHaveAttribute("tabindex");
+    const cell = screen.getByTestId("pivot-row-total");
+    expect(cell).toHaveAttribute("role", "gridcell");
+    expect(cell).toHaveAttribute("tabindex", "0");
   });
 
-  it("excluded measure in subtotal row total shows dash", () => {
+  it("excluded measure in subtotal row total is omitted", () => {
     const config = makeConfig({
       rows: ["region", "category"],
       columns: ["year"],
@@ -1860,10 +2177,9 @@ describe("per-attribute totals", () => {
 
     const revenueSubtotalTotal = screen.getByTestId("pivot-subtotal-total");
     expect(revenueSubtotalTotal).toHaveTextContent(/\d/);
-
-    const excludedCells = screen.getAllByTestId("pivot-excluded-total");
-    expect(excludedCells.length).toBe(1);
-    expect(excludedCells[0]).toHaveTextContent("–");
+    expect(
+      screen.queryByTestId("pivot-excluded-total"),
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -299,14 +299,18 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     [config, rowTemporalInfos],
   );
   const effectiveNumRowDims =
-    config.rows.length === 0
+    config.row_layout === "hierarchy"
       ? 1
-      : rowTemporalInfos.length > 0
-        ? computeNumRowHeaderLevels(config, rowTemporalInfos)
-        : numRowDims;
+      : config.rows.length === 0
+        ? 1
+        : rowTemporalInfos.length > 0
+          ? computeNumRowHeaderLevels(config, rowTemporalInfos)
+          : numRowDims;
   const totalDataColumns = effectiveColSlots.length;
 
-  const useSubtotals = !!config.show_subtotals && config.rows.length >= 2;
+  const useSubtotals =
+    config.rows.length >= 2 &&
+    (config.row_layout === "hierarchy" || !!config.show_subtotals);
   const collapsedSet = useMemo(() => {
     const raw = config.collapsed_groups ?? [];
     if (raw.includes("__ALL__")) {
@@ -364,8 +368,13 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       : computedHeaderHeight);
 
   const groupedRows: GroupedRow[] | null = useMemo(
-    () => (useSubtotals ? pivotData.getGroupedRowKeys() : null),
-    [useSubtotals, pivotData],
+    () =>
+      useSubtotals
+        ? config.row_layout === "hierarchy"
+          ? pivotData.getHierarchyRowKeys()
+          : pivotData.getGroupedRowKeys()
+        : null,
+    [useSubtotals, pivotData, config.row_layout],
   );
 
   const visibleRowEntries = useMemo(() => {
@@ -691,6 +700,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         numColDims >= 2 && onCollapseChange ? handleToggleColGroup : undefined,
         pivotData,
         onCollapseChange,
+        onConfigChange,
         handleResizeMouseDown,
         columnWidthMap,
         headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
@@ -701,6 +711,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         handleTemporalToggle,
         columnTypes,
         rowTemporalInfos.length > 0 ? rowHeaderLevels : undefined,
+        rowTemporalInfos.length > 0 ? rowTemporalInfos : undefined,
       );
     },
     [

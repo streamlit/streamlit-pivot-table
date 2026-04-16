@@ -87,6 +87,7 @@ class PivotConfig(TypedDict, total=False):
     col_sort: SortConfig
     show_subtotals: bool | list[str]
     repeat_row_labels: bool
+    row_layout: str
     collapsed_groups: list[str]
     collapsed_col_groups: list[str]
     collapsed_temporal_groups: dict[str, list[str]]
@@ -1769,6 +1770,7 @@ def _default_config(
     sticky_headers: bool = True,
     show_subtotals: bool | list[str] = False,
     repeat_row_labels: bool = False,
+    row_layout: Literal["table", "hierarchy"] = "table",
     show_values_as: dict[str, str] | None = None,
     conditional_formatting: list[dict[str, Any]] | None = None,
     number_format: str | dict[str, str] | None = None,
@@ -1792,6 +1794,7 @@ def _default_config(
         else show_totals,
         empty_cell_value=empty_cell_value,
         interactive=interactive,
+        row_layout=row_layout,
     )
     if isinstance(cfg["show_row_totals"], list):
         cfg["show_row_totals"] = _validate_list_field(
@@ -1975,6 +1978,7 @@ def st_pivot_table(
     sticky_headers: bool = True,
     show_subtotals: bool | list[str] = False,
     repeat_row_labels: bool = False,
+    row_layout: Literal["table", "hierarchy"] = "table",
     show_values_as: dict[str, str] | None = None,
     conditional_formatting: list[dict[str, Any]] | None = None,
     number_format: str | dict[str, str] | None = None,
@@ -2108,6 +2112,11 @@ def st_pivot_table(
     repeat_row_labels : bool
         If True, row dimension labels are repeated on every row
         instead of being merged/spanned. Defaults to False.
+    row_layout : {"table", "hierarchy"}
+        Controls the row-header layout. ``"table"`` (default) shows row
+        dimensions in separate visible columns. ``"hierarchy"`` renders a
+        compact tree-style first column with indentation and inline
+        expand/collapse controls.
     show_values_as : dict[str, str] or None
         Per-field display mode. Maps value field names to one of
         ``"raw"``, ``"pct_of_total"``, ``"pct_of_row"``, ``"pct_of_col"``,
@@ -2461,6 +2470,10 @@ def st_pivot_table(
         raise TypeError(
             f"repeat_row_labels must be a bool, got {type(repeat_row_labels).__name__}"
         )
+    if row_layout not in ("table", "hierarchy"):
+        raise ValueError(
+            f'row_layout must be "table" or "hierarchy", got {row_layout!r}'
+        )
 
     if show_values_as is not None:
         if not isinstance(show_values_as, dict):
@@ -2634,6 +2647,7 @@ def st_pivot_table(
         sticky_headers=sticky_headers,
         show_subtotals=show_subtotals,
         repeat_row_labels=repeat_row_labels,
+        row_layout=row_layout,
         show_values_as=show_values_as,
         conditional_formatting=conditional_formatting,
         number_format=number_format,

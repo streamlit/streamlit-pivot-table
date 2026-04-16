@@ -1334,7 +1334,10 @@ export class PivotData {
       }
     }
 
-    const subtotalsVal = this._config.show_subtotals;
+    const subtotalsVal =
+      this._config.row_layout === "hierarchy" && rowDims.length >= 2
+        ? true
+        : this._config.show_subtotals;
     if (rowDims.length < 2 || !subtotalsVal) {
       return rowKeys.map((key) => ({
         type: "data" as const,
@@ -1400,6 +1403,76 @@ export class PivotData {
       }
     }
 
+    return result;
+  }
+
+  /**
+   * Get hierarchy-style row entries with parent groups rendered BEFORE children.
+   * Collapsed groups keep the parent row visible and hide descendants.
+   */
+  getHierarchyRowKeys(ignoreCollapsed?: boolean): GroupedRow[] {
+    const rowDims = this._config.rows;
+    const rowKeys = this.getRowKeys();
+
+    let collapsed: Set<string>;
+    if (ignoreCollapsed) {
+      collapsed = new Set<string>();
+    } else {
+      const rawCollapsed = this._config.collapsed_groups ?? [];
+      if (rawCollapsed.includes("__ALL__")) {
+        collapsed = new Set<string>();
+        const seen = new Set<string>();
+        for (const rk of rowKeys) {
+          const topKey = makeKeyString(rk.slice(0, 1));
+          if (!seen.has(topKey)) {
+            seen.add(topKey);
+            collapsed.add(topKey);
+          }
+        }
+      } else {
+        collapsed = new Set(rawCollapsed);
+      }
+    }
+
+    if (rowDims.length === 0) {
+      return [{ type: "data", key: [], level: 0 }];
+    }
+
+    const result: GroupedRow[] = [];
+    const numLevels = rowDims.length;
+
+    const visit = (keys: string[][], level: number, prefix: string[]): void => {
+      if (keys.length === 0) return;
+      if (level >= numLevels - 1) {
+        for (const key of keys) {
+          result.push({ type: "data", key, level: numLevels - 1 });
+        }
+        return;
+      }
+
+      let idx = 0;
+      while (idx < keys.length) {
+        const currentValue = keys[idx]![level] ?? "";
+        const groupPrefix = [...prefix, currentValue];
+        let end = idx + 1;
+        while (
+          end < keys.length &&
+          keys[end]!.slice(0, level + 1).every(
+            (v, prefixIdx) => v === groupPrefix[prefixIdx],
+          )
+        ) {
+          end++;
+        }
+
+        result.push({ type: "subtotal", key: groupPrefix, level });
+        if (!collapsed.has(makeKeyString(groupPrefix))) {
+          visit(keys.slice(idx, end), level + 1, groupPrefix);
+        }
+        idx = end;
+      }
+    };
+
+    visit(rowKeys, 0, []);
     return result;
   }
 

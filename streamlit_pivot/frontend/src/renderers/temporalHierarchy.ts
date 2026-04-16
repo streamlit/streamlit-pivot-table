@@ -543,6 +543,7 @@ export function applyTemporalRowCollapse(
   config: PivotConfigV1,
 ): VisibleRowEntry[] {
   if (temporalInfos.length === 0) return entries;
+  const hierarchyMode = config.row_layout === "hierarchy";
 
   const collapsedSets = new Map<string, Set<string>>();
   for (const tInfo of temporalInfos) {
@@ -551,7 +552,7 @@ export function applyTemporalRowCollapse(
       collapsedSets.set(tInfo.field, new Set(keys));
     }
   }
-  if (collapsedSets.size === 0) return entries;
+  if (collapsedSets.size === 0 && !hierarchyMode) return entries;
 
   const result: VisibleRowEntry[] = [];
   const emittedCollapse = new Set<string>();
@@ -560,9 +561,8 @@ export function applyTemporalRowCollapse(
     let collapsed = false;
 
     for (const tInfo of temporalInfos) {
-      const collapsedKeys = collapsedSets.get(tInfo.field);
-      if (!collapsedKeys) continue;
       if (entry.key.length <= tInfo.dimIndex) continue;
+      const collapsedKeys = collapsedSets.get(tInfo.field);
 
       const leafKey = entry.key[tInfo.dimIndex] ?? "";
       const parentBuckets = extractParentBuckets(leafKey, tInfo.grain);
@@ -581,12 +581,28 @@ export function applyTemporalRowCollapse(
         );
         const collapsePrefix = modifiedRowKey.slice(0, tInfo.dimIndex + 1);
         const collapseKey = makeKeyString(collapsePrefix);
-        if (!collapsedKeys.has(collapseKey)) continue;
 
         const outerPrefixStr = makeKeyString(
           entry.key.slice(0, tInfo.dimIndex),
         );
         const dedupeKey = `${tInfo.field}\x01${parentBucket}\x01${outerPrefixStr}`;
+        if (hierarchyMode && !emittedCollapse.has(dedupeKey)) {
+          emittedCollapse.add(dedupeKey);
+          result.push({
+            type: "temporal_parent",
+            key: [...entry.key.slice(0, tInfo.dimIndex), parentBucket],
+            level: tInfo.dimIndex,
+            temporalParent: {
+              field: tInfo.field,
+              parentBucket,
+              parentGrain: tInfo.hierarchyLevels[lvl]!,
+              modifiedRowKey: collapsePrefix,
+              rowDimIndex: tInfo.dimIndex,
+            },
+          });
+        }
+        if (!collapsedKeys?.has(collapseKey)) continue;
+
         if (!emittedCollapse.has(dedupeKey)) {
           emittedCollapse.add(dedupeKey);
           result.push({

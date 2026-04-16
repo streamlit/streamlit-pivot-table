@@ -80,6 +80,7 @@ describe("Config schema v1", () => {
         "columns": [],
         "empty_cell_value": "-",
         "interactive": true,
+        "row_layout": "table",
         "rows": [],
         "show_column_totals": true,
         "show_row_totals": true,
@@ -322,6 +323,23 @@ describe("validatePivotConfigV1", () => {
       filters: { region: { include: ["US", "EU"] } },
     });
     expect(result.filters).toEqual({ region: { include: ["US", "EU"] } });
+  });
+
+  it("accepts row_layout when valid", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      row_layout: "hierarchy",
+    });
+    expect(result.row_layout).toBe("hierarchy");
+  });
+
+  it("rejects invalid row_layout", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        row_layout: "compact",
+      }),
+    ).toThrow('\'row_layout\' must be "table" or "hierarchy"');
   });
 
   it("rejects non-object filters", () => {

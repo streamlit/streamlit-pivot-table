@@ -316,6 +316,33 @@
   opacity: 1;
 }
 
+.headerMenuBtnInline {
+  position: static;
+  right: auto;
+  top: auto;
+  transform: none;
+  width: 10px;
+  height: 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
+  opacity: 0.9;
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+.headerMenuBtnInline:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+.headerMenuBtnInline:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+  opacity: 1;
+}
+
 /* Active state indicator on header cells */
 
 .headerFiltered::after {
@@ -382,7 +409,6 @@
   width: 14px;
   height: 14px;
   padding: 0;
-  margin-right: 4px;
   border: none;
   border-radius: calc(var(--st-base-radius) - 2px);
   background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
@@ -446,6 +472,70 @@
   opacity: 0.6;
   stroke-width: 1.8;
   flex-shrink: 0;
+}
+
+.hierarchyToggleSpacer {
+  display: inline-block;
+  width: 18px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.hierarchyToggleButton {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hierarchyBreadcrumbToggleButton .groupToggleIcon,
+.hierarchyBreadcrumbToggleButton .dimensionToggleIcon,
+.hierarchyPlainToggleButton .groupToggleIcon,
+.hierarchyPlainToggleButton .dimensionToggleIcon {
+  display: block;
+  margin-right: 0;
+}
+
+.hierarchyPlainToggleButton {
+  all: unset;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hierarchyPlainToggleButton:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.hierarchySubtotalRow {
+  font-weight: 500;
+}
+
+.hierarchySubtotalRow td:not(.totalsCol),
+.hierarchySubtotalRow th {
+  background-color: var(--st-background-color);
+  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 12%, transparent);
+}
+
+.hierarchySubtotalRow .subtotalHeaderCell {
+  font-weight: 500;
+}
+
+.hierarchySubtotalRow[data-level="0"] td:not(.totalsCol),
+.hierarchySubtotalRow[data-level="0"] th,
+.hierarchySubtotalRow[data-level="0"] .subtotalHeaderCell {
+  background-color: color-mix(
+    in srgb,
+    var(--st-secondary-background-color) 22%,
+    var(--st-background-color)
+  );
 }
 
 /* --- Group boundary borders (BI-grade hierarchy) --- */
@@ -517,6 +607,63 @@
   opacity: 0.6;
   stroke-width: 1.8;
   margin-right: 2px;
+}
+
+.hierarchyBreadcrumbBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  white-space: nowrap;
+}
+
+.hierarchyBreadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  flex: 0 0 auto;
+}
+
+.hierarchyBreadcrumbSeparator {
+  margin-inline: 4px;
+  opacity: 0.85;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.hierarchyBreadcrumbButton,
+.hierarchyBreadcrumbLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+}
+
+.hierarchyBreadcrumbButton {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.hierarchyBreadcrumbButton:hover {
+  text-decoration: underline;
+}
+
+.hierarchyBreadcrumbButton:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.hierarchyBreadcrumbLabel {
+  gap: 4px;
+}
+
+.hierarchyBreadcrumbToggleButton {
+  color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
 }
 
 /* Column dimension label in corner area */

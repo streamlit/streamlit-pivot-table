@@ -300,7 +300,7 @@ describe("buildExportGrid", () => {
     expect(grid[1][2]).toBe("Q2");
   });
 
-  it("emits empty string for excluded row total measures", () => {
+  it("omits excluded row total measures from the export grid", () => {
     const config = makeConfig({
       values: ["revenue", "profit"],
       show_row_totals: ["revenue"],
@@ -308,13 +308,25 @@ describe("buildExportGrid", () => {
     const pd = new PivotData(SAMPLE_DATA, config);
     const grid = buildExportGrid(pd, config, "raw");
 
-    // Data rows: last two columns are row totals (revenue, profit)
-    // EU row: revenue total has value, profit total is excluded (empty)
+    expect(grid[0]).toEqual([
+      "region",
+      "2023",
+      "2023",
+      "2024",
+      "2024",
+      "Total",
+    ]);
+    expect(grid[1]).toEqual([
+      "",
+      "revenue",
+      "profit",
+      "revenue",
+      "profit",
+      "revenue",
+    ]);
+
     const euRow = grid[2];
-    const revenueTotalIdx = euRow.length - 2;
-    const profitTotalIdx = euRow.length - 1;
-    expect(euRow[revenueTotalIdx]).not.toBe("");
-    expect(euRow[profitTotalIdx]).toBe("");
+    expect(euRow).toEqual(["EU", "200", "80", "250", "100", "450"]);
   });
 
   it("emits empty string for excluded column total measures", () => {
@@ -334,7 +346,7 @@ describe("buildExportGrid", () => {
     }
   });
 
-  it("emits empty string for excluded grand total measures", () => {
+  it("keeps only visible row-total measures in the export grand-total section", () => {
     const config = makeConfig({
       values: ["revenue", "profit"],
       show_row_totals: ["revenue"],
@@ -343,13 +355,24 @@ describe("buildExportGrid", () => {
     const pd = new PivotData(SAMPLE_DATA, config);
     const grid = buildExportGrid(pd, config, "raw");
 
-    // Totals row: last two cells are grand total (revenue, profit)
-    // Profit grand total is excluded
     const totalRow = grid[grid.length - 1];
-    const grandRevenueIdx = totalRow.length - 2;
-    const grandProfitIdx = totalRow.length - 1;
-    expect(totalRow[grandRevenueIdx]).not.toBe("");
-    expect(totalRow[grandProfitIdx]).toBe("");
+    expect(grid[0]).toEqual([
+      "region",
+      "2023",
+      "2023",
+      "2024",
+      "2024",
+      "Total",
+    ]);
+    expect(grid[1]).toEqual([
+      "",
+      "revenue",
+      "profit",
+      "revenue",
+      "profit",
+      "revenue",
+    ]);
+    expect(totalRow).toEqual(["Total", "350", "", "400", "", "750"]);
   });
 
   const MULTI_DIM_DATA: DataRecord[] = [
@@ -384,7 +407,7 @@ describe("buildExportGrid", () => {
     }
   });
 
-  it("emits empty string for excluded measures in subtotal row totals", () => {
+  it("omits excluded measures from subtotal row totals in export", () => {
     const config = makeConfig({
       rows: ["region", "category"],
       columns: ["year"],
@@ -401,10 +424,8 @@ describe("buildExportGrid", () => {
     expect(subtotalRows.length).toBeGreaterThan(0);
 
     for (const row of subtotalRows) {
-      const profitTotalIdx = row.length - 1;
-      const revenueTotalIdx = row.length - 2;
-      expect(row[revenueTotalIdx]).not.toBe("");
-      expect(row[profitTotalIdx]).toBe("");
+      expect(row.length).toBe(7);
+      expect(row[row.length - 1]).not.toBe("");
     }
   });
 
@@ -719,6 +740,32 @@ describe("buildExportIR", () => {
       for (const c of row) {
         expect(c.mergeDown).toBeUndefined();
       }
+    }
+  });
+
+  it("exports hierarchy layout as a single indented row dimension column", () => {
+    const data: DataRecord[] = [
+      { a: "X", b: "1", val: 10 },
+      { a: "X", b: "2", val: 20 },
+      { a: "Y", b: "3", val: 30 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b"],
+      columns: [],
+      values: ["val"],
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(data, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    expect(ir.rowDimCount).toBe(1);
+    expect(ir.cells.some((row) => row[0].display === "X")).toBe(true);
+    expect(ir.cells.some((row) => row[0].display === "  1")).toBe(true);
+    expect(ir.cells.findIndex((row) => row[0].display === "X")).toBeLessThan(
+      ir.cells.findIndex((row) => row[0].display === "  1"),
+    );
+    for (const row of ir.cells) {
+      expect(row[0].mergeDown).toBeUndefined();
     }
   });
 

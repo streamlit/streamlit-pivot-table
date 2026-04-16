@@ -78,11 +78,13 @@ import {
   type ProjectedRowEntry,
   type RowHeaderLevelMapping,
   type TemporalParentRow,
+  type TemporalRowInfo,
   type VisibleRowEntry,
 } from "./temporalHierarchy";
 import {
   buildModifiedColKey,
   buildModifiedRowKey,
+  extractParentBuckets,
   formatTemporalParentLabel,
 } from "../engine/dateGrouping";
 import { getEffectiveDateGrain, type ColumnTypeMap } from "../engine/types";
@@ -119,6 +121,26 @@ function slugify(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function getDisplayedValueFields(
+  config: PivotConfigV1,
+  hasMultipleValues: boolean,
+): string[] {
+  const renderedValueFields = getRenderedValueFields(config);
+  return hasMultipleValues
+    ? renderedValueFields
+    : [renderedValueFields[0] ?? ""];
+}
+
+function getRowTotalValueFields(
+  config: PivotConfigV1,
+  hasMultipleValues: boolean,
+): string[] {
+  if (!showRowTotals(config)) return [];
+  return getDisplayedValueFields(config, hasMultipleValues).filter((valField) =>
+    showTotalForMeasure(config, valField, "row"),
+  );
 }
 
 /** +/− icon for dimension-level collapse toggles (axis-neutral, matches groupToggle). */
@@ -508,6 +530,9 @@ function MenuTriggerButton({
   axis,
   isOpen,
   onOpen,
+  variant = "default",
+  testId,
+  ariaLabel,
 }: {
   dimension: string;
   axis: MenuAxis;
@@ -518,6 +543,9 @@ function MenuTriggerButton({
     rect: DOMRect,
     triggerEl: HTMLElement,
   ) => void;
+  variant?: "default" | "inline";
+  testId?: string;
+  ariaLabel?: string;
 }) {
   const handleClick = useCallback(
     (e: MouseEvent<HTMLButtonElement>) => {
@@ -535,18 +563,38 @@ function MenuTriggerButton({
   return (
     <button
       type="button"
-      className={styles.headerMenuBtn}
+      className={
+        variant === "inline"
+          ? `${styles.headerMenuBtn} ${styles.headerMenuBtnInline}`
+          : styles.headerMenuBtn
+      }
       onClick={handleClick}
       onMouseDown={stopMouseDown}
-      aria-label={`${dimension} options`}
+      aria-label={ariaLabel ?? `${dimension} options`}
       aria-expanded={isOpen}
-      data-testid={`header-menu-trigger-${dimension}`}
+      data-testid={testId ?? `header-menu-trigger-${dimension}`}
     >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-        <circle cx="12" cy="5" r="2" />
-        <circle cx="12" cy="12" r="2" />
-        <circle cx="12" cy="19" r="2" />
-      </svg>
+      {variant === "inline" ? (
+        <svg
+          width="8"
+          height="8"
+          viewBox="0 0 8 8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="1.5,2.5 4,5 6.5,2.5" />
+        </svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="5" r="2" />
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="12" cy="19" r="2" />
+        </svg>
+      )}
     </button>
   );
 }
@@ -567,6 +615,7 @@ export function renderColumnHeaders(
   onToggleColGroup?: (groupKey: string) => void,
   pivotData?: PivotData,
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void,
+  onConfigChange?: (config: PivotConfigV1) => void,
   onResizeMouseDown?: (
     colSlotIndex: number,
     e: React.MouseEvent<HTMLDivElement>,
@@ -583,14 +632,17 @@ export function renderColumnHeaders(
   onTemporalToggle?: (field: string, collapseKey: string) => void,
   columnTypes?: ColumnTypeMap,
   rowHeaderLevels?: RowHeaderLevelMapping[],
+  rowTemporalInfos?: TemporalRowInfo[],
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
+  const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
     : colSlots;
   const slotOffset = colRange?.[0] ?? 0;
   const rows: ReactElement[] = [];
   const effectiveHeaderLevels = headerLevels ?? [];
+  const hierarchyMode = isHierarchyLayout(config);
   const hasTemporalHierarchy =
     effectiveHeaderLevels.length > 0 &&
     effectiveHeaderLevels.some((l) => l.isTemporal && !l.isLeaf);
@@ -634,6 +686,183 @@ export function renderColumnHeaders(
     }
 
     onCollapseChange(axis, [...working].sort());
+  };
+
+  const getAxisLevelPrefixes = (
+    axis: "row" | "col",
+    level: number,
+  ): string[] => {
+    if (!pivotData) return [];
+    const keys =
+      axis === "row" ? pivotData.getRowKeys() : pivotData.getColKeys();
+    return [
+      ...new Set(keys.map((k) => makeKeyString(k.slice(0, level + 1)))),
+    ].sort();
+  };
+
+  const getTemporalLevelCollapseKeys = (
+    rowLevel: RowHeaderLevelMapping,
+  ): string[] => {
+    if (!pivotData || !rowTemporalInfos || rowLevel.isLeaf) return [];
+    const temporalInfo = rowTemporalInfos.find(
+      (info) =>
+        info.field === rowLevel.field && info.dimIndex === rowLevel.dimIndex,
+    );
+    if (!temporalInfo) return [];
+    return [
+      ...new Set(
+        pivotData
+          .getRowKeys()
+          .map((key) => {
+            const leafKey = key[rowLevel.dimIndex] ?? "";
+            const parentBucket = extractParentBuckets(
+              leafKey,
+              temporalInfo.grain,
+            )[rowLevel.hierarchyOffset];
+            if (!parentBucket) return null;
+            return makeKeyString(
+              buildModifiedRowKey(
+                key,
+                rowLevel.dimIndex,
+                rowLevel.field,
+                parentBucket,
+              ).slice(0, rowLevel.dimIndex + 1),
+            );
+          })
+          .filter((key): key is string => !!key),
+      ),
+    ].sort();
+  };
+
+  const handleTemporalLevelToggle = (rowLevel: RowHeaderLevelMapping) => {
+    if (!pivotData) return;
+    if (rowLevel.isLeaf) {
+      handleDimToggle("row", rowLevel.dimIndex);
+      return;
+    }
+    if (!onConfigChange) return;
+    const collapseKeys = getTemporalLevelCollapseKeys(rowLevel);
+    if (collapseKeys.length === 0) return;
+    const next = new Set(
+      config.collapsed_temporal_row_groups?.[rowLevel.field] ?? [],
+    );
+    const allCollapsed = collapseKeys.every((key) => next.has(key));
+    collapseKeys.forEach((key) => {
+      if (allCollapsed) next.delete(key);
+      else next.add(key);
+    });
+    const updated = { ...(config.collapsed_temporal_row_groups ?? {}) };
+    if (next.size > 0) updated[rowLevel.field] = [...next].sort();
+    else delete updated[rowLevel.field];
+    onConfigChange({
+      ...config,
+      collapsed_temporal_row_groups:
+        Object.keys(updated).length > 0 ? updated : undefined,
+    });
+  };
+
+  const handleHierarchyBreadcrumbToggle = (
+    rowLevel: RowHeaderLevelMapping,
+    rowHeaderIdx: number,
+    rowDimCollapsed: boolean,
+    effectiveRowHeaderLevels: RowHeaderLevelMapping[],
+  ) => {
+    if (!pivotData) return;
+    if (!onConfigChange) {
+      if (rowLevel.isTemporal && !rowLevel.isLeaf) {
+        handleTemporalLevelToggle(rowLevel);
+      } else {
+        handleDimToggle("row", rowLevel.dimIndex);
+      }
+      return;
+    }
+
+    const level0Prefixes = [
+      ...new Set(
+        pivotData.getRowKeys().map((k) => makeKeyString(k.slice(0, 1))),
+      ),
+    ].sort();
+    const nextCollapsedGroups = normalizeCollapsed(
+      config.collapsed_groups ?? [],
+      level0Prefixes,
+    );
+    const currentCollapsedGroups = normalizeCollapsed(
+      config.collapsed_groups ?? [],
+      level0Prefixes,
+    );
+    const nextTemporalGroups = Object.fromEntries(
+      Object.entries(config.collapsed_temporal_row_groups ?? {}).map(
+        ([field, keys]) => [field, new Set(keys)],
+      ),
+    ) as Record<string, Set<string>>;
+    const ancestorBlocked = effectiveRowHeaderLevels
+      .slice(0, rowHeaderIdx)
+      .some((ancestor) => {
+        if (ancestor.isTemporal && !ancestor.isLeaf) {
+          const keys = getTemporalLevelCollapseKeys(ancestor);
+          return (
+            keys.length > 0 &&
+            keys.every((key) =>
+              (
+                config.collapsed_temporal_row_groups?.[ancestor.field] ?? []
+              ).includes(key),
+            )
+          );
+        }
+        return getAxisLevelPrefixes("row", ancestor.dimIndex).some((key) =>
+          currentCollapsedGroups.has(key),
+        );
+      });
+
+    if (rowDimCollapsed || ancestorBlocked) {
+      effectiveRowHeaderLevels.slice(0, rowHeaderIdx).forEach((ancestor) => {
+        if (ancestor.isTemporal && !ancestor.isLeaf) {
+          const keys = getTemporalLevelCollapseKeys(ancestor);
+          if (!nextTemporalGroups[ancestor.field]) return;
+          keys.forEach((key) =>
+            nextTemporalGroups[ancestor.field]!.delete(key),
+          );
+          if (nextTemporalGroups[ancestor.field]!.size === 0) {
+            delete nextTemporalGroups[ancestor.field];
+          }
+        } else {
+          getAxisLevelPrefixes("row", ancestor.dimIndex).forEach((key) =>
+            nextCollapsedGroups.delete(key),
+          );
+        }
+      });
+    }
+
+    if (rowLevel.isTemporal && !rowLevel.isLeaf) {
+      const targetKeys = getTemporalLevelCollapseKeys(rowLevel);
+      const targetSet = nextTemporalGroups[rowLevel.field] ?? new Set<string>();
+      targetKeys.forEach((key) => {
+        if (rowDimCollapsed || ancestorBlocked) targetSet.delete(key);
+        else targetSet.add(key);
+      });
+      if (targetSet.size > 0) nextTemporalGroups[rowLevel.field] = targetSet;
+      else delete nextTemporalGroups[rowLevel.field];
+    } else {
+      const targetPrefixes = getAxisLevelPrefixes("row", rowLevel.dimIndex);
+      targetPrefixes.forEach((key) => {
+        if (rowDimCollapsed || ancestorBlocked) nextCollapsedGroups.delete(key);
+        else nextCollapsedGroups.add(key);
+      });
+    }
+
+    onConfigChange({
+      ...config,
+      collapsed_groups: [...nextCollapsedGroups].sort(),
+      collapsed_temporal_row_groups:
+        Object.keys(nextTemporalGroups).length > 0
+          ? Object.fromEntries(
+              Object.entries(nextTemporalGroups).map(([field, keys]) => [
+                field,
+                [...keys].sort(),
+              ]),
+            )
+          : undefined,
+    });
   };
 
   const canDimToggle = !!onCollapseChange && !!pivotData;
@@ -744,180 +973,360 @@ export function renderColumnHeaders(
         ? numColLevels + (hasMultipleValues ? 1 : 0)
         : dimCellRowSpan;
       if (config.rows.length > 0) {
-        const showRowDimToggle =
-          canDimToggle && config.rows.length >= 2 && !!config.show_subtotals;
-        const effectiveRowHeaderLevels =
-          rowHeaderLevels && rowHeaderLevels.length > 0
-            ? rowHeaderLevels
-            : config.rows.map((field, dimIndex) => ({
-                dimIndex,
-                field,
-                grain: field as DateGrain,
-                hierarchyOffset: 0,
-                isLeaf: true,
-                isTemporal: false,
-              }));
-        effectiveRowHeaderLevels.forEach((rowLevel, rowHeaderIdx) => {
-          const dim = rowLevel.field;
-          const dimIdx = rowLevel.dimIndex;
-          const isFiltered = !!config.filters?.[dim];
-          const isFirstRowDim = rowHeaderIdx === 0;
-          const hasSubtotals =
-            !!config.show_subtotals && config.rows.length >= 2;
-          const sortTargetDim = config.row_sort?.dimension;
-          const sortTargetIdx = sortTargetDim
-            ? config.rows.indexOf(sortTargetDim)
-            : -1;
-          const showSortOnThisDim = config.row_sort
-            ? sortTargetDim
-              ? hasSubtotals
-                ? dimIdx >= sortTargetIdx && sortTargetIdx !== -1
-                : sortTargetDim === dim
-              : hasSubtotals
-                ? rowLevel.isLeaf
-                : isFirstRowDim
-            : false;
-          const rowSortDir = showSortOnThisDim
-            ? config.row_sort!.direction
-            : undefined;
-          const isInnermost = dimIdx === config.rows.length - 1;
-          const rowDimCollapsed =
-            showRowDimToggle && !isInnermost && pivotData && rowLevel.isLeaf
-              ? isDimCollapsed(
-                  config.collapsed_groups ?? [],
-                  pivotData.getRowKeys(),
-                  dimIdx,
-                )
-              : false;
-          const parentCollapsed =
-            showRowDimToggle && dimIdx > 0 && pivotData && rowLevel.isLeaf
-              ? Array.from({ length: dimIdx }, (_, lvl) => lvl).some((lvl) =>
-                  isDimCollapsed(
-                    config.collapsed_groups ?? [],
-                    pivotData.getRowKeys(),
-                    lvl,
-                  ),
-                )
-              : false;
-          const canToggleThisDim =
-            showRowDimToggle &&
-            rowLevel.isLeaf &&
-            !rowLevel.isTemporal &&
-            !isInnermost;
-          const dimToggleEnabled = canToggleThisDim && !parentCollapsed;
-          const isGroupingDimHeader =
-            !!config.show_subtotals &&
-            config.rows.length >= 2 &&
-            !isInnermost &&
-            rowLevel.isLeaf;
-          const isPrimaryRowHierarchy =
-            rowLevel.dimIndex === 0 && rowLevel.hierarchyOffset === 0;
-
-          const rowDimResizeIdx = -(rowHeaderIdx + 1);
-          const rowDimResizeWidth = columnWidthMap?.get(rowDimResizeIdx);
-          const rowDimCellStyle: React.CSSProperties | undefined =
-            rowDimResizeWidth != null
-              ? {
-                  ...stickyTop,
-                  width: rowDimResizeWidth,
-                  minWidth: rowDimResizeWidth,
-                  maxWidth: rowDimResizeWidth,
-                }
-              : stickyTop;
-
+        if (hierarchyMode) {
+          const effectiveRowHeaderLevels =
+            rowHeaderLevels && rowHeaderLevels.length > 0
+              ? rowHeaderLevels
+              : config.rows.map((field, dimIndex) => ({
+                  dimIndex,
+                  field,
+                  grain: field as DateGrain,
+                  hierarchyOffset: 0,
+                  isLeaf: true,
+                  isTemporal: false,
+                }));
+          const showRowDimToggle = canDimToggle && config.rows.length >= 2;
           cells.push(
             <th
-              key={`row-dim-${rowHeaderIdx}`}
-              className={`${styles.headerCell} ${isPrimaryRowHierarchy ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
+              key="row-dim-hierarchy"
+              className={`${styles.headerCell} ${styles.rowHeaderPrimary} ${styles.headerRowPinned}`}
               rowSpan={cornerFullRowSpan}
-              style={rowDimCellStyle}
-              data-testid={
-                canToggleThisDim
-                  ? `pivot-dim-toggle-row-${rowHeaderIdx}-${slugify(dim)}`
-                  : rowHeaderLevels && rowHeaderLevels.length > 0
-                    ? `pivot-row-dim-label-${slugify(dim)}-${rowHeaderIdx}`
-                    : `pivot-row-dim-label-${dim}`
-              }
-              aria-sort={
-                rowSortDir === "asc"
-                  ? "ascending"
-                  : rowSortDir === "desc"
-                    ? "descending"
-                    : undefined
-              }
-              title={
-                canToggleThisDim && !dimToggleEnabled
-                  ? `Expand ${config.rows[dimIdx - 1]} first`
-                  : undefined
-              }
-              {...(dimToggleEnabled
-                ? {
-                    onClick: (e: MouseEvent) => {
-                      if (
-                        (e.target as HTMLElement).closest(
-                          `.${styles.headerMenuBtn}`,
-                        )
-                      )
-                        return;
-                      handleDimToggle("row", dimIdx);
-                    },
-                    role: "button",
-                    tabIndex: 0,
-                    onKeyDown: (e: KeyboardEvent) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleDimToggle("row", dimIdx);
-                      }
-                    },
-                    "aria-expanded": !rowDimCollapsed,
-                    "aria-label": `${rowDimCollapsed ? "Expand" : "Collapse"} all ${getDimensionLabel(config, dim, pivotData?.getColumnType(dim), adaptiveDateGrains?.[dim])} groups`,
-                  }
-                : {})}
+              data-testid="pivot-row-dim-label-hierarchy"
+              style={stickyTop}
             >
-              <div className={styles.headerCellInner}>
-                {canToggleThisDim && (
-                  <DimToggleIcon collapsed={rowDimCollapsed} />
-                )}
-                <span className={isFiltered ? styles.headerFiltered : ""}>
-                  {rowLevel.isTemporal
-                    ? `${DATE_GRAIN_LABELS[rowLevel.grain]}`
-                    : getDimensionLabel(
-                        config,
-                        dim,
-                        pivotData?.getColumnType(dim),
-                        adaptiveDateGrains?.[dim],
-                      )}
-                </span>
-                {rowSortDir && <SortArrowIcon direction={rowSortDir} />}
-                {hasMenu && rowLevel.isLeaf && (
-                  <MenuTriggerButton
-                    dimension={dim}
-                    axis="row"
-                    isOpen={activeMenuDimension === dim}
-                    onOpen={onOpenMenu}
-                  />
-                )}
+              <div
+                className={styles.headerCellInner}
+                style={{ justifyContent: "flex-start" }}
+              >
+                <div className={styles.hierarchyBreadcrumbBar}>
+                  {effectiveRowHeaderLevels.map((rowLevel, rowHeaderIdx) => {
+                    const dim = rowLevel.field;
+                    const dimIdx = rowLevel.dimIndex;
+                    const isInnermost = dimIdx === config.rows.length - 1;
+                    const isLastVisibleLevel =
+                      rowHeaderIdx === effectiveRowHeaderLevels.length - 1;
+                    const temporalLevelCollapseKeys =
+                      rowLevel.isTemporal && !rowLevel.isLeaf
+                        ? getTemporalLevelCollapseKeys(rowLevel)
+                        : [];
+                    const rowDimCollapsed =
+                      rowLevel.isTemporal && !rowLevel.isLeaf
+                        ? temporalLevelCollapseKeys.length > 0 &&
+                          temporalLevelCollapseKeys.every((key) =>
+                            (
+                              config.collapsed_temporal_row_groups?.[
+                                rowLevel.field
+                              ] ?? []
+                            ).includes(key),
+                          )
+                        : showRowDimToggle &&
+                            !isInnermost &&
+                            rowLevel.isLeaf &&
+                            pivotData
+                          ? isDimCollapsed(
+                              config.collapsed_groups ?? [],
+                              pivotData.getRowKeys(),
+                              dimIdx,
+                            )
+                          : false;
+                    const ancestorBlocked = effectiveRowHeaderLevels
+                      .slice(0, rowHeaderIdx)
+                      .some((ancestor) => {
+                        if (ancestor.isTemporal && !ancestor.isLeaf) {
+                          const keys = getTemporalLevelCollapseKeys(ancestor);
+                          return (
+                            keys.length > 0 &&
+                            keys.every((key) =>
+                              (
+                                config.collapsed_temporal_row_groups?.[
+                                  ancestor.field
+                                ] ?? []
+                              ).includes(key),
+                            )
+                          );
+                        }
+                        return getAxisLevelPrefixes(
+                          "row",
+                          ancestor.dimIndex,
+                        ).some((key) =>
+                          normalizeCollapsed(
+                            config.collapsed_groups ?? [],
+                            [
+                              ...new Set(
+                                pivotData
+                                  ?.getRowKeys()
+                                  .map((k) => makeKeyString(k.slice(0, 1))) ??
+                                  [],
+                              ),
+                            ].sort(),
+                          ).has(key),
+                        );
+                      });
+                    const visualRowDimCollapsed =
+                      rowDimCollapsed || ancestorBlocked;
+                    const canToggleThisDim =
+                      showRowDimToggle &&
+                      !isLastVisibleLevel &&
+                      (rowLevel.isTemporal ||
+                        (rowLevel.isLeaf && !isInnermost));
+                    const label = rowLevel.isTemporal
+                      ? DATE_GRAIN_LABELS[rowLevel.grain]
+                      : getDimensionLabel(
+                          config,
+                          dim,
+                          pivotData?.getColumnType(dim),
+                          adaptiveDateGrains?.[dim],
+                        );
+
+                    return (
+                      <div
+                        key={`hierarchy-breadcrumb-${rowHeaderIdx}`}
+                        className={styles.hierarchyBreadcrumb}
+                      >
+                        {rowHeaderIdx > 0 && (
+                          <span
+                            className={styles.hierarchyBreadcrumbSeparator}
+                            aria-hidden="true"
+                          >
+                            /
+                          </span>
+                        )}
+                        {canToggleThisDim ? (
+                          <span className={styles.hierarchyBreadcrumbLabel}>
+                            <HierarchyToggleButton
+                              collapsed={visualRowDimCollapsed}
+                              label={`all ${label} groups`}
+                              dataTestId={`pivot-dim-toggle-row-${rowHeaderIdx}-${slugify(dim)}`}
+                              onClick={() =>
+                                handleHierarchyBreadcrumbToggle(
+                                  rowLevel,
+                                  rowHeaderIdx,
+                                  visualRowDimCollapsed,
+                                  effectiveRowHeaderLevels,
+                                )
+                              }
+                              icon={
+                                <DimToggleIcon
+                                  collapsed={visualRowDimCollapsed}
+                                />
+                              }
+                              variant="breadcrumb"
+                            />
+                            {label}
+                            {hasMenu && (
+                              <MenuTriggerButton
+                                dimension={dim}
+                                axis="row"
+                                isOpen={activeMenuDimension === dim}
+                                onOpen={onOpenMenu}
+                                variant="inline"
+                                testId={`header-menu-trigger-${slugify(dim)}-${rowHeaderIdx}`}
+                                ariaLabel={`${label} options`}
+                              />
+                            )}
+                          </span>
+                        ) : (
+                          <span
+                            className={styles.hierarchyBreadcrumbLabel}
+                            data-testid={`pivot-row-dim-breadcrumb-${slugify(dim)}-${rowHeaderIdx}`}
+                          >
+                            {label}
+                            {hasMenu && (
+                              <MenuTriggerButton
+                                dimension={dim}
+                                axis="row"
+                                isOpen={activeMenuDimension === dim}
+                                onOpen={onOpenMenu}
+                                variant="inline"
+                                testId={`header-menu-trigger-${slugify(dim)}-${rowHeaderIdx}`}
+                                ariaLabel={`${label} options`}
+                              />
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              {onResizeMouseDown && (
-                <div
-                  className={styles.resizeHandle}
-                  data-testid={`resize-handle-row-dim-${dimIdx}`}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    onResizeMouseDown(rowDimResizeIdx, e);
-                  }}
-                  onDoubleClick={
-                    onResizeDoubleClick
-                      ? (e) => onResizeDoubleClick(rowDimResizeIdx, e)
-                      : undefined
-                  }
-                  onMouseEnter={elevateCell}
-                  onMouseLeave={resetCell}
-                />
-              )}
             </th>,
           );
-        });
+        } else {
+          const showRowDimToggle =
+            canDimToggle && config.rows.length >= 2 && !!config.show_subtotals;
+          const effectiveRowHeaderLevels =
+            rowHeaderLevels && rowHeaderLevels.length > 0
+              ? rowHeaderLevels
+              : config.rows.map((field, dimIndex) => ({
+                  dimIndex,
+                  field,
+                  grain: field as DateGrain,
+                  hierarchyOffset: 0,
+                  isLeaf: true,
+                  isTemporal: false,
+                }));
+          effectiveRowHeaderLevels.forEach((rowLevel, rowHeaderIdx) => {
+            const dim = rowLevel.field;
+            const dimIdx = rowLevel.dimIndex;
+            const isFiltered = !!config.filters?.[dim];
+            const isFirstRowDim = rowHeaderIdx === 0;
+            const hasSubtotals =
+              !!config.show_subtotals && config.rows.length >= 2;
+            const sortTargetDim = config.row_sort?.dimension;
+            const sortTargetIdx = sortTargetDim
+              ? config.rows.indexOf(sortTargetDim)
+              : -1;
+            const showSortOnThisDim = config.row_sort
+              ? sortTargetDim
+                ? hasSubtotals
+                  ? dimIdx >= sortTargetIdx && sortTargetIdx !== -1
+                  : sortTargetDim === dim
+                : hasSubtotals
+                  ? rowLevel.isLeaf
+                  : isFirstRowDim
+              : false;
+            const rowSortDir = showSortOnThisDim
+              ? config.row_sort!.direction
+              : undefined;
+            const isInnermost = dimIdx === config.rows.length - 1;
+            const rowDimCollapsed =
+              showRowDimToggle && !isInnermost && pivotData && rowLevel.isLeaf
+                ? isDimCollapsed(
+                    config.collapsed_groups ?? [],
+                    pivotData.getRowKeys(),
+                    dimIdx,
+                  )
+                : false;
+            const parentCollapsed =
+              showRowDimToggle && dimIdx > 0 && pivotData && rowLevel.isLeaf
+                ? Array.from({ length: dimIdx }, (_, lvl) => lvl).some((lvl) =>
+                    isDimCollapsed(
+                      config.collapsed_groups ?? [],
+                      pivotData.getRowKeys(),
+                      lvl,
+                    ),
+                  )
+                : false;
+            const canToggleThisDim =
+              showRowDimToggle &&
+              rowLevel.isLeaf &&
+              !rowLevel.isTemporal &&
+              !isInnermost;
+            const dimToggleEnabled = canToggleThisDim && !parentCollapsed;
+            const isGroupingDimHeader =
+              !!config.show_subtotals &&
+              config.rows.length >= 2 &&
+              !isInnermost &&
+              rowLevel.isLeaf;
+            const isPrimaryRowHierarchy =
+              rowLevel.dimIndex === 0 && rowLevel.hierarchyOffset === 0;
+
+            const rowDimResizeIdx = -(rowHeaderIdx + 1);
+            const rowDimResizeWidth = columnWidthMap?.get(rowDimResizeIdx);
+            const rowDimCellStyle: React.CSSProperties | undefined =
+              rowDimResizeWidth != null
+                ? {
+                    ...stickyTop,
+                    width: rowDimResizeWidth,
+                    minWidth: rowDimResizeWidth,
+                    maxWidth: rowDimResizeWidth,
+                  }
+                : stickyTop;
+
+            cells.push(
+              <th
+                key={`row-dim-${rowHeaderIdx}`}
+                className={`${styles.headerCell} ${isPrimaryRowHierarchy ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${canToggleThisDim && !dimToggleEnabled ? styles.dimensionToggleDisabled : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
+                rowSpan={cornerFullRowSpan}
+                style={rowDimCellStyle}
+                data-testid={
+                  canToggleThisDim
+                    ? `pivot-dim-toggle-row-${rowHeaderIdx}-${slugify(dim)}`
+                    : rowHeaderLevels && rowHeaderLevels.length > 0
+                      ? `pivot-row-dim-label-${slugify(dim)}-${rowHeaderIdx}`
+                      : `pivot-row-dim-label-${dim}`
+                }
+                aria-sort={
+                  rowSortDir === "asc"
+                    ? "ascending"
+                    : rowSortDir === "desc"
+                      ? "descending"
+                      : undefined
+                }
+                title={
+                  canToggleThisDim && !dimToggleEnabled
+                    ? `Expand ${config.rows[dimIdx - 1]} first`
+                    : undefined
+                }
+                {...(dimToggleEnabled
+                  ? {
+                      onClick: (e: MouseEvent) => {
+                        if (
+                          (e.target as HTMLElement).closest(
+                            `.${styles.headerMenuBtn}`,
+                          )
+                        )
+                          return;
+                        handleDimToggle("row", dimIdx);
+                      },
+                      role: "button",
+                      tabIndex: 0,
+                      onKeyDown: (e: KeyboardEvent) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleDimToggle("row", dimIdx);
+                        }
+                      },
+                      "aria-expanded": !rowDimCollapsed,
+                      "aria-label": `${rowDimCollapsed ? "Expand" : "Collapse"} all ${getDimensionLabel(config, dim, pivotData?.getColumnType(dim), adaptiveDateGrains?.[dim])} groups`,
+                    }
+                  : {})}
+              >
+                <div className={styles.headerCellInner}>
+                  {canToggleThisDim && (
+                    <DimToggleIcon collapsed={rowDimCollapsed} />
+                  )}
+                  <span className={isFiltered ? styles.headerFiltered : ""}>
+                    {rowLevel.isTemporal
+                      ? `${DATE_GRAIN_LABELS[rowLevel.grain]}`
+                      : getDimensionLabel(
+                          config,
+                          dim,
+                          pivotData?.getColumnType(dim),
+                          adaptiveDateGrains?.[dim],
+                        )}
+                  </span>
+                  {rowSortDir && <SortArrowIcon direction={rowSortDir} />}
+                  {hasMenu && rowLevel.isLeaf && (
+                    <MenuTriggerButton
+                      dimension={dim}
+                      axis="row"
+                      isOpen={activeMenuDimension === dim}
+                      onOpen={onOpenMenu}
+                    />
+                  )}
+                </div>
+                {onResizeMouseDown && (
+                  <div
+                    className={styles.resizeHandle}
+                    data-testid={`resize-handle-row-dim-${dimIdx}`}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      onResizeMouseDown(rowDimResizeIdx, e);
+                    }}
+                    onDoubleClick={
+                      onResizeDoubleClick
+                        ? (e) => onResizeDoubleClick(rowDimResizeIdx, e)
+                        : undefined
+                    }
+                    onMouseEnter={elevateCell}
+                    onMouseLeave={resetCell}
+                  />
+                )}
+              </th>,
+            );
+          });
+        }
       } else {
         cells.push(
           <th
@@ -1236,8 +1645,8 @@ export function renderColumnHeaders(
       );
     }
 
-    if (showRowTotals(config) && level === 0) {
-      const totalColSpan = hasMultipleValues ? renderedValueFields.length : 1;
+    if (rowTotalValueFields.length > 0 && level === 0) {
+      const totalColSpan = hasMultipleValues ? rowTotalValueFields.length : 1;
       cells.push(
         <th
           key="total-header"
@@ -1304,8 +1713,8 @@ export function renderColumnHeaders(
         );
       }
     }
-    if (showRowTotals(config)) {
-      for (const valField of renderedValueFields) {
+    if (rowTotalValueFields.length > 0) {
+      for (const valField of rowTotalValueFields) {
         valueCells.push(
           <th
             key={`val-total-${valField}`}
@@ -1387,6 +1796,43 @@ function GroupToggleIcon({ isCollapsed }: { isCollapsed: boolean }) {
   );
 }
 
+function HierarchyToggleButton({
+  collapsed,
+  label,
+  onClick,
+  dataTestId,
+  icon,
+  variant = "table",
+}: {
+  collapsed: boolean;
+  label: string;
+  onClick: () => void;
+  dataTestId?: string;
+  icon?: ReactElement;
+  variant?: "table" | "breadcrumb";
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      className={
+        variant === "breadcrumb"
+          ? `${styles.groupToggle} ${styles.hierarchyToggleButton} ${styles.hierarchyBreadcrumbToggleButton}`
+          : styles.hierarchyPlainToggleButton
+      }
+      data-testid={dataTestId}
+      onClick={(e: MouseEvent<HTMLButtonElement>) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      aria-expanded={!collapsed}
+      aria-label={`${collapsed ? "Expand" : "Collapse"} ${label}`}
+      title={`${collapsed ? "Expand" : "Collapse"} ${label}`}
+    >
+      {icon ?? <GroupToggleIcon isCollapsed={collapsed} />}
+    </button>
+  );
+}
+
 export interface GroupContext {
   onToggleGroup?: (groupKey: string) => void;
   collapsedSet?: Set<string>;
@@ -1398,6 +1844,66 @@ interface ProjectedRowRenderContext {
   projectedEntry: ProjectedRowEntry;
   rowHeaderLevels: RowHeaderLevelMapping[];
   onTemporalToggle?: (field: string, collapseKey: string) => void;
+}
+
+const HIERARCHY_INDENT_PX = 16;
+
+function isHierarchyLayout(config: PivotConfigV1): boolean {
+  return config.row_layout === "hierarchy";
+}
+
+function getHierarchyPadding(depth: number): string {
+  return `${Math.max(depth, 0) * HIERARCHY_INDENT_PX}px`;
+}
+
+function getDeepestActiveHeaderIndex(
+  visible: boolean[],
+  spans: number[] | undefined,
+  spacer?: boolean[],
+): number {
+  for (let idx = visible.length - 1; idx >= 0; idx--) {
+    if (!visible[idx]) continue;
+    if (spacer?.[idx]) continue;
+    if (spans && spans[idx] === 0) continue;
+    return idx;
+  }
+  return -1;
+}
+
+function renderHierarchyRowHeaderCell(
+  key: string,
+  label: string,
+  depth: number,
+  classes: string,
+  opts?: {
+    dataTestId?: string;
+    rowSpan?: number;
+    leadingToggle?: ReactElement | null;
+    reserveToggleSpace?: boolean;
+    dimIndex?: number;
+  },
+): ReactElement {
+  return (
+    <th
+      key={key}
+      scope="row"
+      className={classes}
+      data-testid={opts?.dataTestId ?? "pivot-row-header"}
+      rowSpan={opts?.rowSpan && opts.rowSpan > 1 ? opts.rowSpan : undefined}
+      data-dim-index={opts?.dimIndex}
+    >
+      <span
+        className={styles.rowHeaderContent}
+        style={{ paddingInlineStart: getHierarchyPadding(depth) }}
+      >
+        {opts?.leadingToggle ??
+          (opts?.reserveToggleSpace ? (
+            <span className={styles.hierarchyToggleSpacer} aria-hidden="true" />
+          ) : null)}
+        <span>{label}</span>
+      </span>
+    </th>
+  );
 }
 
 function renderProjectedRowHeaderCells(
@@ -1414,7 +1920,141 @@ function renderProjectedRowHeaderCells(
 ): ReactElement[] {
   const subtotalsOn = groupContext?.subtotalsEnabled && config.rows.length >= 2;
   const leafDimIdx = config.rows.length - 1;
+  const hierarchyMode = isHierarchyLayout(config);
   const cells: ReactElement[] = [];
+
+  if (hierarchyMode) {
+    const colIdx = getDeepestActiveHeaderIndex(
+      projected.headerVisible,
+      headerSpans,
+      projected.headerSpacer,
+    );
+    if (colIdx === -1) return cells;
+
+    const mapping = rowHeaderLevels[colIdx];
+    if (!mapping) return cells;
+    const value = projected.headerValues[colIdx] ?? "";
+    const temporalPattern =
+      config.dimension_format?.[mapping.field] ??
+      config.dimension_format?.["__all__"];
+    const formatted =
+      value !== ""
+        ? mapping.isTemporal
+          ? formatTemporalParentLabel(value, mapping.grain, temporalPattern)
+          : pivotData.formatDimLabel(mapping.field, value)
+        : "(empty)";
+    const text = formatted;
+
+    const temporalToggleKey =
+      mapping.isTemporal &&
+      !mapping.isLeaf &&
+      value !== "" &&
+      projected.key.length > mapping.dimIndex
+        ? projected.type === "temporal_parent" &&
+          projected.temporalParent.rowDimIndex === mapping.dimIndex &&
+          projected.temporalParent.parentGrain === mapping.grain
+          ? makeKeyString(projected.temporalParent.modifiedRowKey)
+          : makeKeyString(
+              buildModifiedRowKey(
+                projected.key,
+                mapping.dimIndex,
+                mapping.field,
+                value,
+              ).slice(0, mapping.dimIndex + 1),
+            )
+        : undefined;
+    const temporalCollapsed =
+      temporalToggleKey !== undefined &&
+      (config.collapsed_temporal_row_groups?.[mapping.field] ?? []).includes(
+        temporalToggleKey,
+      );
+    const showTemporalToggle =
+      temporalToggleKey !== undefined &&
+      !!onTemporalToggle &&
+      (projected.type === "temporal_parent" ||
+        (headerSpans?.[colIdx] ?? 0) > 1);
+
+    const showSubtotalRowToggle =
+      !!isSubtotalRow &&
+      !!onToggleGroup &&
+      mapping.isLeaf &&
+      mapping.dimIndex === projected.level;
+    const showDataRowToggle =
+      !isSubtotalRow &&
+      subtotalsOn &&
+      mapping.isLeaf &&
+      !mapping.isTemporal &&
+      mapping.dimIndex < leafDimIdx &&
+      !!groupContext?.onToggleGroup &&
+      !(
+        showSubtotalForDim(config, config.rows[mapping.dimIndex] ?? "") ||
+        hierarchyMode
+      );
+    const showGroupToggle = showSubtotalRowToggle || showDataRowToggle;
+    const showHierarchyDescendantToggle =
+      hierarchyMode &&
+      !isSubtotalRow &&
+      !!groupContext?.onToggleGroup &&
+      mapping.isLeaf &&
+      projected.key.length > mapping.dimIndex + 1;
+    const showAnyGroupToggle = showGroupToggle || showHierarchyDescendantToggle;
+    const groupKeyStr = showAnyGroupToggle
+      ? projected.key.slice(0, mapping.dimIndex + 1).join("\x00")
+      : "";
+    const isCollapsed = showSubtotalRowToggle
+      ? !!subtotalCollapsed
+      : showDataRowToggle || showHierarchyDescendantToggle
+        ? (groupContext?.collapsedSet?.has(groupKeyStr) ?? false)
+        : false;
+    const dimClasses = [
+      styles.rowHeaderCell,
+      projected.type !== "data" ? styles.rowHeaderPrimary : "",
+      styles.rowHeaderCellPinned,
+      projected.type !== "data" ? styles.subtotalHeaderCell : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return [
+      renderHierarchyRowHeaderCell(
+        `row-header-hierarchy-${colIdx}`,
+        text,
+        colIdx,
+        dimClasses,
+        {
+          dataTestId: "pivot-row-header",
+          dimIndex: mapping.dimIndex,
+          reserveToggleSpace: colIdx > 0,
+          leadingToggle: showTemporalToggle ? (
+            <button
+              type="button"
+              className={styles.temporalToggleBtn}
+              data-testid={`pivot-temporal-row-toggle-${mapping.field}-${value}`}
+              onClick={(e: MouseEvent<HTMLButtonElement>) => {
+                e.stopPropagation();
+                onTemporalToggle?.(mapping.field, temporalToggleKey!);
+              }}
+              aria-label={`${temporalCollapsed ? "Expand" : "Collapse"} ${text}`}
+              title={`${temporalCollapsed ? "Expand" : "Collapse"} ${text}`}
+            >
+              <GroupToggleIcon isCollapsed={temporalCollapsed} />
+            </button>
+          ) : showAnyGroupToggle ? (
+            <HierarchyToggleButton
+              collapsed={isCollapsed}
+              label={text}
+              dataTestId={`pivot-group-toggle-${groupKeyStr}`}
+              onClick={() =>
+                showSubtotalRowToggle
+                  ? onToggleGroup?.(groupKeyStr)
+                  : groupContext?.onToggleGroup?.(groupKeyStr)
+              }
+            />
+          ) : null,
+        },
+      ),
+    ];
+  }
 
   for (let colIdx = 0; colIdx < projected.headerValues.length; colIdx++) {
     const span = headerSpans ? (headerSpans[colIdx] ?? 1) : 1;
@@ -1608,10 +2248,8 @@ export function renderDataRow(
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
     : colSlots;
-  const renderedValueFields = getRenderedValueFields(config);
-  const valueFields = hasMultipleValues
-    ? renderedValueFields
-    : [renderedValueFields[0] ?? ""];
+  const valueFields = getDisplayedValueFields(config, hasMultipleValues);
+  const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
   const interactive = !!onCellClick;
   const subtotalsOn = groupContext?.subtotalsEnabled && config.rows.length >= 2;
   const numGroupingDims = groupContext?.numGroupingDims ?? 0;
@@ -1622,7 +2260,7 @@ export function renderDataRow(
           `groupBoundaryL${Math.min(groupBoundaryLevel, 2)}` as keyof typeof styles
         ] ?? "")
       : "",
-    isEvenRow ? styles.evenDataRow : "",
+    !isHierarchyLayout(config) && isEvenRow ? styles.evenDataRow : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1642,81 +2280,116 @@ export function renderDataRow(
             groupContext,
             projectedContext.onTemporalToggle,
           )
-        : rowKey.map((part, dimIdx) => {
-            const span = headerSpans ? headerSpans[dimIdx] : 1;
-            if (span === 0) return null;
-            const isGroupingDim = subtotalsOn && dimIdx < leafDimIdx;
-            const isLeafDim = subtotalsOn && dimIdx === leafDimIdx;
-            // Only show toggle on data rows when this dimension has NO subtotal row.
-            // When subtotals exist, the subtotal row has the toggle to avoid redundancy.
-            const hasSubtotalRow = showSubtotalForDim(
-              config,
-              config.rows[dimIdx] ?? "",
-            );
-            const showToggle =
-              isGroupingDim &&
-              span > 1 &&
-              groupContext?.onToggleGroup &&
-              !hasSubtotalRow;
-            const groupKeyStr = showToggle
-              ? rowKey.slice(0, dimIdx + 1).join("\x00")
-              : "";
-            const isCollapsed = showToggle
-              ? (groupContext.collapsedSet?.has(groupKeyStr) ?? false)
-              : false;
-            const dimClasses = [
-              styles.rowHeaderCell,
-              dimIdx === 0
-                ? styles.rowHeaderPrimary
-                : styles.rowHeaderSecondary,
-              dimIdx === 0 ? styles.rowHeaderCellPinned : "",
-              isGroupingDim ? styles.groupingDimCell : "",
-              isLeafDim ? styles.leafDimCell : "",
-              showToggle ? styles.groupToggleCell : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <th
-                key={dimIdx}
-                scope="row"
-                className={dimClasses}
-                data-testid={
-                  showToggle
-                    ? `pivot-group-toggle-${groupKeyStr}`
-                    : "pivot-row-header"
-                }
-                rowSpan={span > 1 ? span : undefined}
-                data-dim-index={dimIdx}
-                {...(showToggle
-                  ? {
-                      onClick: () => groupContext.onToggleGroup!(groupKeyStr),
-                      role: "button",
-                      tabIndex: 0,
-                      onKeyDown: (e: KeyboardEvent) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          groupContext.onToggleGroup!(groupKeyStr);
-                        }
-                      },
-                      "aria-expanded": !isCollapsed,
-                    }
-                  : {})}
-              >
-                <span className={styles.rowHeaderContent}>
-                  {showToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
-                  <span>
-                    {(part
-                      ? pivotData.formatDimLabel(
-                          config.rows[dimIdx] ?? "",
-                          part,
-                        )
-                      : "") || "(empty)"}
+        : isHierarchyLayout(config)
+          ? (() => {
+              const activeHeaderIdx = getDeepestActiveHeaderIndex(
+                rowKey.map(() => true),
+                headerSpans,
+              );
+              const activeDimIdx =
+                activeHeaderIdx >= 0 ? activeHeaderIdx : rowKey.length - 1;
+              const part = rowKey[activeDimIdx] ?? "";
+              const text =
+                (part
+                  ? pivotData.formatDimLabel(
+                      config.rows[activeDimIdx] ?? "",
+                      part,
+                    )
+                  : "") || "(empty)";
+              const dimClasses = [
+                styles.rowHeaderCell,
+                styles.rowHeaderCellPinned,
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return renderHierarchyRowHeaderCell(
+                `row-header-hierarchy-${activeDimIdx}`,
+                text,
+                activeDimIdx,
+                dimClasses,
+                {
+                  reserveToggleSpace: activeDimIdx > 0,
+                  dimIndex: activeDimIdx,
+                },
+              );
+            })()
+          : rowKey.map((part, dimIdx) => {
+              const span = headerSpans ? headerSpans[dimIdx] : 1;
+              if (span === 0) return null;
+              const isGroupingDim = subtotalsOn && dimIdx < leafDimIdx;
+              const isLeafDim = subtotalsOn && dimIdx === leafDimIdx;
+              // Only show toggle on data rows when this dimension has NO subtotal row.
+              // When subtotals exist, the subtotal row has the toggle to avoid redundancy.
+              const hasSubtotalRow = showSubtotalForDim(
+                config,
+                config.rows[dimIdx] ?? "",
+              );
+              const showToggle =
+                isGroupingDim &&
+                span > 1 &&
+                groupContext?.onToggleGroup &&
+                !hasSubtotalRow;
+              const groupKeyStr = showToggle
+                ? rowKey.slice(0, dimIdx + 1).join("\x00")
+                : "";
+              const isCollapsed = showToggle
+                ? (groupContext.collapsedSet?.has(groupKeyStr) ?? false)
+                : false;
+              const dimClasses = [
+                styles.rowHeaderCell,
+                dimIdx === 0
+                  ? styles.rowHeaderPrimary
+                  : styles.rowHeaderSecondary,
+                dimIdx === 0 ? styles.rowHeaderCellPinned : "",
+                isGroupingDim ? styles.groupingDimCell : "",
+                isLeafDim ? styles.leafDimCell : "",
+                showToggle ? styles.groupToggleCell : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return (
+                <th
+                  key={dimIdx}
+                  scope="row"
+                  className={dimClasses}
+                  data-testid={
+                    showToggle
+                      ? `pivot-group-toggle-${groupKeyStr}`
+                      : "pivot-row-header"
+                  }
+                  rowSpan={span > 1 ? span : undefined}
+                  data-dim-index={dimIdx}
+                  {...(showToggle
+                    ? {
+                        onClick: () => groupContext.onToggleGroup!(groupKeyStr),
+                        role: "button",
+                        tabIndex: 0,
+                        onKeyDown: (e: KeyboardEvent) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            groupContext.onToggleGroup!(groupKeyStr);
+                          }
+                        },
+                        "aria-expanded": !isCollapsed,
+                      }
+                    : {})}
+                >
+                  <span className={styles.rowHeaderContent}>
+                    {showToggle && (
+                      <GroupToggleIcon isCollapsed={isCollapsed} />
+                    )}
+                    <span>
+                      {(part
+                        ? pivotData.formatDimLabel(
+                            config.rows[dimIdx] ?? "",
+                            part,
+                          )
+                        : "") || "(empty)"}
+                    </span>
                   </span>
-                </span>
-              </th>
-            );
-          })}
+                </th>
+              );
+            })}
       {rowKey.length === 0 && (
         <th
           scope="row"
@@ -1906,20 +2579,9 @@ export function renderDataRow(
           );
         });
       })}
-      {showRowTotals(config) && (
+      {rowTotalValueFields.length > 0 && (
         <>
-          {valueFields.map((valField) => {
-            if (!showTotalForMeasure(config, valField, "row")) {
-              return (
-                <td
-                  key={`total-${valField}`}
-                  className={`${styles.dataCell} ${styles.totalsCol} ${styles.excludedTotal}`}
-                  data-testid="pivot-excluded-total"
-                >
-                  –
-                </td>
-              );
-            }
+          {rowTotalValueFields.map((valField) => {
             const agg = pivotData.getRowTotal(rowKey, valField);
             const comparisonMode = getPeriodComparisonMode(config, valField);
             const cellValue = agg.value();
@@ -2013,10 +2675,8 @@ export function renderSubtotalRow(
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
     : colSlots;
-  const renderedValueFields = getRenderedValueFields(config);
-  const valueFields = hasMultipleValues
-    ? renderedValueFields
-    : [renderedValueFields[0] ?? ""];
+  const valueFields = getDisplayedValueFields(config, hasMultipleValues);
+  const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
   const numRowDims = Math.max(config.rows.length, 1);
   const label = parentKey[parentKey.length - 1] || "(empty)";
   const groupKeyStr = parentKey.join("\x00");
@@ -2024,7 +2684,7 @@ export function renderSubtotalRow(
   return (
     <tr
       key={`subtotal-${groupKeyStr}-${level}`}
-      className={styles.subtotalRow}
+      className={`${styles.subtotalRow} ${isHierarchyLayout(config) ? styles.hierarchySubtotalRow : ""}`}
       data-testid="pivot-subtotal-row"
       aria-label={`Subtotal for ${parentKey.join(" / ")}`}
       data-level={level}
@@ -2042,68 +2702,102 @@ export function renderSubtotalRow(
             true,
             isCollapsed,
           )
-        : Array.from({ length: numRowDims }, (_, dimIdx) => {
-            const span = headerSpans ? headerSpans[dimIdx] : 1;
-            if (span === 0) return null;
+        : isHierarchyLayout(config)
+          ? (() => {
+              const formatted =
+                parentKey[level] !== undefined
+                  ? pivotData.formatDimLabel(
+                      config.rows[level] ?? "",
+                      parentKey[level] ?? "",
+                    )
+                  : "";
+              return renderHierarchyRowHeaderCell(
+                `sub-hdr-hierarchy-${level}`,
+                formatted || "(empty)",
+                level,
+                `${styles.rowHeaderCell} ${styles.rowHeaderPrimary} ${styles.rowHeaderCellPinned} ${styles.subtotalHeaderCell}`,
+                {
+                  dataTestId: "pivot-row-header",
+                  dimIndex: level,
+                  leadingToggle: onToggleGroup ? (
+                    <HierarchyToggleButton
+                      collapsed={isCollapsed}
+                      label={label}
+                      dataTestId={`pivot-group-toggle-${groupKeyStr}`}
+                      onClick={() => onToggleGroup(groupKeyStr)}
+                    />
+                  ) : null,
+                },
+              );
+            })()
+          : Array.from({ length: numRowDims }, (_, dimIdx) => {
+              const span = headerSpans ? headerSpans[dimIdx] : 1;
+              if (span === 0) return null;
 
-            if (dimIdx < level) {
-              // Parent dimension cell — show value from parentKey
+              if (dimIdx < level) {
+                // Parent dimension cell — show value from parentKey
+                return (
+                  <th
+                    key={`sub-hdr-${dimIdx}`}
+                    scope="row"
+                    className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.groupingDimCell}`}
+                    rowSpan={span > 1 ? span : undefined}
+                    data-dim-index={dimIdx}
+                  >
+                    {parentKey[dimIdx] || "(empty)"}
+                  </th>
+                );
+              }
+              if (dimIdx === level) {
+                const canToggle = !!onToggleGroup;
+                return (
+                  <th
+                    key={`sub-hdr-${dimIdx}`}
+                    scope="row"
+                    className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.subtotalHeaderCell} ${canToggle ? styles.groupToggleCell : ""}`}
+                    {...(canToggle
+                      ? {
+                          onClick: () => onToggleGroup(groupKeyStr),
+                          role: "button",
+                          tabIndex: 0,
+                          onKeyDown: (e: KeyboardEvent) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onToggleGroup(groupKeyStr);
+                            }
+                          },
+                          "aria-expanded": !isCollapsed,
+                          "aria-label": isCollapsed
+                            ? `Expand ${label}`
+                            : `Collapse ${label}`,
+                        }
+                      : {})}
+                    data-testid={
+                      canToggle
+                        ? `pivot-group-toggle-${groupKeyStr}`
+                        : undefined
+                    }
+                  >
+                    <span className={styles.rowHeaderContent}>
+                      {canToggle && (
+                        <GroupToggleIcon isCollapsed={isCollapsed} />
+                      )}
+                      <span className={styles.subtotalLabel}>
+                        {label} Total
+                      </span>
+                    </span>
+                  </th>
+                );
+              }
+              // Inner dimensions (dimIdx > level): empty cell
               return (
                 <th
                   key={`sub-hdr-${dimIdx}`}
                   scope="row"
-                  className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.groupingDimCell}`}
-                  rowSpan={span > 1 ? span : undefined}
-                  data-dim-index={dimIdx}
-                >
-                  {parentKey[dimIdx] || "(empty)"}
-                </th>
+                  className={`${styles.rowHeaderCell} ${styles.rowHeaderSecondary}`}
+                />
               );
-            }
-            if (dimIdx === level) {
-              const canToggle = !!onToggleGroup;
-              return (
-                <th
-                  key={`sub-hdr-${dimIdx}`}
-                  scope="row"
-                  className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.subtotalHeaderCell} ${canToggle ? styles.groupToggleCell : ""}`}
-                  {...(canToggle
-                    ? {
-                        onClick: () => onToggleGroup(groupKeyStr),
-                        role: "button",
-                        tabIndex: 0,
-                        onKeyDown: (e: KeyboardEvent) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            onToggleGroup(groupKeyStr);
-                          }
-                        },
-                        "aria-expanded": !isCollapsed,
-                        "aria-label": isCollapsed
-                          ? `Expand ${label}`
-                          : `Collapse ${label}`,
-                      }
-                    : {})}
-                  data-testid={
-                    canToggle ? `pivot-group-toggle-${groupKeyStr}` : undefined
-                  }
-                >
-                  <span className={styles.rowHeaderContent}>
-                    {canToggle && <GroupToggleIcon isCollapsed={isCollapsed} />}
-                    <span className={styles.subtotalLabel}>{label} Total</span>
-                  </span>
-                </th>
-              );
-            }
-            // Inner dimensions (dimIdx > level): empty cell
-            return (
-              <th
-                key={`sub-hdr-${dimIdx}`}
-                scope="row"
-                className={`${styles.rowHeaderCell} ${styles.rowHeaderSecondary}`}
-              />
-            );
-          })}
+            })}
       {/* Data cells: subtotal values */}
       {visibleSlots.map((slot) =>
         valueFields.map((valField) => {
@@ -2199,20 +2893,9 @@ export function renderSubtotalRow(
           );
         }),
       )}
-      {showRowTotals(config) && (
+      {rowTotalValueFields.length > 0 && (
         <>
-          {valueFields.map((valField) => {
-            if (!showTotalForMeasure(config, valField, "row")) {
-              return (
-                <td
-                  key={`total-${valField}`}
-                  className={`${styles.dataCell} ${styles.totalsCol} ${styles.excludedTotal}`}
-                  data-testid="pivot-excluded-total"
-                >
-                  –
-                </td>
-              );
-            }
+          {rowTotalValueFields.map((valField) => {
             const agg = pivotData.getSubtotalAggregator(
               parentKey,
               [],
@@ -2298,10 +2981,8 @@ export function renderTemporalParentRow(
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
     : colSlots;
-  const renderedValueFields = getRenderedValueFields(config);
-  const valueFields = hasMultipleValues
-    ? renderedValueFields
-    : [renderedValueFields[0] ?? ""];
+  const valueFields = getDisplayedValueFields(config, hasMultipleValues);
+  const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
   const trClasses = [styles.subtotalRow].filter(Boolean).join(" ");
   const resolveAgg = (slot: ColSlot, valField: string) => {
     const tSlot = slot as TemporalColSlot;
@@ -2373,20 +3054,9 @@ export function renderTemporalParentRow(
           );
         }),
       )}
-      {showRowTotals(config) && (
+      {rowTotalValueFields.length > 0 && (
         <>
-          {valueFields.map((valField) => {
-            if (!showTotalForMeasure(config, valField, "row")) {
-              return (
-                <td
-                  key={`trp-total-${valField}`}
-                  className={`${styles.dataCell} ${styles.totalsCol} ${styles.excludedTotal}`}
-                  data-testid="pivot-excluded-total"
-                >
-                  –
-                </td>
-              );
-            }
+          {rowTotalValueFields.map((valField) => {
             const agg = pivotData.getTemporalRowSubtotalGrand(
               entry.temporalParent.modifiedRowKey,
               valField,
@@ -2444,10 +3114,8 @@ export function renderTotalsRow(
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
     : colSlots;
-  const renderedValueFields = getRenderedValueFields(config);
-  const valueFields = hasMultipleValues
-    ? renderedValueFields
-    : [renderedValueFields[0] ?? ""];
+  const valueFields = getDisplayedValueFields(config, hasMultipleValues);
+  const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
   return (
     <tr className={styles.totalsRow} data-testid="pivot-totals-row">
       <th
@@ -2555,72 +3223,71 @@ export function renderTotalsRow(
           );
         }),
       )}
-      {showRowTotals(config) &&
-        valueFields.map((valField) => {
-          if (!showTotalForMeasure(config, valField, "grand")) {
-            return (
-              <td
-                key={`grand-${valField}`}
-                className={`${styles.dataCell} ${styles.totalsCol} ${styles.excludedTotal}`}
-                data-testid="pivot-excluded-total"
-              >
-                –
-              </td>
-            );
-          }
-          const grandAgg = pivotData.getGrandTotal(valField);
-          const cellValue = grandAgg.value();
-          const text = formatTotalCellValue(
-            grandAgg,
-            valField,
-            config,
-            pivotData,
-            "grand",
-            undefined,
-          );
-          const cellStyle = buildTotalCellStyle(
-            cellValue,
-            valField,
-            config,
-            pivotData,
-          );
+      {rowTotalValueFields.map((valField) => {
+        if (!showTotalForMeasure(config, valField, "grand")) {
           return (
             <td
               key={`grand-${valField}`}
-              className={`${styles.dataCell} ${styles.totalsCol}`}
-              data-testid="pivot-grand-total"
-              style={cellStyle}
-              {...(onCellClick
-                ? {
-                    tabIndex: 0,
-                    role: "gridcell",
-                    onClick: () =>
-                      onCellClick(
-                        buildCellClickPayload(
+              className={`${styles.dataCell} ${styles.totalsCol} ${styles.excludedTotal}`}
+              data-testid="pivot-excluded-total"
+            >
+              –
+            </td>
+          );
+        }
+        const grandAgg = pivotData.getGrandTotal(valField);
+        const cellValue = grandAgg.value();
+        const text = formatTotalCellValue(
+          grandAgg,
+          valField,
+          config,
+          pivotData,
+          "grand",
+          undefined,
+        );
+        const cellStyle = buildTotalCellStyle(
+          cellValue,
+          valField,
+          config,
+          pivotData,
+        );
+        return (
+          <td
+            key={`grand-${valField}`}
+            className={`${styles.dataCell} ${styles.totalsCol}`}
+            data-testid="pivot-grand-total"
+            style={cellStyle}
+            {...(onCellClick
+              ? {
+                  tabIndex: 0,
+                  role: "gridcell",
+                  onClick: () =>
+                    onCellClick(
+                      buildCellClickPayload(
+                        TOTAL_KEY,
+                        TOTAL_KEY,
+                        cellValue,
+                        config,
+                        valField,
+                      ),
+                    ),
+                  onKeyDown: onCellKeyDown
+                    ? (e: KeyboardEvent) =>
+                        onCellKeyDown(
+                          e,
                           TOTAL_KEY,
                           TOTAL_KEY,
                           cellValue,
-                          config,
                           valField,
-                        ),
-                      ),
-                    onKeyDown: onCellKeyDown
-                      ? (e: KeyboardEvent) =>
-                          onCellKeyDown(
-                            e,
-                            TOTAL_KEY,
-                            TOTAL_KEY,
-                            cellValue,
-                            valField,
-                          )
-                      : undefined,
-                  }
-                : {})}
-            >
-              {text}
-            </td>
-          );
-        })}
+                        )
+                    : undefined,
+                }
+              : {})}
+          >
+            {text}
+          </td>
+        );
+      })}
     </tr>
   );
 }
@@ -2875,8 +3542,9 @@ const TableRenderer: FC<TableRendererProps> = ({
     () => computeRowHeaderLevels(config, rowTemporalInfos),
     [config, rowTemporalInfos],
   );
-  const effectiveNumRowDims =
-    config.rows.length === 0
+  const effectiveNumRowDims = isHierarchyLayout(config)
+    ? 1
+    : config.rows.length === 0
       ? 1
       : rowTemporalInfos.length > 0
         ? computeNumRowHeaderLevels(config, rowTemporalInfos)
@@ -2920,7 +3588,9 @@ const TableRenderer: FC<TableRendererProps> = ({
     [config, onConfigChange],
   );
 
-  const useSubtotals = !!config.show_subtotals && config.rows.length >= 2;
+  const useSubtotals =
+    config.rows.length >= 2 &&
+    (isHierarchyLayout(config) || !!config.show_subtotals);
   const collapsedSet = useMemo(() => {
     const raw = config.collapsed_groups ?? [];
     if (raw.includes("__ALL__")) {
@@ -2933,8 +3603,13 @@ const TableRenderer: FC<TableRendererProps> = ({
   }, [config.collapsed_groups, allRowKeys]);
 
   const groupedRows: GroupedRow[] | null = useMemo(
-    () => (useSubtotals ? pivotData.getGroupedRowKeys() : null),
-    [useSubtotals, pivotData],
+    () =>
+      useSubtotals
+        ? isHierarchyLayout(config)
+          ? pivotData.getHierarchyRowKeys()
+          : pivotData.getGroupedRowKeys()
+        : null,
+    [useSubtotals, pivotData, config],
   );
 
   const visibleRowEntries: VisibleRowEntry[] | null = useMemo(() => {
@@ -3323,6 +3998,7 @@ const TableRenderer: FC<TableRendererProps> = ({
                 : undefined,
               pivotData,
               onCollapseChange,
+              onConfigChange,
               handleResizeMouseDown,
               columnWidthMap,
               headerRowOffsets.length > 1 ? headerRowOffsets : undefined,
@@ -3333,6 +4009,7 @@ const TableRenderer: FC<TableRendererProps> = ({
               handleTemporalToggle,
               columnTypes,
               rowTemporalInfos.length > 0 ? rowHeaderLevels : undefined,
+              rowTemporalInfos.length > 0 ? rowTemporalInfos : undefined,
             )}
           </thead>
           <tbody>

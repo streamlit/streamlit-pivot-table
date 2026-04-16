@@ -95,6 +95,7 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `height` | `int \| None` | `None` | Fixed height in pixels. `None` means auto-size (capped by `max_height`). |
 | `max_height` | `int` | `500` | Maximum auto-size height in pixels. Table becomes scrollable when content exceeds this. Ignored when `height` is set. |
 | `sticky_headers` | `bool` | `True` | Column headers stick to the top of the scroll container. |
+| `row_layout` | `"table" \| "hierarchy"` | `"table"` | Controls how row dimensions are rendered. `"table"` uses separate row-header columns, while `"hierarchy"` renders a single indented tree column with breadcrumb-level controls. |
 
 #### Interactivity and Callbacks
 
@@ -331,6 +332,34 @@ Once a temporal field is active on an axis, open its header menu to:
 When a temporal field is on `columns`, parent headers such as `2024` or `Q1 2024` can be collapsed with the inline +/- toggle. When a temporal field is on `rows`, collapsing a parent replaces the visible child rows with one summary row for that parent. Both are view-only collapses: exports still emit the full expanded leaf-level table.
 
 Grouped buckets export as grouped labels such as `Jan 2024`, `Q1 2024`, or `2024-W03`; they are intentionally not exported as fake raw Excel dates.
+
+### Row Layout Modes
+
+Choose between two row presentation modes:
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| Table | `"table"` | Classic pivot layout with one visible row-header column per row dimension, plus expanded temporal levels as separate row-header columns when applicable. |
+| Hierarchy | `"hierarchy"` | Compact tree layout with a single visible row hierarchy column, indentation by depth, breadcrumb controls, and inline expand/collapse. |
+
+```python
+st_pivot_table(
+    df,
+    key="row_layout_example",
+    rows=["Region", "Category", "Customer"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    row_layout="hierarchy",
+)
+```
+
+Behavior notes:
+
+- `table` preserves the traditional multi-column row-axis layout and works naturally with `repeat_row_labels`.
+- `hierarchy` renders parent groups before their children and uses a single visible row column rather than separate columns per row dimension.
+- Temporal date hierarchies work in both layouts. In `table`, date levels expand into separate row-header columns; in `hierarchy`, those same levels render as nested tree levels within the single hierarchy column.
+- Export parity is preserved. CSV, TSV, clipboard, and XLSX outputs follow the selected row layout, including hierarchy indentation.
+- Execution-mode parity is also preserved. `row_layout` works in both `client_only` and `threshold_hybrid`; the layout mostly affects rendering, not whether hybrid execution is allowed.
 
 ### Number Format Patterns
 
@@ -569,6 +598,8 @@ st_pivot_table(
 **Limitations:**
 - Synthetic measures are not supported in hybrid mode (falls back to client-side).
 
+`row_layout` is supported in both execution paths. Switching between `table` and `hierarchy` does not by itself force a fallback out of `threshold_hybrid`.
+
 ### Locked Mode
 
 Use `locked=True` for a viewer-mode experience with exploration enabled. The Settings Panel and toolbar config controls are locked so end-users cannot change rows, columns, values, or per-measure aggregation. Reset, Swap, and config import/export are hidden, while data export remains available. Expand/Collapse All group controls remain accessible in the toolbar utility menu. Header-menu sorting, filtering, and `Show Values As` remain available, and drill-down still works.
@@ -608,7 +639,9 @@ The panel contains:
 - **Available Fields** — unassigned columns shown as draggable chips. Click a chip's menu to add it to Rows, Columns, or Values. When more than 8 fields are available, a search input appears.
 - **Rows / Columns / Values** drop zones — drag chips to reorder within a zone, drag between zones, or use the `x` button to remove. Value chips show an aggregation picker (click the badge to change).
 - **Synthetic Measures** — click **+ Add measure** to create derived metrics (ratio of sums, difference of sums) with optional format patterns.
-- **Display Toggles** — Row Totals, Column Totals, Subtotals, Repeat Labels, and Sticky Headers.
+- **Display Toggles** — Row Totals, Column Totals, Subtotals, Repeat Labels, Row Layout, and Sticky Headers.
+
+In `hierarchy` row layout, `Repeat Labels` is not applicable because the row axis is rendered as a single hierarchy column rather than repeated across separate row-dimension columns.
 
 External config changes (toolbar DnD, Reset, Swap, config import) while the panel is open will close it and discard uncommitted edits.
 
