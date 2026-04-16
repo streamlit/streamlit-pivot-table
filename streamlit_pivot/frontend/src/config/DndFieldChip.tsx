@@ -200,3 +200,115 @@ export const DragOverlayChip: FC<FieldChipProps> = (props): ReactElement => {
     </span>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Synthetic (fx) measure chip — sortable within the Values zone.
+// ---------------------------------------------------------------------------
+
+export interface SyntheticChipDisplayProps {
+  syntheticId: string;
+  label: string;
+  testId: string;
+  disabled?: boolean;
+  onRemove?: (syntheticId: string) => void;
+  showDragHandle?: boolean;
+}
+
+function SyntheticChipContent({
+  syntheticId,
+  label,
+  testId,
+  disabled,
+  onRemove,
+  showDragHandle,
+}: SyntheticChipDisplayProps): ReactElement {
+  return (
+    <>
+      {showDragHandle && <GripDotsIcon />}
+      <span className={styles.aggChipIcon}>fx</span>
+      <span
+        className={styles.chipLabelText}
+        data-testid={`${testId}-synthetic-label-${syntheticId}`}
+      >
+        <span className={styles.chipPrimaryText}>{label}</span>
+      </span>
+      {!disabled && onRemove && (
+        <button
+          type="button"
+          className={styles.chipRemove}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(syntheticId);
+          }}
+          aria-label={`Remove ${label}`}
+          data-testid={`${testId}-synthetic-remove-${syntheticId}`}
+        >
+          ×
+        </button>
+      )}
+    </>
+  );
+}
+
+export interface SortableSyntheticChipProps extends SyntheticChipDisplayProps {
+  id: string;
+}
+
+export const SortableSyntheticChip: FC<SortableSyntheticChipProps> = ({
+  id,
+  syntheticId,
+  label,
+  testId,
+  disabled,
+  onRemove,
+}): ReactElement => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id,
+    disabled,
+    data: { type: "synthetic", syntheticId },
+  });
+
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : undefined,
+  };
+
+  return (
+    <span
+      ref={setNodeRef}
+      className={`${styles.chip} ${isDragging ? styles.chipDragging : ""}`}
+      style={style}
+      {...attributes}
+      {...(disabled ? {} : listeners)}
+      data-testid={`${testId}-synthetic-${syntheticId}`}
+    >
+      <SyntheticChipContent
+        syntheticId={syntheticId}
+        label={label}
+        testId={testId}
+        disabled={disabled}
+        onRemove={onRemove}
+        showDragHandle={!disabled}
+      />
+    </span>
+  );
+};
+
+export const SyntheticDragOverlayChip: FC<SyntheticChipDisplayProps> = (
+  props,
+): ReactElement => {
+  return (
+    <span className={`${styles.chip} ${styles.chipOverlay}`}>
+      <SyntheticChipContent {...props} showDragHandle={true} />
+    </span>
+  );
+};

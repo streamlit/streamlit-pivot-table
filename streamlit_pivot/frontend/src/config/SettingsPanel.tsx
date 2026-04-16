@@ -48,6 +48,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   normalizeAggregationConfig,
+  reconcileValueOrder,
   stringifyPivotConfig,
   type AggregationConfig,
   type AggregationType,
@@ -500,6 +501,81 @@ const ZoneChip: FC<ZoneChipProps> = ({
           ))}
         </div>
       )}
+    </span>
+  );
+};
+
+// -- Sortable synthetic (fx) measure chip, preserving SettingsPanel visuals --
+
+interface SortableSyntheticZoneChipProps {
+  id: string;
+  syntheticId: string;
+  label: string;
+  onEdit: () => void;
+  onRemove: (syntheticId: string) => void;
+}
+
+const SortableSyntheticZoneChip: FC<SortableSyntheticZoneChipProps> = ({
+  id,
+  syntheticId,
+  label,
+  onEdit,
+  onRemove,
+}): ReactElement => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id,
+    data: { type: "synthetic", syntheticId },
+  });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : undefined,
+  };
+
+  return (
+    <span
+      ref={setNodeRef}
+      className={`${styles.syntheticChip} ${isDragging ? styles.zoneChipDragging : ""}`}
+      style={style}
+      {...attributes}
+      {...listeners}
+      data-testid={`settings-synthetic-${syntheticId}`}
+    >
+      <GripDotsIcon />
+      <span className={styles.syntheticIcon}>fx</span>
+      {label}
+      <button
+        type="button"
+        className={styles.chipMenuBtn}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit();
+        }}
+        aria-label={`Edit ${label}`}
+      >
+        ✎
+      </button>
+      <button
+        type="button"
+        className={styles.chipRemoveBtn}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(syntheticId);
+        }}
+        aria-label={`Remove ${label}`}
+      >
+        ×
+      </button>
     </span>
   );
 };
@@ -1121,6 +1197,11 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   const [localSynthetics, setLocalSynthetics] = useState<
     SyntheticMeasureConfig[]
   >(config.synthetic_measures ?? []);
+  // Unified display order for the Values zone (real fields + synthetic ids),
+  // or undefined to mean "use default order".
+  const [localValueOrder, setLocalValueOrder] = useState<string[] | undefined>(
+    config.value_order,
+  );
   const [localShowRowTotals, setLocalShowRowTotals] = useState(
     config.show_row_totals ?? config.show_totals,
   );
@@ -1163,6 +1244,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       setLocalVals(config.values);
       setLocalAgg(config.aggregation);
       setLocalSynthetics(config.synthetic_measures ?? []);
+      setLocalValueOrder(config.value_order);
       setLocalShowRowTotals(config.show_row_totals ?? config.show_totals);
       setLocalShowColTotals(config.show_column_totals ?? config.show_totals);
       setLocalShowSubtotals(config.show_subtotals);
@@ -1626,19 +1708,57 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     [numericSet, localCols, localRows],
   );
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    const data = event.active.data.current as
-      | { field?: string; zone?: string }
-      | undefined;
-    if (data?.field) {
-      setDragOverlay({ field: data.field, zone: data.zone });
-    }
-    setAddMenuField(null);
-  }, []);
+  // Unified ordered list of measure ids (real fields + synthetic ids) for the
+  // Values zone, resolved against localValueOrder + localVals + localSynthetics.
+  const orderedValueMeasures = useMemo(
+    () =>
+      reconcileValueOrder(localValueOrder, {
+        values: localVals,
+        synthetic_measures: localSynthetics,
+      } as PivotConfigV1),
+    [localValueOrder, localVals, localSynthetics],
+  );
+  const syntheticIdSet = useMemo(
+    () => new Set(localSynthetics.map((m) => m.id)),
+    [localSynthetics],
+  );
+
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const data = event.active.data.current as
+        | {
+            field?: string;
+            zone?: string;
+            type?: string;
+            syntheticId?: string;
+          }
+        | undefined;
+      if (data?.type === "synthetic" && data.syntheticId) {
+        const measure = localSynthetics.find((m) => m.id === data.syntheticId);
+        setDragOverlay({
+          field: measure?.label ?? data.syntheticId,
+          zone: "synthetic",
+        });
+      } else if (data?.field) {
+        setDragOverlay({ field: data.field, zone: data.zone });
+      }
+      setAddMenuField(null);
+    },
+    [localSynthetics],
+  );
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
       const { active, over } = event;
+      const activeData = active.data.current as
+        | { field?: string; zone?: string; type?: string }
+        | undefined;
+      // Synthetic chips only reorder within Values; don't highlight zones.
+      if (activeData?.type === "synthetic") {
+        setDragActiveZone(null);
+        setDragActiveZoneInvalid(false);
+        return;
+      }
       if (!over) {
         setDragActiveZone(null);
         setDragActiveZoneInvalid(false);
@@ -1649,9 +1769,6 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
         (over.data.current?.type === "container"
           ? String(over.id).replace("sp-zone-", "")
           : null);
-      const activeData = active.data.current as
-        | { field?: string; zone?: string }
-        | undefined;
       const isValidDrop =
         activeData?.field && targetZone
           ? canDropToZone(
@@ -1666,6 +1783,31 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     [canDropToZone],
   );
 
+  // Shared by handleDragEnd: apply a unified reorder across the Values zone
+  // (any mix of real fields and synthetic measures). Returns true if handled.
+  const applyValuesReorder = useCallback(
+    (activeMeasureId: string, overMeasureId: string): boolean => {
+      if (activeMeasureId === overMeasureId) return false;
+      const oldIdx = orderedValueMeasures.indexOf(activeMeasureId);
+      const newIdx = orderedValueMeasures.indexOf(overMeasureId);
+      if (oldIdx === -1 || newIdx === -1) return false;
+      const next = arrayMove(orderedValueMeasures, oldIdx, newIdx);
+      const synById = new Map(localSynthetics.map((m) => [m.id, m]));
+      const newVals: string[] = [];
+      const newSyns: SyntheticMeasureConfig[] = [];
+      for (const id of next) {
+        const syn = synById.get(id);
+        if (syn) newSyns.push(syn);
+        else newVals.push(id);
+      }
+      setLocalVals(newVals);
+      setLocalSynthetics(newSyns);
+      setLocalValueOrder(next);
+      return true;
+    },
+    [orderedValueMeasures, localSynthetics],
+  );
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
@@ -1675,11 +1817,48 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       if (!over) return;
 
       const activeData = active.data.current as
-        | { zone?: string; field?: string }
+        | {
+            zone?: string;
+            field?: string;
+            type?: string;
+            syntheticId?: string;
+          }
         | undefined;
+      const overData = over.data.current as
+        | {
+            zone?: string;
+            field?: string;
+            type?: string;
+            syntheticId?: string;
+          }
+        | undefined;
+
+      // Unified Values-zone reorder: real↔real, real↔synthetic,
+      // synthetic↔synthetic. Detected when both active and over resolve to a
+      // measure id (field name or synthetic id).
+      const activeMeasureId =
+        activeData?.type === "synthetic"
+          ? activeData.syntheticId
+          : activeData?.zone === "values"
+            ? activeData.field
+            : undefined;
+      const overMeasureId =
+        overData?.type === "synthetic"
+          ? overData.syntheticId
+          : overData?.zone === "values"
+            ? overData.field
+            : undefined;
+      if (activeMeasureId && overMeasureId) {
+        applyValuesReorder(activeMeasureId, overMeasureId);
+        return;
+      }
+
+      // Synthetic chips cannot leave the Values zone.
+      if (activeData?.type === "synthetic") return;
+
       const targetZone =
-        over.data.current?.zone ??
-        (over.data.current?.type === "container"
+        overData?.zone ??
+        (overData?.type === "container"
           ? String(over.id).replace("sp-zone-", "")
           : null);
       if (
@@ -1697,9 +1876,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       const action = resolveDragEnd({
         activeData,
         overId: over.id,
-        overData: over.data.current as
-          | { zone?: string; type?: string; field?: string }
-          | undefined,
+        overData,
       });
       if (!action) return;
 
@@ -1723,7 +1900,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
         addToZone(action.field, action.toZone);
       }
     },
-    [moveToZone, addToZone, canDropToZone],
+    [moveToZone, addToZone, canDropToZone, applyValuesReorder],
   );
 
   const handleDragCancel = useCallback(() => {
@@ -1742,8 +1919,13 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     [localCols],
   );
   const valSortableIds = useMemo(
-    () => localVals.map((f) => makeZoneItemId("values", f)),
-    [localVals],
+    () =>
+      orderedValueMeasures.map((id) =>
+        syntheticIdSet.has(id)
+          ? `synthetic::${id}`
+          : makeZoneItemId("values", id),
+      ),
+    [orderedValueMeasures, syntheticIdSet],
   );
 
   // -- Apply handler --
@@ -1774,6 +1956,22 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       sticky_headers: localStickyHeaders,
     };
 
+    // Reconcile unified value_order against the resolved values / synthetics.
+    // Drop it when it equals the default `[...values, ...synthetic_ids]`.
+    const reconciledOrder = reconcileValueOrder(localValueOrder, newConfig);
+    const defaultOrder = [
+      ...newConfig.values,
+      ...(newConfig.synthetic_measures ?? []).map((m) => m.id),
+    ];
+    const isDefaultOrder =
+      reconciledOrder.length === defaultOrder.length &&
+      reconciledOrder.every((id, i) => id === defaultOrder[i]);
+    if (isDefaultOrder) {
+      delete newConfig.value_order;
+    } else {
+      newConfig.value_order = reconciledOrder;
+    }
+
     // Cleanup after subtotals off
     if (!subtotalsValue) {
       delete newConfig.collapsed_groups;
@@ -1798,6 +1996,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localVals,
     localAgg,
     localSynthetics,
+    localValueOrder,
     localShowRowTotals,
     localShowColTotals,
     localShowSubtotals,
@@ -1833,6 +2032,11 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       return true;
     if (JSON.stringify(localSynthetics) !== JSON.stringify(initSynthetics))
       return true;
+    if (
+      JSON.stringify(localValueOrder ?? null) !==
+      JSON.stringify(config.value_order ?? null)
+    )
+      return true;
     if (JSON.stringify(localShowRowTotals) !== JSON.stringify(initRowTotals))
       return true;
     if (JSON.stringify(localShowColTotals) !== JSON.stringify(initColTotals))
@@ -1853,6 +2057,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localVals,
     localAgg,
     localSynthetics,
+    localValueOrder,
     localShowRowTotals,
     localShowColTotals,
     localShowSubtotals,
@@ -2153,10 +2358,25 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
               {localVals.length === 0 && localSynthetics.length === 0 ? (
                 <span className={styles.zoneEmpty}>Drop fields here</span>
               ) : (
-                <>
-                  {localVals.map((field) => (
+                orderedValueMeasures.map((id) => {
+                  if (syntheticIdSet.has(id)) {
+                    const measure = localSynthetics.find((m) => m.id === id);
+                    if (!measure) return null;
+                    return (
+                      <SortableSyntheticZoneChip
+                        key={`syn:${measure.id}`}
+                        id={`synthetic::${measure.id}`}
+                        syntheticId={measure.id}
+                        label={measure.label}
+                        onEdit={() => openEditSynthetic(measure)}
+                        onRemove={removeSynthetic}
+                      />
+                    );
+                  }
+                  const field = id;
+                  return (
                     <ZoneChip
-                      key={field}
+                      key={`fld:${field}`}
                       id={makeZoneItemId("values", field)}
                       zone="values"
                       field={field}
@@ -2181,34 +2401,8 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                       onRemove={(f) => removeFromZone(f, "values")}
                       menuItems={[]}
                     />
-                  ))}
-                  {localSynthetics.map((measure) => (
-                    <span
-                      key={measure.id}
-                      className={styles.syntheticChip}
-                      data-testid={`settings-synthetic-${measure.id}`}
-                    >
-                      <span className={styles.syntheticIcon}>fx</span>
-                      {measure.label}
-                      <button
-                        type="button"
-                        className={styles.chipMenuBtn}
-                        onClick={() => openEditSynthetic(measure)}
-                        aria-label={`Edit ${measure.label}`}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.chipRemoveBtn}
-                        onClick={() => removeSynthetic(measure.id)}
-                        aria-label={`Remove ${measure.label}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </>
+                  );
+                })
               )}
             </SortableContext>
           </DropZone>
@@ -2351,12 +2545,22 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
 
           <DragOverlay dropAnimation={null}>
             {dragOverlay ? (
-              <span
-                className={`${dragOverlay.zone ? styles.zoneChip : styles.availableChip} ${styles.dragOverlayChip}`}
-              >
-                <GripDotsIcon />
-                {dragOverlay.field}
-              </span>
+              dragOverlay.zone === "synthetic" ? (
+                <span
+                  className={`${styles.syntheticChip} ${styles.dragOverlayChip}`}
+                >
+                  <GripDotsIcon />
+                  <span className={styles.syntheticIcon}>fx</span>
+                  {dragOverlay.field}
+                </span>
+              ) : (
+                <span
+                  className={`${dragOverlay.zone ? styles.zoneChip : styles.availableChip} ${styles.dragOverlayChip}`}
+                >
+                  <GripDotsIcon />
+                  {dragOverlay.field}
+                </span>
+              )
             ) : null}
           </DragOverlay>
         </DndContext>

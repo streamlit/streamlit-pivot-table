@@ -49,6 +49,14 @@ export interface PivotConfigV1 {
   /** Per-field temporal grain override. Null explicitly opts out to Original/raw values. */
   date_grains?: Record<string, DateGrain | null>;
   synthetic_measures?: SyntheticMeasureConfig[];
+  /**
+   * Optional display order for the Values zone, interleaving real value fields
+   * and synthetic measure ids. When absent, display order is
+   * `[...values, ...synthetic_measures.map(m => m.id)]`.
+   * TODO(v2): consider unifying `values` and `synthetic_measures` into a single
+   * discriminated union rather than ordering an external array.
+   */
+  value_order?: string[];
   aggregation: AggregationConfig;
   show_totals: boolean;
   /** Independent row totals toggle. bool = all/none, string[] = only listed measures. */
@@ -549,9 +557,47 @@ export function getSyntheticMeasureMap(
   return new Map((config.synthetic_measures ?? []).map((m) => [m.id, m]));
 }
 
-export function getRenderedValueFields(config: PivotConfigV1): string[] {
+/**
+ * Default display order: real value fields first, then synthetic ids.
+ */
+function defaultValueOrder(config: PivotConfigV1): string[] {
   const syntheticIds = (config.synthetic_measures ?? []).map((m) => m.id);
   return [...config.values, ...syntheticIds];
+}
+
+/**
+ * Reconcile a `value_order` list against the actual measures in the config:
+ *   - Drop orphan ids (not present in `values` ∪ `synthetic_measures`).
+ *   - Append any measures missing from the order (preserving default order).
+ * Returns the canonical order for rendering.
+ */
+export function reconcileValueOrder(
+  order: readonly string[] | undefined,
+  config: PivotConfigV1,
+): string[] {
+  const defaults = defaultValueOrder(config);
+  if (!order || order.length === 0) return defaults;
+  const valid = new Set(defaults);
+  const seen = new Set<string>();
+  const reconciled: string[] = [];
+  for (const id of order) {
+    if (valid.has(id) && !seen.has(id)) {
+      reconciled.push(id);
+      seen.add(id);
+    }
+  }
+  for (const id of defaults) {
+    if (!seen.has(id)) reconciled.push(id);
+  }
+  return reconciled;
+}
+
+/**
+ * Canonical list of measure ids to render, in display order. Resolves
+ * `config.value_order` if set, else uses the default concatenation.
+ */
+export function getRenderedValueFields(config: PivotConfigV1): string[] {
+  return reconcileValueOrder(config.value_order, config);
 }
 
 export function getRenderedValueLabel(
@@ -872,6 +918,25 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       o.collapsed_temporal_row_groups as Record<string, string[]>;
   if (typeof o.sticky_headers === "boolean")
     result.sticky_headers = o.sticky_headers;
+  if (o.value_order !== undefined) {
+    if (
+      !Array.isArray(o.value_order) ||
+      !o.value_order.every((v) => typeof v === "string")
+    ) {
+      throw new Error("'value_order' must be an array of strings");
+    }
+    const reconciled = reconcileValueOrder(
+      o.value_order as string[],
+      result as PivotConfigV1,
+    );
+    const defaults = defaultValueOrder(result as PivotConfigV1);
+    const isDefault =
+      reconciled.length === defaults.length &&
+      reconciled.every((id, i) => id === defaults[i]);
+    if (!isDefault) {
+      result.value_order = reconciled;
+    }
+  }
   if (
     o.show_values_as !== undefined &&
     typeof o.show_values_as === "object" &&

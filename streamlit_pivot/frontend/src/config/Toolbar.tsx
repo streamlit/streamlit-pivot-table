@@ -51,7 +51,9 @@ import {
 } from "../engine/exportData";
 import {
   getDimensionLabel,
+  getRenderedValueFields,
   normalizeAggregationConfig,
+  reconcileValueOrder,
   stringifyPivotConfig,
   type AggregationConfig,
   type AggregationType,
@@ -68,7 +70,9 @@ import {
 import { useClickOutside } from "../shared/useClickOutside";
 import {
   SortableFieldChip,
+  SortableSyntheticChip,
   DragOverlayChip,
+  SyntheticDragOverlayChip,
   makeItemId,
   parseItemId,
 } from "./DndFieldChip";
@@ -118,6 +122,47 @@ function stringArraysEqual(
 ): boolean {
   if ((a?.length ?? 0) !== b.length) return false;
   return b.every((value, idx) => a?.[idx] === value);
+}
+
+/**
+ * Extract the canonical measure id (real field name or synthetic id) from a
+ * dnd-kit drag-data payload. Returns null for non-value-zone drags.
+ */
+function getMeasureIdFromDragData(
+  data:
+    | {
+        zone?: string;
+        field?: string;
+        type?: string;
+        syntheticId?: string;
+      }
+    | undefined,
+): string | null {
+  if (!data) return null;
+  if (data.type === "synthetic") return data.syntheticId ?? null;
+  if (data.zone === "values") return data.field ?? null;
+  return null;
+}
+
+/**
+ * Apply a new Values display order, clearing `value_order` when it matches the
+ * default `[...values, ...synthetic_ids]` so the config stays minimal.
+ */
+function withValueOrder(
+  config: PivotConfigV1,
+  nextOrder: readonly string[],
+): PivotConfigV1 {
+  const syntheticIds = (config.synthetic_measures ?? []).map((m) => m.id);
+  const defaults = [...config.values, ...syntheticIds];
+  const isDefault =
+    nextOrder.length === defaults.length &&
+    nextOrder.every((id, i) => id === defaults[i]);
+  if (isDefault) {
+    if (config.value_order === undefined) return config;
+    const { value_order: _omit, ...rest } = config;
+    return rest;
+  }
+  return { ...config, value_order: [...nextOrder] };
 }
 
 const AGG_LABELS: Record<AggregationType, string> = {
@@ -287,8 +332,13 @@ const Toolbar: FC<ToolbarProps> = ({
 }): ReactElement => {
   const emitIfChanged = useCallback(
     (updated: PivotConfigV1) => {
-      if (onConfigChange && !configsEqual(updated, config)) {
-        onConfigChange(updated);
+      if (!onConfigChange) return;
+      // Keep value_order consistent with the current values/synthetic_measures
+      // (drop orphans, append new measures, strip when equal to default).
+      const reconciled = reconcileValueOrder(updated.value_order, updated);
+      const normalized = withValueOrder(updated, reconciled);
+      if (!configsEqual(normalized, config)) {
+        onConfigChange(normalized);
       }
     },
     [config, onConfigChange],
@@ -325,6 +375,19 @@ const Toolbar: FC<ToolbarProps> = ({
       emitIfChanged(cleanupConfigAfterFieldChanges(config, nextConfig));
     },
     [config, emitIfChanged, frozenColumns],
+  );
+
+  const handleRemoveSynthetic = useCallback(
+    (syntheticId: string) => {
+      const current = config.synthetic_measures ?? [];
+      const next = current.filter((m) => m.id !== syntheticId);
+      if (next.length === current.length) return;
+      emitIfChanged({
+        ...config,
+        synthetic_measures: next.length > 0 ? next : undefined,
+      });
+    },
+    [config, emitIfChanged],
   );
 
   const expandAllGroups = useCallback(() => {
@@ -395,13 +458,21 @@ const Toolbar: FC<ToolbarProps> = ({
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
       const { active, over } = event;
+      const activeData = active.data.current as
+        | { zone?: string; field?: string; type?: string }
+        | undefined;
+      // Synthetic chips only participate in Values-zone reordering.
+      if (activeData?.type === "synthetic") {
+        setActiveOverZone(null);
+        return;
+      }
       if (!over) {
         setActiveOverZone(null);
         return;
       }
 
-      const sourceZone = (active.data.current as { zone: string })?.zone;
-      const field = (active.data.current as { field: string })?.field;
+      const sourceZone = activeData?.zone;
+      const field = activeData?.field;
       let targetZone: string | undefined;
       if (over.data.current?.type === "container") {
         targetZone = String(over.id);
@@ -432,8 +503,47 @@ const Toolbar: FC<ToolbarProps> = ({
 
       if (!over) return;
 
-      const sourceZone = (active.data.current as { zone: string })?.zone;
-      const field = (active.data.current as { field: string })?.field;
+      const activeData = active.data.current as
+        | {
+            zone?: string;
+            field?: string;
+            type?: string;
+            syntheticId?: string;
+          }
+        | undefined;
+      const overData = over.data.current as
+        | {
+            zone?: string;
+            field?: string;
+            type?: string;
+            syntheticId?: string;
+          }
+        | undefined;
+
+      const activeMeasureId = getMeasureIdFromDragData(activeData);
+      const overMeasureId = getMeasureIdFromDragData(overData);
+
+      // Values-zone reorder: any combination of real/synthetic measures.
+      if (
+        activeMeasureId &&
+        overMeasureId &&
+        activeMeasureId !== overMeasureId
+      ) {
+        const currentOrder = getRenderedValueFields(config);
+        const oldIdx = currentOrder.indexOf(activeMeasureId);
+        const newIdx = currentOrder.indexOf(overMeasureId);
+        if (oldIdx !== -1 && newIdx !== -1) {
+          const nextOrder = arrayMove(currentOrder, oldIdx, newIdx);
+          emitIfChanged(withValueOrder(config, nextOrder));
+        }
+        return;
+      }
+
+      // Synthetic chips cannot leave the Values zone.
+      if (activeData?.type === "synthetic") return;
+
+      const sourceZone = activeData?.zone;
+      const field = activeData?.field;
       if (!sourceZone || !field) return;
 
       let targetZone: string | undefined;
@@ -498,6 +608,7 @@ const Toolbar: FC<ToolbarProps> = ({
 
   // Zone card content helpers
   const syntheticMeasures = config.synthetic_measures ?? [];
+  const valueOrder = useMemo(() => getRenderedValueFields(config), [config]);
   const emptyHint = locked ? undefined : "Apply fields in settings menu";
 
   return (
@@ -571,35 +682,48 @@ const Toolbar: FC<ToolbarProps> = ({
           aggregation={config.aggregation}
           showValuesAs={config.show_values_as}
           syntheticMeasures={syntheticMeasures}
+          renderedMeasures={valueOrder}
           onAggregationChange={handleValueAggChange}
           onRemove={(field) => handleRemoveField("values", field)}
+          onRemoveSynthetic={handleRemoveSynthetic}
           aggPortalTarget={toolbarRef.current}
           aggTestIdPrefix="toolbar-values-agg"
         />
         <DragOverlay dropAnimation={{ duration: 200 }}>
           {activeField ? (
-            <DragOverlayChip
-              field={activeField.field}
-              displayLabel={
-                activeField.zone === "rows" || activeField.zone === "columns"
-                  ? getDimensionLabel(
-                      config,
-                      activeField.field,
-                      columnTypes?.get(activeField.field),
-                      adaptiveDateGrains?.[activeField.field],
-                    )
-                  : undefined
-              }
-              testId={`toolbar-${activeField.zone}`}
-              isValuesField={activeField.zone === "values"}
-              aggregationLabel={
-                activeField.zone === "values"
-                  ? AGG_CHIP_LABELS[
-                      config.aggregation?.[activeField.field] ?? "sum"
-                    ]
-                  : undefined
-              }
-            />
+            activeField.zone === "synthetic" ? (
+              <SyntheticDragOverlayChip
+                syntheticId={activeField.field}
+                label={
+                  syntheticMeasures.find((m) => m.id === activeField.field)
+                    ?.label ?? activeField.field
+                }
+                testId="toolbar-values"
+              />
+            ) : (
+              <DragOverlayChip
+                field={activeField.field}
+                displayLabel={
+                  activeField.zone === "rows" || activeField.zone === "columns"
+                    ? getDimensionLabel(
+                        config,
+                        activeField.field,
+                        columnTypes?.get(activeField.field),
+                        adaptiveDateGrains?.[activeField.field],
+                      )
+                    : undefined
+                }
+                testId={`toolbar-${activeField.zone}`}
+                isValuesField={activeField.zone === "values"}
+                aggregationLabel={
+                  activeField.zone === "values"
+                    ? AGG_CHIP_LABELS[
+                        config.aggregation?.[activeField.field] ?? "sum"
+                      ]
+                    : undefined
+                }
+              />
+            )
           ) : null}
         </DragOverlay>
       </DndContext>
@@ -830,10 +954,16 @@ interface ZoneCardProps {
   showValuesAs?: Record<string, ShowValuesAs>;
   aggregation?: AggregationConfig;
   syntheticMeasures?: SyntheticMeasureConfig[];
+  /**
+   * Unified display order for the Values zone (interleaves real field names
+   * and synthetic measure ids). Only consulted when `isValues` is true.
+   */
+  renderedMeasures?: readonly string[];
   isDropHighlighted?: boolean;
   activeId?: string | null;
   onAggregationChange?: (field: string, agg: AggregationType) => void;
   onRemove?: (field: string) => void;
+  onRemoveSynthetic?: (syntheticId: string) => void;
   aggPortalTarget?: HTMLElement | null;
   aggTestIdPrefix?: string;
   displayLabelForField?: (field: string) => string;
@@ -853,10 +983,12 @@ const ZoneCard: FC<ZoneCardProps> = ({
   showValuesAs,
   aggregation,
   syntheticMeasures = [],
+  renderedMeasures,
   isDropHighlighted,
   activeId,
   onAggregationChange,
   onRemove,
+  onRemoveSynthetic,
   aggPortalTarget,
   aggTestIdPrefix,
   displayLabelForField,
@@ -869,10 +1001,39 @@ const ZoneCard: FC<ZoneCardProps> = ({
     id: zoneId,
     data: { type: "container" },
   });
-  const sortableIds = useMemo(
-    () => selected.map((f) => makeItemId(zoneId, f)),
-    [zoneId, selected],
+
+  const syntheticById = useMemo(
+    () => new Map(syntheticMeasures.map((m) => [m.id, m])),
+    [syntheticMeasures],
   );
+  const valuesSet = useMemo(() => new Set(selected), [selected]);
+
+  // In Values, a single SortableContext spans real fields and synthetic
+  // measures so users can reorder them together. Elsewhere the zone only
+  // has real fields.
+  const displayOrder = useMemo<readonly string[]>(
+    () =>
+      isValues
+        ? (renderedMeasures ?? [
+            ...selected,
+            ...syntheticMeasures.map((m) => m.id),
+          ])
+        : selected,
+    [isValues, renderedMeasures, selected, syntheticMeasures],
+  );
+
+  const sortableIds = useMemo(
+    () =>
+      displayOrder.map((id) =>
+        isValues && syntheticById.has(id)
+          ? `synthetic::${id}`
+          : makeItemId(zoneId, id),
+      ),
+    [displayOrder, isValues, syntheticById, zoneId],
+  );
+
+  const hasChips =
+    selected.length > 0 || (isValues && syntheticMeasures.length > 0);
 
   return (
     <div
@@ -895,13 +1056,34 @@ const ZoneCard: FC<ZoneCardProps> = ({
         )}
       </div>
 
-      <SortableContext
-        items={sortableIds}
-        strategy={horizontalListSortingStrategy}
-      >
-        {selected.length > 0 || (isValues && syntheticMeasures.length > 0) ? (
-          <div className={styles.chipRow} data-testid={`${testId}-chips`}>
-            {selected.map((col) => {
+      {hasChips ? (
+        <div className={styles.chipRow} data-testid={`${testId}-chips`}>
+          <SortableContext
+            items={sortableIds}
+            strategy={horizontalListSortingStrategy}
+          >
+            {displayOrder.map((id) => {
+              const synthetic =
+                isValues && syntheticById.has(id)
+                  ? syntheticById.get(id)
+                  : undefined;
+              if (synthetic) {
+                return (
+                  <SortableSyntheticChip
+                    key={`syn:${synthetic.id}`}
+                    id={`synthetic::${synthetic.id}`}
+                    syntheticId={synthetic.id}
+                    label={synthetic.label}
+                    testId={testId}
+                    disabled={disabled}
+                    onRemove={disabled ? undefined : onRemoveSynthetic}
+                  />
+                );
+              }
+              // Real field chip. In Values, only render if still present
+              // in `selected` (guards against transient ordering states).
+              if (isValues && !valuesSet.has(id)) return null;
+              const col = id;
               const isFrozen = frozenColumns?.has(col);
               const hasFilter =
                 filters?.[col] &&
@@ -912,7 +1094,7 @@ const ZoneCard: FC<ZoneCardProps> = ({
               const showAsBadge = currentShowAs !== "raw";
               return (
                 <SortableFieldChip
-                  key={col}
+                  key={`fld:${col}`}
                   id={makeItemId(zoneId, col)}
                   zone={zoneId}
                   field={col}
@@ -948,22 +1130,11 @@ const ZoneCard: FC<ZoneCardProps> = ({
                 />
               );
             })}
-            {isValues &&
-              syntheticMeasures.map((measure) => (
-                <span
-                  key={measure.id}
-                  className={styles.chip}
-                  data-testid={`${testId}-synthetic-${measure.id}`}
-                >
-                  <span className={styles.aggChipIcon}>fx</span>
-                  {measure.label}
-                </span>
-              ))}
-          </div>
-        ) : resolvedEmptyHint ? (
-          <div className={styles.emptyDropZone}>{resolvedEmptyHint}</div>
-        ) : null}
-      </SortableContext>
+          </SortableContext>
+        </div>
+      ) : resolvedEmptyHint ? (
+        <div className={styles.emptyDropZone}>{resolvedEmptyHint}</div>
+      ) : null}
     </div>
   );
 };
