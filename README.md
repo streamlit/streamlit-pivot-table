@@ -2,7 +2,7 @@
 
 Pivot table component for [Streamlit](https://streamlit.io). Built with Streamlit Components V2, React, and TypeScript.
 
-Supports multi-dimensional pivoting, interactive sorting and filtering, subtotals with collapse/expand, conditional formatting, data export, drill-down detail panels, and more.
+Supports multi-dimensional pivoting, interactive sorting and filtering, subtotals with collapse/expand, conditional formatting, data export (Excel/CSV/TSV/clipboard), drill-down detail panels, drag-and-drop field configuration, synthetic (derived) measures, date/time hierarchies with period-over-period comparisons, hierarchical row layouts, column resize, fullscreen mode, and server-side pre-aggregation for large datasets.
 
 ## Installation
 
@@ -32,7 +32,9 @@ result = st_pivot_table(
 )
 ```
 
-The `data` parameter accepts the same input types as `st.dataframe` — Pandas DataFrames, Polars DataFrames, NumPy arrays, dicts, lists of records, and more. Data is automatically converted to a Pandas DataFrame internally.
+The `data` parameter accepts the same input types as `st.dataframe` — Pandas DataFrames, Polars DataFrames, NumPy arrays, dicts, lists of records, PyArrow tables, and any object supporting the DataFrame Interchange Protocol or `to_pandas()`. Data is automatically converted to a Pandas DataFrame internally.
+
+Passing a Pandas `Styler` is also supported: its embedded number formatters are auto-extracted and used as default `number_format` patterns (explicit parameters still win). See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config).
 
 If `rows`, `columns`, and `values` are all omitted, the component auto-detects dimensions (categorical + low-cardinality numeric columns) and measures (high-cardinality numeric columns) from the data.
 
@@ -44,7 +46,7 @@ If `rows`, `columns`, and `values` are all omitted, the component auto-detects d
 
 Creates a pivot table component. All parameters except `data` are keyword-only.
 
-Returns a `PivotTableResult` dict containing the current `config` state.
+Returns a `PivotTableResult` dict containing the current `config` state and optional `perf_metrics` (frontend-reported timing and layout stats). See [Callbacks and State](#callbacks-and-state).
 
 #### Core Parameters
 
@@ -82,20 +84,22 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `number_format` | `str \| dict[str, str] \| None` | `None` | Number format pattern(s). See [Number Format Patterns](#number-format-patterns). |
+| `number_format` | `str \| dict[str, str] \| None` | `None` | Number format pattern(s) applied to value-field cells. See [Number Format Patterns](#number-format-patterns). |
+| `dimension_format` | `str \| dict[str, str] \| None` | `None` | Number format pattern(s) applied to row/column dimension labels (e.g. to render a numeric `Year` as `2024` instead of `2,024.00`). A single string applies to every numeric dimension; a dict maps field names to patterns. Use `"__all__"` as a key for a default. |
 | `column_alignment` | `dict[str, str] \| None` | `None` | Per-field text alignment: `"left"`, `"center"`, or `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Visual formatting rules. See [Conditional Formatting](#conditional-formatting). |
+| `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column format hints, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Each entry is a dict with a `format` key (d3-style or printf-style `"%,.2f"`) and optionally `type` (`"date"` / `"datetime"` / `"time"` map to `dimension_format`; everything else maps to `number_format`). Explicit `number_format` / `dimension_format` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
 | `empty_cell_value` | `str` | `"-"` | Display string for cells with no data. |
 
 #### Layout
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `height` | `int \| None` | `None` | Fixed height in pixels. `None` means auto-size (capped by `max_height`). |
-| `max_height` | `int` | `500` | Maximum auto-size height in pixels. Table becomes scrollable when content exceeds this. Ignored when `height` is set. |
+| `height` | `int \| None` | `None` | **Deprecated.** Kept for backwards compatibility — when provided, it is treated as `max_height`. Use `max_height` in new code. |
+| `max_height` | `int` | `500` | Maximum auto-size height in pixels. Table becomes scrollable when content exceeds this. |
 | `sticky_headers` | `bool` | `True` | Column headers stick to the top of the scroll container. |
-| `row_layout` | `"table" \| "hierarchy"` | `"table"` | Controls how row dimensions are rendered. `"table"` uses separate row-header columns, while `"hierarchy"` renders a single indented tree column with breadcrumb-level controls. |
+| `row_layout` | `"table" \| "hierarchy"` | `"table"` | Controls how row dimensions are rendered. `"table"` uses separate row-header columns, while `"hierarchy"` renders a single indented tree column with breadcrumb-level controls. Passing `"hierarchy"` with no explicit `show_subtotals` automatically enables subtotals for all grouping levels. See [Row Layout Modes](#row-layout-modes). |
 
 #### Interactivity and Callbacks
 
@@ -117,7 +121,8 @@ Returns a `PivotTableResult` dict containing the current `config` state.
 | `source_filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Server-only report-level filters applied before any pivot processing. `include` takes precedence over `exclude`. `None` matches null-like values, `""` matches only literal empty strings, and no type coercion is performed. |
 | `hidden_attributes` | `list[str] \| None` | `None` | Column names to hide entirely from the UI. |
 | `hidden_from_aggregators` | `list[str] \| None` | `None` | Column names hidden from the values/aggregators dropdown only. |
-| `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone and cannot be reordered or moved via drag-and-drop. |
+| `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone and cannot be reordered or moved via drag-and-drop. Frozen chips render without a drag handle. |
+| `hidden_from_drag_drop` | `list[str] \| None` | `None` | **Deprecated alias** for `frozen_columns`. Use `frozen_columns` in new code. |
 | `sorters` | `dict[str, list[str]] \| None` | `None` | Custom sort orderings per dimension. Maps column name to ordered list of values. |
 | `menu_limit` | `int \| None` | `None` | Max items in the header-menu filter checklist. Defaults to 50. |
 | `execution_mode` | `str` | `"auto"` | Performance execution mode. See [Execution Mode](#execution-mode). |
@@ -203,6 +208,8 @@ Per-measure aggregation applies only to raw entries in `values`. Synthetic measu
 
 `aggregation="sum_over_sum"` is no longer supported as a table-wide aggregation mode. Use `synthetic_measures` for ratio-of-sums behavior.
 In the interactive builder, the **Format** input includes presets (Percent, Currency, Number) and validates custom patterns before save.
+
+Synthetic measures render as `fx`-badged chips in the Values zone and can be interleaved with raw value chips via drag-and-drop; the resulting order is persisted on the config as `value_order`. See [Drag-and-Drop Field Configuration](#drag-and-drop-field-configuration). When `value_order` is omitted, the default order is all raw `values` followed by synthetic measures in declaration order.
 
 ### Sort Configuration
 
@@ -356,7 +363,9 @@ st_pivot_table(
 Behavior notes:
 
 - `table` preserves the traditional multi-column row-axis layout and works naturally with `repeat_row_labels`.
-- `hierarchy` renders parent groups before their children and uses a single visible row column rather than separate columns per row dimension.
+- `hierarchy` renders parent groups before their children and uses a single visible row column rather than separate columns per row dimension. Indentation reflects depth and the top grouping level uses a subtle background tint; deeper levels rely on indentation plus group-boundary borders.
+- **Auto-subtotals:** when `row_layout="hierarchy"` and `show_subtotals` is not explicitly set, subtotals are automatically enabled for all grouping levels so the tree exposes group aggregations out of the box. Pass `show_subtotals=False` or `show_subtotals=[...]` to override.
+- **`repeat_row_labels` is ignored** in hierarchy mode because the row axis is a single indented column; the Settings Panel disables the toggle accordingly.
 - Temporal date hierarchies work in both layouts. In `table`, date levels expand into separate row-header columns; in `hierarchy`, those same levels render as nested tree levels within the single hierarchy column.
 - Export parity is preserved. CSV, TSV, clipboard, and XLSX outputs follow the selected row layout, including hierarchy indentation.
 - Execution-mode parity is also preserved. `row_layout` works in both `client_only` and `threshold_hybrid`; the layout mostly affects rendering, not whether hybrid execution is allowed.
@@ -392,6 +401,59 @@ st_pivot_table(
     number_format="$,.0f",
 )
 ```
+
+`dimension_format` uses the same d3-style patterns but applies to row/column dimension labels instead of value cells. This is useful when a dimension is numeric but should display like an ID (for example, `Year` rendered as `2024` rather than `2,024.00`).
+
+```python
+st_pivot_table(
+    df,
+    key="dimension_format_example",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    dimension_format={"Year": ".0f"},
+    number_format={"Revenue": "$,.0f"},
+)
+```
+
+### Formats from `Styler` and `column_config`
+
+The component can pick up sensible default formats from two upstream sources, so a single format declaration often flows through to the pivot without extra configuration.
+
+**Pandas `Styler`.** If you pass a `Styler` as `data`, its per-column formatters are probed with a representative numeric value and the resulting output string is reverse-engineered into a d3-style `number_format` pattern (currency prefix, grouping, decimals, and percent suffix are all detected). The component extracts **number formats only** — dimension/date formatters on a Styler are not currently translated to `dimension_format`. Unrecognizable formatters are silently skipped.
+
+```python
+styled = df.style.format({"Revenue": "${:,.0f}", "Profit": "{:,.2f}"})
+st_pivot_table(
+    styled,
+    key="styler_formats_example",
+    rows=["Region"],
+    values=["Revenue", "Profit"],
+)
+# -> number_format = {"Revenue": "$,.0f", "Profit": ",.2f"}
+```
+
+**`column_config`.** A dict mapping column names to a small subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Each entry is read for:
+
+- `format` — a format string. d3-style patterns (`",.2f"`, `"$,.0f"`) pass through as-is. Streamlit printf-style patterns (`"%,.2f"`) are normalized by stripping the leading `%`.
+- `type` — if it resolves to `"date"`, `"datetime"`, or `"time"`, the pattern contributes to `dimension_format`; otherwise it contributes to `number_format`. Plain `type_config = {"type": ...}` nesting is also accepted.
+
+```python
+st_pivot_table(
+    df,
+    key="column_config_formats_example",
+    rows=["Region"],
+    columns=["Order Date"],
+    values=["Revenue", "Units"],
+    column_config={
+        "Revenue": {"format": "$,.0f"},
+        "Units": {"format": ",.0f"},
+        "Order Date": {"format": "YYYY-MM-DD", "type": "date"},
+    },
+)
+```
+
+**Precedence.** `explicit number_format / dimension_format` > `column_config` > `Styler`. The lower-priority sources only fill gaps — any field already present in an explicit format dict keeps the caller-supplied pattern.
 
 ### Conditional Formatting
 
@@ -637,15 +699,12 @@ The Settings Panel is the primary authoring surface for pivot configuration. Cha
 The panel contains:
 
 - **Available Fields** — unassigned columns shown as draggable chips. Click a chip's menu to add it to Rows, Columns, or Values. When more than 8 fields are available, a search input appears.
-- **Rows / Columns / Values** drop zones — drag chips to reorder within a zone, drag between zones, or use the `x` button to remove. Value chips show an aggregation picker (click the badge to change).
-- **Synthetic Measures** — click **+ Add measure** to create derived metrics (ratio of sums, difference of sums) with optional format patterns.
+- **Rows / Columns / Values** drop zones — drag chips to reorder within a zone, drag between zones, or use the `x` button to remove. Value chips show an aggregation picker (click the badge to change). Synthetic `fx` chips appear inline with raw value chips and can be reordered alongside them (the resulting order is persisted as `value_order`).
+- **Synthetic Measures** — click **+ Add measure** to create derived metrics (ratio of sums, difference of sums) with optional format patterns. Existing synthetic chips expose an **✎ Edit** button that reopens the measure editor.
 - **Display Toggles** — Row Totals, Column Totals, Subtotals, Repeat Labels, Row Layout, and Sticky Headers.
+- **Invalid drop feedback** — if you drag a chip onto a zone that cannot accept it (e.g. a non-numeric field into Values), the zone turns red and shows an inline hint explaining why.
 
-In `hierarchy` row layout, `Repeat Labels` is not applicable because the row axis is rendered as a single hierarchy column rather than repeated across separate row-dimension columns.
-
-External config changes (toolbar DnD, Reset, Swap, config import) while the panel is open will close it and discard uncommitted edits.
-
-In **locked mode**, Reset, Swap, and config import/export are hidden. `Export Data` remains available as a viewer action. The Settings icon shows read-only display status, and header-menu sorting, filtering, and `Show Values As` stay enabled.
+External config changes (toolbar DnD, Reset, Swap, config import) while the panel is open will close it and discard uncommitted edits. See [Locked Mode](#locked-mode) for viewer-mode behavior.
 
 ### Field Search
 
@@ -664,7 +723,8 @@ Drag-and-drop is available in two contexts:
 **Visual feedback:**
 - A floating overlay chip follows the cursor during drag.
 - The source chip stays in place at reduced opacity (ghosted).
-- When dragging over a valid target zone, the zone highlights with a dashed border and subtle tint.
+- When dragging over a **valid** target zone, the zone highlights with a dashed border and subtle tint.
+- When dragging over an **invalid** target zone (see Constraints), the zone highlights in red with an inline hint such as "Only numeric fields can be added to Values"; dropping is blocked.
 - Within-zone reorders show smooth shift animations as chips make room.
 
 **Constraints:**
@@ -672,10 +732,11 @@ Drag-and-drop is available in two contexts:
 - Non-numeric fields are rejected from the Values zone.
 - Rows and Columns are mutually exclusive (a field cannot be in both).
 - A field can be in Values and one dimension zone simultaneously.
+- Synthetic `fx` chips may be reordered within the Values zone but cannot leave it.
 - When `locked=True`, drag-and-drop is fully disabled.
 - A 5 px activation distance distinguishes clicks from drags.
 
-**Config cleanup on move:** When fields move between zones, related config properties (aggregation, sort, collapsed groups, subtotals, conditional formatting, show-values-as, per-measure totals) are automatically synchronized.
+**Config cleanup on move:** When fields move between zones, related config properties (aggregation, sort, collapsed groups, subtotals, conditional formatting, show-values-as, per-measure totals, and `value_order`) are automatically synchronized. Orphan entries in `value_order` are dropped and newly added measures are appended.
 
 No Python API parameter is required — drag-and-drop is a purely frontend interaction.
 
@@ -684,8 +745,8 @@ No Python API parameter is required — drag-and-drop is a purely frontend inter
 Drag the **right edge of any column header** to resize that column. A thin resize handle appears on hover (cursor changes to `col-resize`). Minimum column width is 40 px.
 
 - Works in both virtualized and non-virtualized rendering modes.
-- Each column's width is tracked independently.
-- Widths reset when the pivot configuration changes (new rows, columns, or values).
+- Each column's width is tracked independently by slot position.
+- Double-click the resize handle to auto-size a column to its content.
 - No Python API parameter is required — column resize is a purely frontend interaction.
 
 ### Fullscreen Mode
@@ -747,7 +808,32 @@ For total cells, `rowKey` or `colKey` will be `["Total"]` and the corresponding 
 
 ### Config State
 
-The returned `config` dict contains the current supported configuration state, including interactive changes such as rows, columns, values, aggregation, totals, sorting, filtering, and display options. Use this to persist user customizations or synchronize multiple components.
+The returned `config` dict contains the current supported configuration state, including interactive changes such as rows, columns, values, aggregation, totals, sorting, filtering, collapsed groups, `value_order`, and display options. Use this to persist user customizations, serialize via the toolbar's **Copy Config** / **Import Config** actions, or synchronize multiple components.
+
+### Performance Metrics
+
+When the frontend finishes a render pass, it writes a `perf_metrics` entry into the component's session state alongside `config`. Read it from the return value or `st.session_state[key]` to observe pivot sizing and timing. The schema (all keys optional) is:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `parseMs` | `float` | Time to parse incoming data |
+| `pivotComputeMs` | `float` | Time to build the pivot structure |
+| `renderMs` | `float` | Time to render the current view |
+| `firstMountMs` | `float` | Time to the first painted frame after mount |
+| `sourceRows` / `sourceCols` | `int` | Source DataFrame shape after `source_filters` |
+| `totalRows` / `totalCols` / `totalCells` | `int` | Rendered pivot shape |
+| `executionMode` | `str` | `"client_only"` or `"threshold_hybrid"` — the path actually used for the current render |
+| `needsVirtualization` | `bool` | Whether the renderer switched to virtualized scrolling |
+| `columnsTruncated` / `truncatedColumnCount` | `bool`, `int` | Whether the frontend capped columns for safety |
+| `warnings` | `list[str]` | Non-fatal messages (e.g. fallbacks out of hybrid mode) |
+| `lastAction` | `dict` | `{kind, elapsedMs, axis, field, totalCount}` describing the most recent user-driven action |
+
+```python
+result = st_pivot_table(df, key="my_pivot", rows=["Region"], values=["Revenue"])
+metrics = result.get("perf_metrics") or {}
+if metrics.get("executionMode") == "threshold_hybrid":
+    st.caption(f"Pre-aggregated {metrics['sourceRows']} source rows on the server.")
+```
 
 ---
 
@@ -850,19 +936,11 @@ npx vitest run
 
 ### Build a wheel
 
-1. Build the frontend assets:
+Build the frontend first (see [Building the frontend](#building-the-frontend)), then:
 
-   ```sh
-   cd streamlit_pivot/frontend
-   npm install
-   npm run build
-   ```
-
-2. Build the Python wheel:
-
-   ```sh
-   uv build
-   ```
+```sh
+uv build
+```
 
 Output: `dist/streamlit_pivot-<version>-py3-none-any.whl`
 
