@@ -855,6 +855,7 @@ interface BuilderSelectProps<T extends string> {
   onChange: (value: T) => void;
   testId: string;
   ariaLabel: string;
+  portalTarget?: HTMLElement | null;
 }
 
 function BuilderSelect<T extends string>({
@@ -863,6 +864,7 @@ function BuilderSelect<T extends string>({
   onChange,
   testId,
   ariaLabel,
+  portalTarget: portalTargetProp,
 }: BuilderSelectProps<T>): ReactElement {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -873,9 +875,11 @@ function BuilderSelect<T extends string>({
   const selected =
     options.find((option) => option.value === value) ?? options[0];
   const portalTarget = useMemo(() => {
+    if (portalTargetProp) return portalTargetProp;
     const root = triggerRef.current?.getRootNode();
     return root instanceof ShadowRoot ? root : document.body;
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, portalTargetProp]);
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -2603,6 +2607,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                       operation,
                     }))
                   }
+                  portalTarget={containerRef.current}
                 />
                 {synState.operation !== "formula" &&
                   synState.numerator &&
@@ -2663,6 +2668,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                       onChange={(numerator) =>
                         setSynState((s) => ({ ...s, numerator }))
                       }
+                      portalTarget={containerRef.current}
                     />
                   </div>
                   <div className={styles.builderField}>
@@ -2678,6 +2684,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                       onChange={(denominator) =>
                         setSynState((s) => ({ ...s, denominator }))
                       }
+                      portalTarget={containerRef.current}
                     />
                   </div>
                 </>
