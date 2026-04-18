@@ -29,6 +29,7 @@ import {
   type DateGrain,
   getEffectiveDateGrain,
   getAggregationForField,
+  getSyntheticSourceFields,
   type DimensionFilter,
   type HybridTotals,
   type NullHandlingConfig,
@@ -37,6 +38,11 @@ import {
   type SyntheticMeasureConfig,
   type SortConfig,
 } from "./types";
+import {
+  compileFormula,
+  type CompiledFormula,
+  FormulaParseError,
+} from "./formulaParser";
 import { DataRecordSource } from "./parseArrow";
 import {
   formatNumber,
@@ -242,6 +248,17 @@ export class PivotData {
   private _hybridTemporalRowParentGrand: Map<string, number | null> | null =
     null;
 
+  private readonly _compiledFormulas: Map<string, CompiledFormula>;
+  private readonly _formulaErrors: Map<string, string>;
+  private readonly _formulaScope: Record<string, number | null> = {};
+
+  private static readonly NULL_AGGREGATOR: Aggregator = Object.freeze({
+    push: () => undefined,
+    value: () => null,
+    count: () => 0,
+    format: (emptyCellValue: string) => emptyCellValue,
+  });
+
   constructor(
     input: DataRecord[] | ColumnarDataSource,
     config: PivotConfigV1,
@@ -263,12 +280,45 @@ export class PivotData {
       (config.synthetic_measures ?? []).map((m) => [m.id, m]),
     );
     this._hasSyntheticMeasures = this._syntheticById.size > 0;
-    const syntheticSourceFields = (config.synthetic_measures ?? []).flatMap(
-      (m) => [m.numerator, m.denominator],
+
+    this._compiledFormulas = new Map();
+    this._formulaErrors = new Map();
+    for (const m of config.synthetic_measures ?? []) {
+      if (m.operation === "formula" && m.formula) {
+        try {
+          this._compiledFormulas.set(m.id, compileFormula(m.formula));
+        } catch (e) {
+          this._formulaErrors.set(
+            m.id,
+            e instanceof FormulaParseError ? e.message : String(e),
+          );
+        }
+      } else if (m.operation === "formula") {
+        this._formulaErrors.set(m.id, "Formula is empty");
+      }
+    }
+
+    const syntheticSourceFields = getSyntheticSourceFields(
+      config.synthetic_measures,
     );
     this._allAggregatedFields = [
       ...new Set([...config.values, ...syntheticSourceFields]),
     ];
+
+    const dataColumnSet = new Set(this._dataSource.getColumnNames());
+    for (const [id, compiled] of this._compiledFormulas) {
+      if (this._formulaErrors.has(id)) continue;
+      const unknownRefs = compiled.fieldRefs.filter(
+        (ref) => !dataColumnSet.has(ref),
+      );
+      if (unknownRefs.length > 0) {
+        this._formulaErrors.set(
+          id,
+          `Unknown field(s): ${unknownRefs.map((r) => `"${r}"`).join(", ")}`,
+        );
+      }
+    }
+
     const hybridAggRemap = options?.hybridAggRemap;
     this._factoriesByField = new Map(
       this._allAggregatedFields.map((field) => {
@@ -614,7 +664,18 @@ export class PivotData {
   private _evaluateSynthetic(
     synthetic: SyntheticMeasureConfig,
     getSum: (field: string) => number | null,
+    getAgg: (field: string) => number | null,
   ): number | null {
+    if (synthetic.operation === "formula") {
+      const compiled = this._compiledFormulas.get(synthetic.id);
+      if (!compiled) return null;
+      const scope = this._formulaScope;
+      for (const key in scope) delete scope[key];
+      for (const ref of compiled.fieldRefs) {
+        scope[ref] = getAgg(ref);
+      }
+      return compiled.evaluate(scope);
+    }
     const numerator = getSum(synthetic.numerator);
     const denominator = getSum(synthetic.denominator);
     if (numerator == null || denominator == null) return null;
@@ -624,13 +685,17 @@ export class PivotData {
     return numerator - denominator;
   }
 
+  getFormulaErrors(): ReadonlyMap<string, string> {
+    return this._formulaErrors;
+  }
+
   private _fixedAggregator(value: number | null): Aggregator {
+    if (value == null) return PivotData.NULL_AGGREGATOR;
     return {
       push: () => undefined,
       value: () => value,
-      count: () => (value == null ? 0 : 1),
-      format: (emptyCellValue: string) =>
-        value == null ? emptyCellValue : formatNumber(value),
+      count: () => 1,
+      format: () => formatNumber(value),
     };
   }
 
@@ -1121,10 +1186,12 @@ export class PivotData {
     const field = valField ?? this._defaultValueField();
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
-      const value = this._evaluateSynthetic(synthetic, (sourceField) => {
-        const sourceKey = `${makeKeyString(rowKey)}\x01${makeKeyString(colKey)}\x01${sourceField}`;
-        return this._cellSumAggs.get(sourceKey)?.value() ?? null;
-      });
+      const prefix = `${makeKeyString(rowKey)}\x01${makeKeyString(colKey)}\x01`;
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => this._cellSumAggs.get(prefix + sf)?.value() ?? null,
+        (sf) => this._cellAggs.get(prefix + sf)?.value() ?? null,
+      );
       return this._fixedAggregator(value);
     }
     const keyStr = `${makeKeyString(rowKey)}\x01${makeKeyString(colKey)}\x01${field}`;
@@ -1139,10 +1206,12 @@ export class PivotData {
     const field = valField ?? this._defaultValueField();
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
-      const value = this._evaluateSynthetic(synthetic, (sourceField) => {
-        const sourceKey = `${makeKeyString(rowKey)}\x01${sourceField}`;
-        return this._rowTotalSumAggs.get(sourceKey)?.value() ?? null;
-      });
+      const prefix = `${makeKeyString(rowKey)}\x01`;
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => this._rowTotalSumAggs.get(prefix + sf)?.value() ?? null,
+        (sf) => this._rowTotalAggs.get(prefix + sf)?.value() ?? null,
+      );
       return this._fixedAggregator(value);
     }
     const keyStr = `${makeKeyString(rowKey)}\x01${field}`;
@@ -1160,10 +1229,12 @@ export class PivotData {
     const field = valField ?? this._defaultValueField();
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
-      const value = this._evaluateSynthetic(synthetic, (sourceField) => {
-        const sourceKey = `${makeKeyString(colKey)}\x01${sourceField}`;
-        return this._colTotalSumAggs.get(sourceKey)?.value() ?? null;
-      });
+      const prefix = `${makeKeyString(colKey)}\x01`;
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => this._colTotalSumAggs.get(prefix + sf)?.value() ?? null,
+        (sf) => this._colTotalAggs.get(prefix + sf)?.value() ?? null,
+      );
       return this._fixedAggregator(value);
     }
     const keyStr = `${makeKeyString(colKey)}\x01${field}`;
@@ -1183,8 +1254,8 @@ export class PivotData {
     if (synthetic) {
       const value = this._evaluateSynthetic(
         synthetic,
-        (sourceField) =>
-          this._grandTotalSumAggs.get(sourceField)?.value() ?? null,
+        (sf) => this._grandTotalSumAggs.get(sf)?.value() ?? null,
+        (sf) => this._grandTotalAggs.get(sf)?.value() ?? null,
       );
       return this._fixedAggregator(value);
     }
@@ -1291,10 +1362,12 @@ export class PivotData {
     if (synthetic) {
       const aggs = this._buildSubtotalAggs();
       void aggs;
-      const value = this._evaluateSynthetic(synthetic, (sourceField) => {
-        const sourceKey = `${parentKeyStr}\x01${colKeyStr}\x01${sourceField}`;
-        return this._subtotalSumAggs?.get(sourceKey)?.value() ?? null;
-      });
+      const prefix = `${parentKeyStr}\x01${colKeyStr}\x01`;
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => this._subtotalSumAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) => this._subtotalAggs?.get(prefix + sf)?.value() ?? null,
+      );
       return this._fixedAggregator(value);
     }
     const lookupKey = `${parentKeyStr}\x01${colKeyStr}\x01${field}`;
@@ -1604,10 +1677,12 @@ export class PivotData {
     if (synthetic) {
       const aggs = this._buildColSubtotalAggs();
       void aggs;
-      const value = this._evaluateSynthetic(synthetic, (sourceField) => {
-        const sourceKey = `${rowKeyStr}\x01${colPrefixStr}\x01${sourceField}`;
-        return this._colSubtotalSumAggs?.get(sourceKey)?.value() ?? null;
-      });
+      const prefix = `${rowKeyStr}\x01${colPrefixStr}\x01`;
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => this._colSubtotalSumAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) => this._colSubtotalAggs?.get(prefix + sf)?.value() ?? null,
+      );
       return this._fixedAggregator(value);
     }
     const lookupKey = `${rowKeyStr}\x01${colPrefixStr}\x01${field}`;
@@ -1624,15 +1699,18 @@ export class PivotData {
    */
   getColGroupGrandSubtotal(colPrefix: string[], valField: string): Aggregator {
     const colPrefixStr = makeKeyString(colPrefix);
+    const emptyKeyStr = makeKeyString([]);
     const field = valField;
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
       const aggs = this._buildColSubtotalAggs();
       void aggs;
-      const value = this._evaluateSynthetic(synthetic, (sourceField) => {
-        const sourceKey = `${makeKeyString([])}\x01${colPrefixStr}\x01${sourceField}`;
-        return this._colSubtotalSumAggs?.get(sourceKey)?.value() ?? null;
-      });
+      const prefix = `${emptyKeyStr}\x01${colPrefixStr}\x01`;
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => this._colSubtotalSumAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) => this._colSubtotalAggs?.get(prefix + sf)?.value() ?? null,
+      );
       return this._fixedAggregator(value);
     }
     const lookupKey = `${colPrefixStr}\x01${field}`;
@@ -1659,10 +1737,12 @@ export class PivotData {
     const synthetic = this._syntheticById.get(field);
     if (synthetic) {
       this._buildColSubtotalAggs();
-      const value = this._evaluateSynthetic(synthetic, (sourceField) => {
-        const sourceKey = `${parentKeyStr}\x01${colPrefixStr}\x01${sourceField}`;
-        return this._crossSubtotalSumAggs?.get(sourceKey)?.value() ?? null;
-      });
+      const prefix = `${parentKeyStr}\x01${colPrefixStr}\x01`;
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => this._crossSubtotalSumAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) => this._crossSubtotalAggs?.get(prefix + sf)?.value() ?? null,
+      );
       return this._fixedAggregator(value);
     }
     const lookupKey = `${parentKeyStr}\x01${colPrefixStr}\x01${field}`;
@@ -1780,6 +1860,19 @@ export class PivotData {
     modifiedColKey: string[],
     valField: string,
   ): Aggregator {
+    const synthetic = this._syntheticById.get(valField);
+    if (synthetic) {
+      const rowKeyStr = makeKeyString(rowKey);
+      const modifiedColKeyStr = makeKeyString(modifiedColKey);
+      const prefix = `${rowKeyStr}\x01${modifiedColKeyStr}\x01`;
+      const aggs = this._buildTemporalSubtotalAggs();
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+      );
+      return this._fixedAggregator(value);
+    }
     const rowKeyStr = makeKeyString(rowKey);
     const modifiedColKeyStr = makeKeyString(modifiedColKey);
     const lookupKey = `${rowKeyStr}\x01${modifiedColKeyStr}\x01${valField}`;
@@ -1798,6 +1891,18 @@ export class PivotData {
     modifiedColKey: string[],
     valField: string,
   ): Aggregator {
+    const synthetic = this._syntheticById.get(valField);
+    if (synthetic) {
+      const modifiedColKeyStr = makeKeyString(modifiedColKey);
+      const prefix = `${makeKeyString([])}\x01${modifiedColKeyStr}\x01`;
+      const aggs = this._buildTemporalSubtotalAggs();
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+      );
+      return this._fixedAggregator(value);
+    }
     const modifiedColKeyStr = makeKeyString(modifiedColKey);
     const lookupKey = `${modifiedColKeyStr}\x01${valField}`;
 
@@ -1953,6 +2058,19 @@ export class PivotData {
     colKey: string[],
     valField: string,
   ): Aggregator {
+    const synthetic = this._syntheticById.get(valField);
+    if (synthetic) {
+      const modifiedRowKeyStr = makeKeyString(modifiedRowKey);
+      const colKeyStr = makeKeyString(colKey);
+      const prefix = `${modifiedRowKeyStr}\x01${colKeyStr}\x01`;
+      const aggs = this._buildTemporalRowSubtotalAggs();
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+      );
+      return this._fixedAggregator(value);
+    }
     const modifiedRowKeyStr = makeKeyString(modifiedRowKey);
     const colKeyStr = makeKeyString(colKey);
     const lookupKey = `${modifiedRowKeyStr}\x01${colKeyStr}\x01${valField}`;
@@ -1970,6 +2088,18 @@ export class PivotData {
     modifiedRowKey: string[],
     valField: string,
   ): Aggregator {
+    const synthetic = this._syntheticById.get(valField);
+    if (synthetic) {
+      const modifiedRowKeyStr = makeKeyString(modifiedRowKey);
+      const prefix = `${modifiedRowKeyStr}\x01\x01`;
+      const aggs = this._buildTemporalRowSubtotalAggs();
+      const value = this._evaluateSynthetic(
+        synthetic,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+      );
+      return this._fixedAggregator(value);
+    }
     const modifiedRowKeyStr = makeKeyString(modifiedRowKey);
     const lookupKey = `${modifiedRowKeyStr}\x01${valField}`;
 

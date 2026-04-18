@@ -112,6 +112,7 @@ INTERACTIONS_PIVOT_KEYS = [
     "test_pivot_hierarchy_locked",
     "test_pivot_drilldown_pagination",
     "test_pivot_drilldown_pagination_hybrid",
+    "test_pivot_formula",
 ]
 
 DATA_PIVOT_KEYS = [

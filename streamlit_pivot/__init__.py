@@ -1591,6 +1591,180 @@ def _compute_hybrid_drilldown(
     return records, list(page_slice.columns), total_count, page
 
 
+_FORMULA_KNOWN_FUNCTIONS: dict[str, tuple[int, int]] = {
+    "abs": (1, 1),
+    "min": (2, 2),
+    "max": (2, 2),
+    "round": (1, 2),
+    "if": (3, 3),
+}
+
+_FORMULA_TOKEN_RE = re.compile(
+    r"""
+    \s+                          |  # whitespace
+    "([^"]*)"                    |  # quoted field ref (group 1)
+    (\d+(?:\.\d+)?)              |  # number literal (group 2)
+    ([a-zA-Z_]\w*)               |  # identifier/function (group 3)
+    ([+\-*/%<>=!&|^~?:,()]+)    |  # operators/punctuation (group 4)
+    (.)                             # anything else → error (group 5)
+    """,
+    re.VERBOSE,
+)
+
+_FORMULA_ALLOWED_IDENTS = {"true", "false", "E", "PI"}
+_FORMULA_OPERATOR_IDENTS = {"and", "or", "not"}
+_BINARY_ONLY_OPS = {"*", "/", "%", "^", "==", "!=", "<=", ">="}
+
+_OP_SPLIT_RE = re.compile(r"[!=<>]=|.")
+
+
+def _split_op_tokens(ops: str) -> list[str]:
+    """Split a run of operator characters into meaningful tokens like ** or <=."""
+    return _OP_SPLIT_RE.findall(ops)
+
+
+def _validate_formula(formula: str) -> list[str]:
+    """Validate formula syntax and return extracted field references.
+
+    Raises ValueError on syntax errors, unknown identifiers, or wrong arity.
+    """
+    stripped = formula.strip()
+    if not stripped:
+        raise ValueError("Formula is empty")
+
+    refs: list[str] = []
+    paren_depth = 0
+    prev_is_op = True
+    func_call_stack: list[tuple[str, int]] = []
+    pending_func: str | None = None
+
+    for m in _FORMULA_TOKEN_RE.finditer(stripped):
+        if m.group(0).isspace():
+            continue
+
+        if m.group(5) is not None:
+            raise ValueError(f"Unexpected character: {m.group(5)!r}")
+
+        if m.group(1) is not None:
+            refs.append(m.group(1))
+            prev_is_op = False
+            pending_func = None
+            continue
+
+        if m.group(2) is not None:
+            prev_is_op = False
+            pending_func = None
+            continue
+
+        if m.group(3) is not None:
+            name = m.group(3)
+            if name in _FORMULA_KNOWN_FUNCTIONS:
+                pending_func = name
+                prev_is_op = False
+            elif name in _FORMULA_OPERATOR_IDENTS:
+                if name in ("and", "or"):
+                    if prev_is_op:
+                        raise ValueError(f"Unexpected '{name}' — missing operand")
+                prev_is_op = True
+                pending_func = None
+            elif name in _FORMULA_ALLOWED_IDENTS:
+                pending_func = None
+                prev_is_op = False
+            else:
+                raise ValueError(
+                    f"Unknown identifier '{name}'. Wrap field names in quotes"
+                    f" or use a supported function: {sorted(_FORMULA_KNOWN_FUNCTIONS)}"
+                )
+            continue
+
+        ops = m.group(4)
+        if ops is not None:
+            op_tokens = _split_op_tokens(ops)
+            for tok in op_tokens:
+                if tok == "(":
+                    paren_depth += 1
+                    if pending_func is not None:
+                        func_call_stack.append((pending_func, 0))
+                        pending_func = None
+                    else:
+                        func_call_stack.append(("", 0))
+                    prev_is_op = True
+                elif tok == ")":
+                    if paren_depth <= 0:
+                        raise ValueError("Unmatched closing parenthesis")
+                    paren_depth -= 1
+                    if func_call_stack:
+                        fn_name, arg_count = func_call_stack.pop()
+                        if not prev_is_op:
+                            arg_count += 1
+                        if fn_name and fn_name in _FORMULA_KNOWN_FUNCTIONS:
+                            min_a, max_a = _FORMULA_KNOWN_FUNCTIONS[fn_name]
+                            if arg_count < min_a or arg_count > max_a:
+                                expected = (
+                                    f"exactly {min_a}"
+                                    if min_a == max_a
+                                    else f"{min_a}\u2013{max_a}"
+                                )
+                                raise ValueError(
+                                    f"{fn_name}() expects {expected}"
+                                    f" argument(s), got {arg_count}"
+                                )
+                    prev_is_op = False
+                elif tok == ",":
+                    if func_call_stack:
+                        fn_name, arg_count = func_call_stack[-1]
+                        if not prev_is_op:
+                            arg_count += 1
+                        func_call_stack[-1] = (fn_name, arg_count)
+                    prev_is_op = True
+                    pending_func = None
+                    continue
+                elif tok in _BINARY_ONLY_OPS:
+                    if prev_is_op:
+                        raise ValueError(
+                            f"Unexpected operator '{tok}' — missing operand"
+                        )
+                    prev_is_op = True
+                else:
+                    prev_is_op = True
+                pending_func = None
+            continue
+
+    if paren_depth != 0:
+        raise ValueError("Unmatched opening parenthesis")
+
+    if prev_is_op:
+        raise ValueError("Formula ends with an operator — missing operand")
+
+    if not refs:
+        raise ValueError(
+            "Formula must reference at least one field" ' (e.g. \'"Revenue" / "Cost"\')'
+        )
+
+    return list(dict.fromkeys(refs))
+
+
+def _get_synthetic_source_fields(
+    synthetic_measures: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Extract all source fields from synthetic measures (including formula refs)."""
+    fields: list[str] = []
+    for item in synthetic_measures or []:
+        if item.get("operation") == "formula" and item.get("formula"):
+            try:
+                fields.extend(_validate_formula(item["formula"]))
+            except ValueError:
+                fields.extend(re.findall(r'"([^"]+)"', item["formula"]))
+        else:
+            num = item.get("numerator")
+            den = item.get("denominator")
+            if isinstance(num, str):
+                fields.append(num)
+            if isinstance(den, str):
+                fields.append(den)
+    return fields
+
+
 def _normalize_aggregation_config(
     aggregation: str | dict[str, str] | None,
     values: list[str],
@@ -1633,10 +1807,12 @@ def _normalize_config_aggregation(config: Any) -> Any:
     value_list = (
         [v for v in values if isinstance(v, str)] if isinstance(values, list) else []
     )
+    synth_fields = _get_synthetic_source_fields(config.get("synthetic_measures"))
+    all_agg_fields = list(dict.fromkeys(value_list + synth_fields))
     normalized = dict(config)
     normalized["aggregation"] = _normalize_aggregation_config(
         normalized.get("aggregation"),
-        value_list,
+        all_agg_fields,
     )
     return normalized
 
@@ -1786,7 +1962,14 @@ def _default_config(
         values=_values,
         auto_date_hierarchy=auto_date_hierarchy,
         synthetic_measures=synthetic_measures or [],
-        aggregation=_normalize_aggregation_config(aggregation, _values),
+        aggregation=_normalize_aggregation_config(
+            aggregation,
+            list(
+                dict.fromkeys(
+                    _values + _get_synthetic_source_fields(synthetic_measures)
+                )
+            ),
+        ),
         show_totals=show_totals,
         show_row_totals=show_row_totals if show_row_totals is not None else show_totals,
         show_column_totals=show_column_totals
@@ -2410,15 +2593,13 @@ def st_pivot_table(
             raise TypeError("synthetic_measures must be a list of dicts")
         seen_ids: set[str] = set()
         seen_labels: set[str] = set()
-        valid_ops = {"sum_over_sum", "difference"}
+        valid_ops = {"sum_over_sum", "difference", "formula"}
         for i, item in enumerate(synthetic_measures):
             if not isinstance(item, dict):
                 raise TypeError(f"synthetic_measures[{i}] must be a dict")
             sid = item.get("id")
             label = item.get("label")
             op = item.get("operation")
-            numerator = item.get("numerator")
-            denominator = item.get("denominator")
             if not isinstance(sid, str) or sid == "":
                 raise ValueError(
                     f"synthetic_measures[{i}]['id'] must be a non-empty string"
@@ -2435,30 +2616,71 @@ def st_pivot_table(
             seen_labels.add(label)
             if op not in valid_ops:
                 raise ValueError(
-                    f"synthetic_measures[{i}]['operation'] must be one of {sorted(valid_ops)}"
+                    f"synthetic_measures[{i}]['operation'] must be one of"
+                    f" {sorted(valid_ops)}"
                 )
-            if not isinstance(numerator, str) or numerator not in df_cols:
-                raise ValueError(
-                    f"synthetic_measures[{i}]['numerator'] must be a DataFrame column name"
+            if op == "formula":
+                formula_str = item.get("formula")
+                if not isinstance(formula_str, str) or formula_str.strip() == "":
+                    raise ValueError(
+                        f"synthetic_measures[{i}]['formula'] must be a non-empty"
+                        f" string when operation is 'formula'"
+                    )
+                try:
+                    refs = _validate_formula(formula_str)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"synthetic_measures[{i}]['formula'] is invalid: {exc}"
+                    ) from exc
+                missing_refs = [r for r in refs if r not in df_cols]
+                if missing_refs:
+                    raise ValueError(
+                        f"synthetic_measures[{i}]['formula'] references unknown"
+                        f" columns: {missing_refs}."
+                        f" Available: {sorted(df_cols)}"
+                    )
+                normalized_synthetic_measures.append(
+                    {
+                        "id": sid,
+                        "label": label,
+                        "operation": op,
+                        "numerator": "",
+                        "denominator": "",
+                        "formula": formula_str,
+                        "format": item.get("format"),
+                    }
                 )
-            if not isinstance(denominator, str) or denominator not in df_cols:
-                raise ValueError(
-                    f"synthetic_measures[{i}]['denominator'] must be a DataFrame column name"
+            else:
+                numerator = item.get("numerator")
+                denominator = item.get("denominator")
+                if not isinstance(numerator, str) or numerator not in df_cols:
+                    raise ValueError(
+                        f"synthetic_measures[{i}]['numerator'] must be a"
+                        f" DataFrame column name"
+                    )
+                if not isinstance(denominator, str) or denominator not in df_cols:
+                    raise ValueError(
+                        f"synthetic_measures[{i}]['denominator'] must be a"
+                        f" DataFrame column name"
+                    )
+                normalized_synthetic_measures.append(
+                    {
+                        "id": sid,
+                        "label": label,
+                        "operation": op,
+                        "numerator": numerator,
+                        "denominator": denominator,
+                        "format": item.get("format"),
+                    }
                 )
-            normalized_synthetic_measures.append(
-                {
-                    "id": sid,
-                    "label": label,
-                    "operation": op,
-                    "numerator": numerator,
-                    "denominator": denominator,
-                    "format": item.get("format"),
-                }
-            )
 
-    normalized_aggregation = _normalize_aggregation_config(
-        aggregation, resolved_values or []
+    _synth_source_fields = _get_synthetic_source_fields(
+        normalized_synthetic_measures or None
     )
+    _all_agg_fields = list(
+        dict.fromkeys((resolved_values or []) + _synth_source_fields)
+    )
+    normalized_aggregation = _normalize_aggregation_config(aggregation, _all_agg_fields)
 
     # --- Phase 3 validation ---
     if not isinstance(show_subtotals, (bool, list)):

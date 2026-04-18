@@ -853,6 +853,115 @@ st_pivot_table(
 section_synthetic()
 
 # ---------------------------------------------------------------------------
+# Section 9b: Formula-Based Calculated Measures
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("9b. Formula-Based Calculated Measures")
+
+
+@st.fragment
+def section_formula():
+    st.markdown(
+        """
+Formula measures extend synthetic measures with a general expression evaluator.
+Instead of picking a fixed operation (Ratio/Difference), you write an arbitrary
+arithmetic expression that references aggregated fields.
+
+**Key points:**
+- Field references are quoted strings: `"Revenue" / "Cost"`.
+- Fields use their configured aggregation (default: Sum).
+- Built-in functions: `abs()`, `min()`, `max()`, `round()`, `if()`.
+- Null propagation: if any field is null, the result is null.
+- Division by zero returns null.
+- No `eval()` or `new Function()` — CSP-safe AST evaluation.
+
+**Try it:**
+- Open the **Settings Panel** and click **+ Add measure**.
+- Select **Formula** from the Operation dropdown.
+- Type `"Revenue" / "Headcount"` or `if("Headcount" > 0, "Revenue" / "Headcount", 0)`.
+"""
+    )
+
+    df_formula = pd.DataFrame(
+        {
+            "Region": ["East", "East", "West", "West", "North"],
+            "Year": [2023, 2024, 2023, 2024, 2024],
+            "Revenue": [100, 200, 150, 300, 50],
+            "Cost": [40, 80, 60, 100, 20],
+            "Headcount": [5, 8, 3, 10, 2],
+        }
+    )
+
+    st_pivot_table(
+        df_formula,
+        key="formula_measures",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Cost", "Headcount"],
+        synthetic_measures=[
+            {
+                "id": "margin",
+                "label": "Margin",
+                "operation": "formula",
+                "formula": '"Revenue" - "Cost"',
+            },
+            {
+                "id": "margin_pct",
+                "label": "Margin %",
+                "operation": "formula",
+                "formula": 'if("Revenue" > 0, ("Revenue" - "Cost") / "Revenue", 0)',
+                "format": ".1%",
+            },
+            {
+                "id": "rev_per_head",
+                "label": "Rev / Head",
+                "operation": "formula",
+                "formula": '"Revenue" / "Headcount"',
+                "format": ",.1f",
+            },
+        ],
+    )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+st_pivot_table(
+    df_formula,
+    key="formula_measures",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Cost", "Headcount"],
+    synthetic_measures=[
+        {
+            "id": "margin",
+            "label": "Margin",
+            "operation": "formula",
+            "formula": '"Revenue" - "Cost"',
+        },
+        {
+            "id": "margin_pct",
+            "label": "Margin %",
+            "operation": "formula",
+            "formula": 'if("Revenue" > 0, ("Revenue" - "Cost") / "Revenue", 0)',
+            "format": ".1%",
+        },
+        {
+            "id": "rev_per_head",
+            "label": "Rev / Head",
+            "operation": "formula",
+            "formula": '"Revenue" / "Headcount"',
+            "format": ",.1f",
+        },
+    ],
+)
+""",
+            language="python",
+        )
+
+
+section_formula()
+
+# ---------------------------------------------------------------------------
 # Section 10: Sticky Headers, Height, and Max Height
 # ---------------------------------------------------------------------------
 st.divider()

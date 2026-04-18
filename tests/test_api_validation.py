@@ -15,6 +15,9 @@
 
 """Python-side validation tests for the public API."""
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -225,6 +228,252 @@ def test_duplicate_synthetic_measure_ids_raise(pivot_module, sample_df):
                 },
             ],
         )
+
+
+def test_formula_syntax_error_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="is invalid"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "bad",
+                    "label": "Bad",
+                    "operation": "formula",
+                    "formula": '"Revenue" + * "Profit"',
+                },
+            ],
+        )
+
+
+def test_formula_unknown_column_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="references unknown columns"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "typo",
+                    "label": "Typo",
+                    "operation": "formula",
+                    "formula": '"Revenue" - "Cosst"',
+                },
+            ],
+        )
+
+
+def test_formula_wrong_arity_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="expects exactly 2 argument"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "bad",
+                    "label": "Bad",
+                    "operation": "formula",
+                    "formula": 'min("Revenue", "Profit", "Year")',
+                },
+            ],
+        )
+
+
+def test_formula_bare_identifier_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="Unknown identifier"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "bad",
+                    "label": "Bad",
+                    "operation": "formula",
+                    "formula": 'Revenue + "Profit"',
+                },
+            ],
+        )
+
+
+def test_formula_valid_accepted(pivot_module, sample_df):
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        synthetic_measures=[
+            {
+                "id": "margin",
+                "label": "Margin",
+                "operation": "formula",
+                "formula": '"Revenue" - "Profit"',
+            },
+        ],
+    )
+
+
+def test_formula_if_valid(pivot_module, sample_df):
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        synthetic_measures=[
+            {
+                "id": "ratio",
+                "label": "Ratio",
+                "operation": "formula",
+                "formula": 'if("Profit" > 0, "Revenue" / "Profit", 0)',
+            },
+        ],
+    )
+
+
+def test_formula_leading_and_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="is invalid"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "bad",
+                    "label": "Bad",
+                    "operation": "formula",
+                    "formula": 'and "Revenue"',
+                },
+            ],
+        )
+
+
+def test_formula_dangling_and_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="is invalid"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "bad",
+                    "label": "Bad",
+                    "operation": "formula",
+                    "formula": '"Revenue" + and "Profit"',
+                },
+            ],
+        )
+
+
+def test_formula_caret_exponentiation_valid(pivot_module, sample_df):
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        synthetic_measures=[
+            {
+                "id": "sq",
+                "label": "Squared",
+                "operation": "formula",
+                "formula": '"Revenue" ^ 2 + "Profit" ^ 2',
+            },
+        ],
+    )
+
+
+def test_formula_double_star_rejected(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="is invalid"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "sq",
+                    "label": "Squared",
+                    "operation": "formula",
+                    "formula": '"Revenue" ** 2',
+                },
+            ],
+        )
+
+
+def test_formula_trailing_operator_rejected(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="is invalid"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            synthetic_measures=[
+                {
+                    "id": "bad",
+                    "label": "Bad",
+                    "operation": "formula",
+                    "formula": '"Revenue" +',
+                },
+            ],
+        )
+
+
+def test_formula_not_valid(pivot_module, sample_df):
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        synthetic_measures=[
+            {
+                "id": "inv",
+                "label": "Inverted",
+                "operation": "formula",
+                "formula": 'if(not "Revenue", 1, 0)',
+            },
+        ],
+    )
+
+
+_GRAMMAR_CASES = json.loads(
+    (Path(__file__).parent / "formula_grammar_cases.json").read_text()
+)
+
+
+@pytest.mark.parametrize(
+    "case",
+    _GRAMMAR_CASES,
+    ids=[c["note"] for c in _GRAMMAR_CASES],
+)
+def test_formula_grammar_parity(pivot_module, case):
+    """Shared grammar corpus — must agree with TS compileFormula tests."""
+    validate = pivot_module._validate_formula
+    if case["valid"]:
+        refs = validate(case["formula"])
+        assert isinstance(refs, list)
+        assert len(refs) > 0
+    else:
+        with pytest.raises(ValueError):
+            validate(case["formula"])
 
 
 @pytest.mark.parametrize("menu_limit", [0, True])

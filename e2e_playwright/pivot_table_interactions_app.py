@@ -427,6 +427,41 @@ def render_app(data):
         on_config_change=noop,
     )
 
+    st.subheader("Formula Measures")
+    df_formula = pd.DataFrame(
+        {
+            "Region": ["US", "US", "EU", "EU"],
+            "Year": ["2023", "2024", "2023", "2024"],
+            "Revenue": [100, 200, 150, 300],
+            "Cost": [40, 80, 60, 100],
+        }
+    )
+    st_pivot_table(
+        df_formula,
+        key="test_pivot_formula",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Cost"],
+        aggregation="sum",
+        synthetic_measures=[
+            {
+                "id": "margin",
+                "label": "Margin",
+                "operation": "formula",
+                "formula": '"Revenue" - "Cost"',
+            },
+            {
+                "id": "margin_pct",
+                "label": "Margin %",
+                "operation": "formula",
+                "formula": 'if("Revenue" > 0, ("Revenue" - "Cost") / "Revenue", 0)',
+                "format": ".1%",
+            },
+        ],
+        interactive=True,
+        on_config_change=noop,
+    )
+
 
 def main():
     init_page()

@@ -50,6 +50,7 @@ import {
   normalizeAggregationConfig,
   reconcileValueOrder,
   stringifyPivotConfig,
+  getSyntheticSourceFields,
   type AggregationConfig,
   type AggregationType,
   type PivotConfigV1,
@@ -62,6 +63,7 @@ import {
   formatWithPattern,
   isSupportedFormatPattern,
 } from "../engine/formatters";
+import { compileFormula as compileFormulaFn } from "../engine/formulaParser";
 import { useClickOutside } from "../shared/useClickOutside";
 import { useListboxKeyboard } from "../shared/useListboxKeyboard";
 import styles from "./SettingsPanel.module.css";
@@ -121,6 +123,7 @@ const SYNTHETIC_FORMAT_PRESETS = [
 const SYNTHETIC_OPERATION_OPTIONS = [
   { value: "sum_over_sum", label: "Ratio of sums" },
   { value: "difference", label: "Difference of sums" },
+  { value: "formula", label: "Formula" },
 ] as const;
 const SYNTHETIC_FORMAT_PREVIEW_NUMBER = 12345.678;
 const SYNTHETIC_FORMAT_PREVIEW_PERCENT = 0.1234;
@@ -221,10 +224,16 @@ export function cleanupConfigAfterFieldChanges(
 ): PivotConfigV1 {
   let updated = { ...newConfig };
 
-  // Normalize aggregation for current values
+  // Normalize aggregation for current values + formula source fields
+  const allAggFields = [
+    ...new Set([
+      ...updated.values,
+      ...getSyntheticSourceFields(updated.synthetic_measures),
+    ]),
+  ];
   updated.aggregation = normalizeAggregationConfig(
     updated.aggregation,
-    updated.values,
+    allAggFields,
   );
 
   // Fields removed from values
@@ -1142,6 +1151,111 @@ const LockedView: FC<{
 };
 
 // ---------------------------------------------------------------------------
+// Formula help tooltip — rich HTML content on hover
+// ---------------------------------------------------------------------------
+
+const FormulaHelpTooltip: FC = () => {
+  const [show, setShow] = useState(false);
+  const iconRef = useRef<HTMLSpanElement>(null);
+  const [style, setStyle] = useState<React.CSSProperties>({});
+
+  const handleEnter = useCallback(() => {
+    const rect = iconRef.current?.getBoundingClientRect();
+    if (rect) {
+      setStyle({
+        position: "fixed",
+        bottom: `${window.innerHeight - rect.top + 6}px`,
+        left: `${rect.left}px`,
+      });
+    }
+    setShow(true);
+  }, []);
+
+  return (
+    <span
+      ref={iconRef}
+      className={styles.formulaHelpIcon}
+      onMouseEnter={handleEnter}
+      onMouseLeave={() => setShow(false)}
+    >
+      ?
+      {show && (
+        <div className={styles.formulaTooltip} style={style}>
+          <span className={styles.formulaTooltipHeading}>
+            Supported Operations:
+          </span>
+          <ul className={styles.formulaTooltipList}>
+            <li>
+              <strong>Arithmetic:</strong> +, -, *, /, ^, %
+            </li>
+            <li>
+              <strong>Comparison:</strong> {">"}, {">="}, {"<"}, {"<="}, ==, !=
+            </li>
+            <li>
+              <strong>Logical:</strong> and, or, not
+            </li>
+            <li>
+              <strong>Conditional:</strong> if(cond, then, else)
+            </li>
+            <li>
+              <strong>Functions:</strong> abs(), min(), max(), round(x,
+              decimals)
+            </li>
+          </ul>
+          <div className={styles.formulaTooltipNote}>
+            Division by zero or missing fields → null
+          </div>
+        </div>
+      )}
+    </span>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Formula field hint chips — clickable to insert a field reference
+// ---------------------------------------------------------------------------
+
+const FormulaFieldHints: FC<{
+  formula: string;
+  numericColumns: string[];
+  onInsertField: (field: string) => void;
+}> = ({ formula, numericColumns, onInsertField }) => {
+  const lastQuoteIdx = formula.lastIndexOf('"');
+  const partial =
+    lastQuoteIdx >= 0 && lastQuoteIdx === formula.length - 1
+      ? ""
+      : lastQuoteIdx >= 0
+        ? formula.slice(lastQuoteIdx + 1)
+        : "";
+  const filtered =
+    partial.length > 0
+      ? numericColumns.filter((c) =>
+          c.toLowerCase().includes(partial.toLowerCase()),
+        )
+      : numericColumns;
+
+  if (filtered.length === 0) return null;
+
+  return (
+    <div className={styles.formulaFieldHints}>
+      {filtered.slice(0, 8).map((col) => (
+        <button
+          key={col}
+          type="button"
+          className={styles.formulaFieldHintBtn}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onInsertField(col);
+          }}
+        >
+          {col}
+        </button>
+      ))}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Synthetic Measure Builder
 // ---------------------------------------------------------------------------
 
@@ -1149,9 +1263,10 @@ interface SyntheticBuilderState {
   editing: boolean;
   editId: string | null;
   label: string;
-  operation: "sum_over_sum" | "difference";
+  operation: "sum_over_sum" | "difference" | "formula";
   numerator: string;
   denominator: string;
+  formula: string;
   format: string;
   error: string | null;
 }
@@ -1163,6 +1278,7 @@ const initialSyntheticState: SyntheticBuilderState = {
   operation: "sum_over_sum",
   numerator: "",
   denominator: "",
+  formula: "",
   format: "",
   error: null,
 };
@@ -1589,6 +1705,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       operation: "sum_over_sum",
       numerator: allNumeric[0] ?? "",
       denominator: allNumeric[1] ?? allNumeric[0] ?? "",
+      formula: "",
       format: "",
       error: null,
     });
@@ -1602,6 +1719,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       operation: measure.operation,
       numerator: measure.numerator,
       denominator: measure.denominator,
+      formula: measure.formula ?? "",
       format: measure.format ?? "",
       error: null,
     });
@@ -1613,7 +1731,40 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       setSynState((s) => ({ ...s, error: "Name is required." }));
       return;
     }
-    if (!synState.numerator || !synState.denominator) {
+    if (synState.operation === "formula") {
+      const trimmedFormula = synState.formula.trim();
+      if (!trimmedFormula) {
+        setSynState((s) => ({ ...s, error: "Formula is required." }));
+        return;
+      }
+      try {
+        const compiled = compileFormulaFn(trimmedFormula);
+        if (compiled.fieldRefs.length === 0) {
+          setSynState((s) => ({
+            ...s,
+            error: "Formula must reference at least one field.",
+          }));
+          return;
+        }
+        const numericSet = new Set(allNumeric);
+        const unknownRefs = compiled.fieldRefs.filter(
+          (ref) => !numericSet.has(ref),
+        );
+        if (unknownRefs.length > 0) {
+          setSynState((s) => ({
+            ...s,
+            error: `Unknown field(s): ${unknownRefs.map((r) => `"${r}"`).join(", ")}. Check spelling against available fields.`,
+          }));
+          return;
+        }
+      } catch (e: unknown) {
+        setSynState((s) => ({
+          ...s,
+          error: e instanceof Error ? e.message : "Invalid formula.",
+        }));
+        return;
+      }
+    } else if (!synState.numerator || !synState.denominator) {
       setSynState((s) => ({ ...s, error: "Choose both source fields." }));
       return;
     }
@@ -1656,8 +1807,10 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       id,
       label: trimmedLabel,
       operation: synState.operation,
-      numerator: synState.numerator,
-      denominator: synState.denominator,
+      numerator: synState.operation === "formula" ? "" : synState.numerator,
+      denominator: synState.operation === "formula" ? "" : synState.denominator,
+      formula:
+        synState.operation === "formula" ? synState.formula.trim() : undefined,
       format: trimmedFormat || undefined,
     };
     const idx = localSynthetics.findIndex((m) => m.id === synState.editId);
@@ -1674,9 +1827,11 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   }, []);
 
   const formulaPreview =
-    synState.operation === "sum_over_sum"
-      ? `sum(${synState.numerator}) / sum(${synState.denominator})`
-      : `sum(${synState.numerator}) - sum(${synState.denominator})`;
+    synState.operation === "formula"
+      ? synState.formula.trim() || "(enter formula)"
+      : synState.operation === "sum_over_sum"
+        ? `sum(${synState.numerator}) / sum(${synState.denominator})`
+        : `sum(${synState.numerator}) - sum(${synState.denominator})`;
   const trimmedFormat = synState.format.trim();
   const hasValidFormatPreview =
     trimmedFormat !== "" && isSupportedFormatPattern(trimmedFormat);
@@ -2449,34 +2604,84 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                     }))
                   }
                 />
-                {synState.numerator && synState.denominator && (
-                  <div className={styles.formulaHint}>{formulaPreview}</div>
-                )}
+                {synState.operation !== "formula" &&
+                  synState.numerator &&
+                  synState.denominator && (
+                    <div className={styles.formulaHint}>{formulaPreview}</div>
+                  )}
               </div>
-              <div className={styles.builderField}>
-                <span className={styles.builderFieldLabel}>Measure A</span>
-                <BuilderSelect
-                  testId="settings-synthetic-numerator"
-                  ariaLabel="Synthetic measure numerator"
-                  value={synState.numerator}
-                  options={allNumeric.map((c) => ({ value: c, label: c }))}
-                  onChange={(numerator) =>
-                    setSynState((s) => ({ ...s, numerator }))
-                  }
-                />
-              </div>
-              <div className={styles.builderField}>
-                <span className={styles.builderFieldLabel}>Measure B</span>
-                <BuilderSelect
-                  testId="settings-synthetic-denominator"
-                  ariaLabel="Synthetic measure denominator"
-                  value={synState.denominator}
-                  options={allNumeric.map((c) => ({ value: c, label: c }))}
-                  onChange={(denominator) =>
-                    setSynState((s) => ({ ...s, denominator }))
-                  }
-                />
-              </div>
+              {synState.operation === "formula" ? (
+                <div
+                  className={`${styles.builderField} ${styles.formulaSection}`}
+                >
+                  <span className={styles.formulaLabelRow}>
+                    <span className={styles.builderFieldLabel}>Formula</span>
+                    <FormulaHelpTooltip />
+                  </span>
+                  <span className={styles.formulaSubtitle}>
+                    Wrap field names in quotes. Fields use their configured
+                    aggregation (default: Sum).
+                  </span>
+                  <FormulaFieldHints
+                    formula={synState.formula}
+                    numericColumns={allNumeric}
+                    onInsertField={(field) =>
+                      setSynState((s) => ({
+                        ...s,
+                        formula: s.formula + `"${field}"`,
+                        error: null,
+                      }))
+                    }
+                  />
+                  <textarea
+                    className={`${styles.builderInput} ${styles.formulaTextarea}`}
+                    value={synState.formula}
+                    placeholder={'e.g. "Revenue" / "Cost"'}
+                    rows={3}
+                    data-testid="settings-synthetic-formula"
+                    onChange={(e) =>
+                      setSynState((s) => ({
+                        ...s,
+                        formula: e.target.value,
+                        error: null,
+                      }))
+                    }
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className={styles.builderField}>
+                    <span className={styles.builderFieldLabel}>Measure A</span>
+                    <BuilderSelect
+                      testId="settings-synthetic-numerator"
+                      ariaLabel="Synthetic measure numerator"
+                      value={synState.numerator}
+                      options={allNumeric.map((c) => ({
+                        value: c,
+                        label: c,
+                      }))}
+                      onChange={(numerator) =>
+                        setSynState((s) => ({ ...s, numerator }))
+                      }
+                    />
+                  </div>
+                  <div className={styles.builderField}>
+                    <span className={styles.builderFieldLabel}>Measure B</span>
+                    <BuilderSelect
+                      testId="settings-synthetic-denominator"
+                      ariaLabel="Synthetic measure denominator"
+                      value={synState.denominator}
+                      options={allNumeric.map((c) => ({
+                        value: c,
+                        label: c,
+                      }))}
+                      onChange={(denominator) =>
+                        setSynState((s) => ({ ...s, denominator }))
+                      }
+                    />
+                  </div>
+                </>
+              )}
               <div className={styles.builderField}>
                 <span className={styles.builderFieldLabel}>
                   Format (optional)

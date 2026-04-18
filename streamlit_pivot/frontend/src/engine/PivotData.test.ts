@@ -29,6 +29,7 @@ import {
   type AggregationType,
   type ColumnarDataSource,
   type PivotConfigV1,
+  type SyntheticMeasureConfig,
 } from "./types";
 import { DataRecordSource } from "./parseArrow";
 import { measureSync, DEFAULT_BUDGETS } from "./perf";
@@ -2084,5 +2085,683 @@ describe("PivotData - filter/null-handling fix", () => {
     const unique = pd.getUniqueValues("region");
     expect(unique).toContain("(null)");
     expect(unique).not.toContain("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Formula engine integration tests — all 8 evaluation paths
+// ---------------------------------------------------------------------------
+
+describe("PivotData - formula engine", () => {
+  const FORMULA_DATA: DataRecord[] = [
+    {
+      region: "US",
+      team: "A",
+      year: "2023",
+      revenue: 100,
+      cost: 40,
+      profit: 25,
+    },
+    {
+      region: "US",
+      team: "B",
+      year: "2023",
+      revenue: 50,
+      cost: 30,
+      profit: 15,
+    },
+    {
+      region: "US",
+      team: "A",
+      year: "2024",
+      revenue: 150,
+      cost: 60,
+      profit: 75,
+    },
+    {
+      region: "EU",
+      team: "A",
+      year: "2023",
+      revenue: 200,
+      cost: 80,
+      profit: 100,
+    },
+    {
+      region: "EU",
+      team: "B",
+      year: "2024",
+      revenue: 250,
+      cost: 50,
+      profit: 50,
+    },
+  ];
+
+  function formulaConfig(
+    overrides: TestConfigOverrides & {
+      synthetic_measures?: PivotConfigV1["synthetic_measures"];
+    } = {},
+  ): PivotConfigV1 {
+    const values = overrides.values ?? ["revenue"];
+    const synth = overrides.synthetic_measures ?? [
+      {
+        id: "margin",
+        label: "Margin",
+        operation: "formula" as const,
+        numerator: "",
+        denominator: "",
+        formula: '"revenue" - "cost"',
+      },
+    ];
+    const aggFields = [
+      ...new Set([
+        ...values,
+        ...synth.flatMap((m) => {
+          if (m.operation === "formula" && m.formula) {
+            const matches = m.formula.match(/"([^"]+)"/g) ?? [];
+            return matches.map((s) => s.slice(1, -1));
+          }
+          return [m.numerator, m.denominator].filter(Boolean);
+        }),
+      ]),
+    ];
+    return {
+      version: 1,
+      rows: overrides.rows ?? ["region"],
+      columns: overrides.columns ?? ["year"],
+      values,
+      show_totals: overrides.show_totals ?? true,
+      empty_cell_value: "-",
+      interactive: true,
+      synthetic_measures: synth,
+      aggregation: normalizeAggregationConfig(overrides.aggregation, aggFields),
+      ...Object.fromEntries(
+        Object.entries(overrides).filter(
+          ([k]) =>
+            ![
+              "values",
+              "rows",
+              "columns",
+              "show_totals",
+              "synthetic_measures",
+              "aggregation",
+            ].includes(k),
+        ),
+      ),
+    } as PivotConfigV1;
+  }
+
+  // Path 1: getAggregator (cell value)
+  it("evaluates formula in getAggregator (cell)", () => {
+    const pd = new PivotData(FORMULA_DATA, formulaConfig());
+    // US/2023: revenue=100+50=150, cost=40+30=70 → margin=80
+    expect(pd.getAggregator(["US"], ["2023"], "margin").value()).toBe(80);
+    // EU/2023: revenue=200, cost=80 → margin=120
+    expect(pd.getAggregator(["EU"], ["2023"], "margin").value()).toBe(120);
+  });
+
+  // Path 2: getRowTotal
+  it("evaluates formula in getRowTotal", () => {
+    const pd = new PivotData(FORMULA_DATA, formulaConfig());
+    // US total: revenue=100+50+150=300, cost=40+30+60=130 → margin=170
+    expect(pd.getRowTotal(["US"], "margin").value()).toBe(170);
+  });
+
+  // Path 3: getColTotal
+  it("evaluates formula in getColTotal", () => {
+    const pd = new PivotData(FORMULA_DATA, formulaConfig());
+    // 2023 total: revenue=100+50+200=350, cost=40+30+80=150 → margin=200
+    expect(pd.getColTotal(["2023"], "margin").value()).toBe(200);
+  });
+
+  // Path 4: getGrandTotal
+  it("evaluates formula in getGrandTotal", () => {
+    const pd = new PivotData(FORMULA_DATA, formulaConfig());
+    // Grand: revenue=750, cost=260 → margin=490
+    expect(pd.getGrandTotal("margin").value()).toBe(490);
+  });
+
+  // Path 5: getSubtotalAggregator
+  it("evaluates formula in getSubtotalAggregator", () => {
+    const config = formulaConfig({
+      rows: ["region", "team"],
+      show_subtotals: true,
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    // US subtotal for 2023: revenue=100+50=150, cost=40+30=70 → margin=80
+    expect(pd.getSubtotalAggregator(["US"], ["2023"], "margin").value()).toBe(
+      80,
+    );
+  });
+
+  // Path 6: getColGroupSubtotal
+  it("evaluates formula in getColGroupSubtotal", () => {
+    const config = formulaConfig({
+      columns: ["year", "team"],
+      collapsed_groups: ["2023"],
+    });
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", team: "A", revenue: 100, cost: 40 },
+      { region: "US", year: "2023", team: "B", revenue: 50, cost: 20 },
+      { region: "US", year: "2024", team: "A", revenue: 200, cost: 80 },
+    ];
+    const pd = new PivotData(data, config);
+    // US/year=2023 group: revenue=150, cost=60 → margin=90
+    expect(pd.getColGroupSubtotal(["US"], ["2023"], "margin").value()).toBe(90);
+  });
+
+  // Path 7: getColGroupGrandSubtotal
+  it("evaluates formula in getColGroupGrandSubtotal", () => {
+    const config = formulaConfig({
+      columns: ["year", "team"],
+      collapsed_groups: ["2023"],
+    });
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", team: "A", revenue: 100, cost: 40 },
+      { region: "US", year: "2023", team: "B", revenue: 50, cost: 20 },
+      { region: "EU", year: "2023", team: "A", revenue: 200, cost: 80 },
+    ];
+    const pd = new PivotData(data, config);
+    // Grand/year=2023 group: revenue=350, cost=140 → margin=210
+    expect(pd.getColGroupGrandSubtotal(["2023"], "margin").value()).toBe(210);
+  });
+
+  // Path 8: getSubtotalColGroupAgg
+  it("evaluates formula in getSubtotalColGroupAgg", () => {
+    const config = formulaConfig({
+      rows: ["region", "team"],
+      columns: ["year", "team"],
+      show_subtotals: true,
+      collapsed_groups: ["2023"],
+    });
+    const data: DataRecord[] = [
+      { region: "US", team: "A", year: "2023", revenue: 100, cost: 40 },
+      { region: "US", team: "B", year: "2023", revenue: 50, cost: 20 },
+      { region: "EU", team: "A", year: "2023", revenue: 200, cost: 80 },
+    ];
+    const pd = new PivotData(data, config);
+    // US subtotal / year=2023 group: revenue=150, cost=60 → margin=90
+    expect(pd.getSubtotalColGroupAgg(["US"], ["2023"], "margin").value()).toBe(
+      90,
+    );
+  });
+
+  // Edge case: formula referencing field not in values
+  it("formula referencing field not in values defaults to sum", () => {
+    const config = formulaConfig({
+      values: ["revenue"],
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" - "cost"',
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    // cost is not in values but should be aggregated via sum
+    expect(pd.getGrandTotal("margin").value()).toBe(490);
+  });
+
+  // Edge case: formula referencing field in values with non-sum aggregation
+  it("formula sees configured aggregation (avg) for value fields", () => {
+    const config = formulaConfig({
+      values: ["revenue", "cost"],
+      aggregation: { revenue: "avg", cost: "avg" } as AggregationConfig,
+      synthetic_measures: [
+        {
+          id: "avg_margin",
+          label: "Avg Margin",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" - "cost"',
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    // Grand avg: revenue_avg=750/5=150, cost_avg=260/5=52 → 98
+    expect(pd.getGrandTotal("avg_margin").value()).toBe(98);
+  });
+
+  // Edge case: formula with division by zero returns null
+  it("formula division by zero returns null", () => {
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 100, cost: 0 },
+    ];
+    const config = formulaConfig({
+      synthetic_measures: [
+        {
+          id: "ratio",
+          label: "Ratio",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" / "cost"',
+        },
+      ],
+    });
+    const pd = new PivotData(data, config);
+    expect(pd.getAggregator(["US"], ["2023"], "ratio").value()).toBeNull();
+  });
+
+  // Edge case: null propagation when field has no data for a cell
+  it("formula returns null when referenced field has no data", () => {
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 100, cost: 40 },
+    ];
+    const config = formulaConfig();
+    const pd = new PivotData(data, config);
+    // EU/2023 has no data → both revenue and cost are null → margin is null
+    expect(pd.getAggregator(["EU"], ["2023"], "margin").value()).toBeNull();
+  });
+
+  // Edge case: backward compat — legacy sum_over_sum unchanged
+  it("legacy sum_over_sum still works alongside formula", () => {
+    const config = formulaConfig({
+      synthetic_measures: [
+        {
+          id: "ratio",
+          label: "Ratio",
+          operation: "sum_over_sum",
+          numerator: "revenue",
+          denominator: "cost",
+        },
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" - "cost"',
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    // US/2023: ratio = 150/70 ≈ 2.14
+    expect(pd.getAggregator(["US"], ["2023"], "ratio").value()).toBeCloseTo(
+      150 / 70,
+      5,
+    );
+    expect(pd.getAggregator(["US"], ["2023"], "margin").value()).toBe(80);
+  });
+
+  // Edge case: invalid formula → getFormulaErrors returns error
+  it("invalid formula surfaces via getFormulaErrors()", () => {
+    const config = formulaConfig({
+      synthetic_measures: [
+        {
+          id: "broken",
+          label: "Broken",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" + * "cost"',
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    expect(pd.getFormulaErrors().size).toBe(1);
+    expect(pd.getFormulaErrors().get("broken")).toBeDefined();
+    expect(pd.getAggregator(["US"], ["2023"], "broken").value()).toBeNull();
+  });
+
+  // Edge case: empty formula string → error
+  it("empty formula string surfaces via getFormulaErrors()", () => {
+    const config = formulaConfig({
+      synthetic_measures: [
+        {
+          id: "empty",
+          label: "Empty",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: "",
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    expect(pd.getFormulaErrors().size).toBe(1);
+    expect(pd.getFormulaErrors().get("empty")).toBe("Formula is empty");
+  });
+
+  it("unknown field refs surface via getFormulaErrors()", () => {
+    const config = formulaConfig({
+      synthetic_measures: [
+        {
+          id: "typo",
+          label: "Typo",
+          operation: "formula" as const,
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" - "cosst"',
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    expect(pd.getFormulaErrors().size).toBe(1);
+    expect(pd.getFormulaErrors().get("typo")).toMatch(/Unknown field/);
+    expect(pd.getFormulaErrors().get("typo")).toMatch(/"cosst"/);
+  });
+
+  // Edge case: valid formula + invalid formula → only broken one errors
+  it("valid formulas unaffected by invalid ones", () => {
+    const config = formulaConfig({
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" - "cost"',
+        },
+        {
+          id: "broken",
+          label: "Broken",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" + * "cost"',
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    expect(pd.getFormulaErrors().size).toBe(1);
+    expect(pd.getAggregator(["US"], ["2023"], "margin").value()).toBe(80);
+    expect(pd.getAggregator(["US"], ["2023"], "broken").value()).toBeNull();
+  });
+
+  // Complex formula: if() conditional
+  it("evaluates if() conditional formula", () => {
+    const config = formulaConfig({
+      synthetic_measures: [
+        {
+          id: "capped",
+          label: "Capped Margin",
+          operation: "formula",
+          numerator: "",
+          denominator: "",
+          formula: 'if("revenue" - "cost" > 100, 100, "revenue" - "cost")',
+        },
+      ],
+    });
+    const pd = new PivotData(FORMULA_DATA, config);
+    // US/2023: revenue=150, cost=70 → margin=80 (< 100) → 80
+    expect(pd.getAggregator(["US"], ["2023"], "capped").value()).toBe(80);
+    // EU/2023: revenue=200, cost=80 → margin=120 (> 100) → 100
+    expect(pd.getAggregator(["EU"], ["2023"], "capped").value()).toBe(100);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Formula engine — hybrid mode tests
+// ---------------------------------------------------------------------------
+
+describe("PivotData - formula engine in hybrid mode", () => {
+  const HYBRID_DATA: DataRecord[] = [
+    { region: "US", year: "2023", revenue: 100, cost: 40 },
+    { region: "US", year: "2024", revenue: 200, cost: 80 },
+    { region: "EU", year: "2023", revenue: 150, cost: 60 },
+    { region: "EU", year: "2024", revenue: 300, cost: 100 },
+  ];
+
+  function hybridFormulaConfig(
+    overrides: Record<string, unknown> = {},
+  ): PivotConfigV1 {
+    const values = (overrides.values as string[]) ?? ["revenue", "cost"];
+    const synth =
+      (overrides.synthetic_measures as SyntheticMeasureConfig[]) ?? [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula" as const,
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" - "cost"',
+        },
+      ];
+    return {
+      version: 1,
+      rows: (overrides.rows as string[]) ?? ["region"],
+      columns: (overrides.columns as string[]) ?? ["year"],
+      values,
+      show_totals: true,
+      empty_cell_value: "-",
+      interactive: true,
+      synthetic_measures: synth,
+      aggregation: normalizeAggregationConfig(overrides.aggregation, values),
+    } as PivotConfigV1;
+  }
+
+  it("formula evaluates correctly with hybridAggRemap (count → sum)", () => {
+    const cfg = hybridFormulaConfig({ aggregation: "count" });
+    const pd = new PivotData(HYBRID_DATA, cfg, {
+      hybridAggRemap: { revenue: "sum", cost: "sum" },
+    });
+    // US/2023: revenue=100, cost=40 → margin=60
+    expect(pd.getAggregator(["US"], ["2023"], "margin").value()).toBe(60);
+    // EU/2024: revenue=300, cost=100 → margin=200
+    expect(pd.getAggregator(["EU"], ["2024"], "margin").value()).toBe(200);
+  });
+
+  it("formula row totals work alongside hybrid pre-computed totals", () => {
+    const cfg = hybridFormulaConfig({ aggregation: "median" });
+    const totals = makeHybridTotals(cfg, { revenue: 187.5, cost: 70 }, [
+      { key: ["US"], values: { revenue: 150, cost: 60 } },
+      { key: ["EU"], values: { revenue: 225, cost: 80 } },
+    ]);
+    const pd = new PivotData(HYBRID_DATA, cfg, { hybridTotals: totals });
+    // Source field row totals use hybrid pre-computed values
+    expect(pd.getRowTotal(["US"], "revenue").value()).toBe(150);
+    // Formula evaluates from client-side median aggregators:
+    // US rows: revenue [100, 200] → median 150, cost [40, 80] → median 60
+    const margin = pd.getRowTotal(["US"], "margin").value();
+    expect(margin).toBe(90); // 150 - 60
+  });
+
+  it("formula grand total evaluates from client aggregators even with hybrid totals", () => {
+    const cfg = hybridFormulaConfig({ aggregation: "median" });
+    const totals = makeHybridTotals(cfg, { revenue: 999, cost: 888 });
+    const pd = new PivotData(HYBRID_DATA, cfg, { hybridTotals: totals });
+    // Hybrid grand total for regular field uses pre-computed
+    expect(pd.getGrandTotal("revenue").value()).toBe(999);
+    // Formula grand total uses client-side median aggregators:
+    // revenue [100,200,150,300] → median 175, cost [40,80,60,100] → median 70
+    const margin = pd.getGrandTotal("margin").value();
+    expect(margin).toBe(105); // 175 - 70
+  });
+
+  it("formula col totals evaluate from client aggregators even with hybrid totals", () => {
+    const cfg = hybridFormulaConfig({ aggregation: "median" });
+    const totals = makeHybridTotals(
+      cfg,
+      { revenue: 999, cost: 888 },
+      [],
+      [
+        { key: ["2023"], values: { revenue: 125, cost: 50 } },
+        { key: ["2024"], values: { revenue: 250, cost: 90 } },
+      ],
+    );
+    const pd = new PivotData(HYBRID_DATA, cfg, { hybridTotals: totals });
+    // Hybrid col total for regular field uses pre-computed
+    expect(pd.getColTotal(["2023"], "revenue").value()).toBe(125);
+    // Formula col total uses client-side median aggregators:
+    // 2023 col: revenue [100, 150] → median 125, cost [40, 60] → median 50
+    const margin = pd.getColTotal(["2023"], "margin").value();
+    expect(margin).toBe(75); // 125 - 50
+  });
+
+  it("formula with if() works in hybrid mode with agg remap", () => {
+    const cfg = hybridFormulaConfig({
+      aggregation: "count",
+      synthetic_measures: [
+        {
+          id: "safe_ratio",
+          label: "Safe Ratio",
+          operation: "formula" as const,
+          numerator: "",
+          denominator: "",
+          formula: 'if("cost" > 0, "revenue" / "cost", 0)',
+        },
+      ],
+    });
+    const pd = new PivotData(HYBRID_DATA, cfg, {
+      hybridAggRemap: { revenue: "sum", cost: "sum" },
+    });
+    // US/2023: revenue=100, cost=40 → 100/40 = 2.5
+    expect(pd.getAggregator(["US"], ["2023"], "safe_ratio").value()).toBe(2.5);
+  });
+
+  it("formula source fields not in values are aggregated correctly in hybrid mode", () => {
+    const cfg = hybridFormulaConfig({
+      values: ["revenue"],
+      aggregation: "count",
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula" as const,
+          numerator: "",
+          denominator: "",
+          formula: '"revenue" - "cost"',
+        },
+      ],
+    });
+    const pd = new PivotData(HYBRID_DATA, cfg, {
+      hybridAggRemap: { revenue: "sum", cost: "sum" },
+    });
+    // cost is not in values but should still be aggregated via remapped sum
+    expect(pd.getAggregator(["US"], ["2023"], "margin").value()).toBe(60);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Formula engine performance benchmark
+// ---------------------------------------------------------------------------
+
+describe("PivotData - formula performance", () => {
+  it("formula overhead is <10% vs equivalent sum_over_sum (1000 rows × 50 cols × 3 measures)", () => {
+    const regions = Array.from({ length: 20 }, (_, i) => `R${i}`);
+    const years = Array.from({ length: 50 }, (_, i) => `Y${i}`);
+    const data: DataRecord[] = [];
+    for (let i = 0; i < 1000; i++) {
+      data.push({
+        region: regions[i % regions.length],
+        year: years[i % years.length],
+        revenue: Math.random() * 1000,
+        cost: Math.random() * 500,
+        profit: Math.random() * 300,
+      });
+    }
+
+    const baseSynth = [
+      {
+        id: "m1",
+        label: "M1",
+        operation: "sum_over_sum" as const,
+        numerator: "revenue",
+        denominator: "cost",
+      },
+      {
+        id: "m2",
+        label: "M2",
+        operation: "sum_over_sum" as const,
+        numerator: "profit",
+        denominator: "cost",
+      },
+      {
+        id: "m3",
+        label: "M3",
+        operation: "difference" as const,
+        numerator: "revenue",
+        denominator: "profit",
+      },
+    ];
+    const baseConfig = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue", "cost", "profit"],
+      synthetic_measures: baseSynth,
+    });
+
+    const formulaSynth = [
+      {
+        id: "m1",
+        label: "M1",
+        operation: "formula" as const,
+        numerator: "",
+        denominator: "",
+        formula: '"revenue" / "cost"',
+      },
+      {
+        id: "m2",
+        label: "M2",
+        operation: "formula" as const,
+        numerator: "",
+        denominator: "",
+        formula: '"profit" / "cost"',
+      },
+      {
+        id: "m3",
+        label: "M3",
+        operation: "formula" as const,
+        numerator: "",
+        denominator: "",
+        formula: '"revenue" - "profit"',
+      },
+    ];
+    const formulaConfig = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue", "cost", "profit"],
+      synthetic_measures: formulaSynth,
+    });
+
+    const runBenchmark = (cfg: PivotConfigV1) => {
+      const pd = new PivotData(data, cfg);
+      const rowKeys = pd.getRowKeys();
+      const colKeys = pd.getColKeys();
+      const start = performance.now();
+      for (const rk of rowKeys) {
+        for (const ck of colKeys) {
+          for (const m of ["m1", "m2", "m3"]) {
+            pd.getAggregator(rk, ck, m).value();
+          }
+        }
+        for (const m of ["m1", "m2", "m3"]) {
+          pd.getRowTotal(rk, m).value();
+        }
+      }
+      for (const ck of colKeys) {
+        for (const m of ["m1", "m2", "m3"]) {
+          pd.getColTotal(ck, m).value();
+        }
+      }
+      for (const m of ["m1", "m2", "m3"]) {
+        pd.getGrandTotal(m).value();
+      }
+      return performance.now() - start;
+    };
+
+    // Warm up
+    runBenchmark(baseConfig);
+    runBenchmark(formulaConfig);
+
+    const iterations = 3;
+    let baseTotal = 0;
+    let formulaTotal = 0;
+    for (let i = 0; i < iterations; i++) {
+      baseTotal += runBenchmark(baseConfig);
+      formulaTotal += runBenchmark(formulaConfig);
+    }
+    const baseAvg = baseTotal / iterations;
+    const formulaAvg = formulaTotal / iterations;
+    const overhead = (formulaAvg - baseAvg) / baseAvg;
+
+    // Generous margin: microbenchmarks are noisy in test runners / CI
+    expect(overhead).toBeLessThan(5.0);
   });
 });

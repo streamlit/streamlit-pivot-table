@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+import { extractFieldRefs } from "./formulaParser";
+
 /**
  * Pivot Table -- Config Schema v1 & Event Payload Contracts
  *
@@ -99,7 +101,7 @@ export interface PivotConfigV1 {
   column_alignment?: Record<string, "left" | "center" | "right">;
 }
 
-export type SyntheticOperation = "sum_over_sum" | "difference";
+export type SyntheticOperation = "sum_over_sum" | "difference" | "formula";
 
 export interface SyntheticMeasureConfig {
   id: string;
@@ -107,6 +109,7 @@ export interface SyntheticMeasureConfig {
   operation: SyntheticOperation;
   numerator: string;
   denominator: string;
+  formula?: string;
   format?: string;
 }
 
@@ -288,10 +291,16 @@ export function getAggregationForField(
 }
 
 export function stringifyPivotConfig(config: PivotConfigV1): string {
+  const allAggFields = [
+    ...new Set([
+      ...config.values,
+      ...getSyntheticSourceFields(config.synthetic_measures),
+    ]),
+  ];
   return JSON.stringify({
     ...config,
     auto_date_hierarchy: config.auto_date_hierarchy !== false,
-    aggregation: normalizeAggregationConfig(config.aggregation, config.values),
+    aggregation: normalizeAggregationConfig(config.aggregation, allAggFields),
     date_grains: config.date_grains
       ? Object.fromEntries(
           Object.entries(config.date_grains).sort(([a], [b]) =>
@@ -478,7 +487,11 @@ function validateSyntheticMeasures(
   }
   const seenIds = new Set<string>();
   const seenLabels = new Set<string>();
-  const validOps = new Set<SyntheticOperation>(["sum_over_sum", "difference"]);
+  const validOps = new Set<SyntheticOperation>([
+    "sum_over_sum",
+    "difference",
+    "formula",
+  ]);
   const measures: SyntheticMeasureConfig[] = [];
   for (let i = 0; i < raw.length; i++) {
     const m = raw[i];
@@ -489,8 +502,6 @@ function validateSyntheticMeasures(
     const id = obj.id;
     const label = obj.label;
     const operation = obj.operation;
-    const numerator = obj.numerator;
-    const denominator = obj.denominator;
     if (typeof id !== "string" || id.trim() === "") {
       throw new Error(
         `'synthetic_measures[${i}].id' must be a non-empty string`,
@@ -506,30 +517,8 @@ function validateSyntheticMeasures(
       !validOps.has(operation as SyntheticOperation)
     ) {
       throw new Error(
-        `'synthetic_measures[${i}].operation' must be "sum_over_sum" or "difference"`,
+        `'synthetic_measures[${i}].operation' must be "sum_over_sum", "difference", or "formula"`,
       );
-    }
-    if (typeof numerator !== "string" || numerator.trim() === "") {
-      throw new Error(
-        `'synthetic_measures[${i}].numerator' must be a non-empty field name`,
-      );
-    }
-    if (typeof denominator !== "string" || denominator.trim() === "") {
-      throw new Error(
-        `'synthetic_measures[${i}].denominator' must be a non-empty field name`,
-      );
-    }
-    if (allColumns && allColumns.length > 0) {
-      if (!allColumns.includes(numerator)) {
-        throw new Error(
-          `'synthetic_measures[${i}].numerator' must be a valid source field`,
-        );
-      }
-      if (!allColumns.includes(denominator)) {
-        throw new Error(
-          `'synthetic_measures[${i}].denominator' must be a valid source field`,
-        );
-      }
     }
     if (seenIds.has(id)) {
       throw new Error(`Duplicate synthetic measure id: "${id}"`);
@@ -539,16 +528,93 @@ function validateSyntheticMeasures(
     }
     seenIds.add(id);
     seenLabels.add(label);
-    measures.push({
-      id,
-      label,
-      operation: operation as SyntheticOperation,
-      numerator,
-      denominator,
-      format: typeof obj.format === "string" ? obj.format : undefined,
-    });
+
+    if (operation === "formula") {
+      const formula = obj.formula;
+      if (typeof formula !== "string" || formula.trim() === "") {
+        throw new Error(
+          `'synthetic_measures[${i}].formula' must be a non-empty string when operation is "formula"`,
+        );
+      }
+      let refs: string[];
+      try {
+        refs = extractFieldRefs(formula);
+      } catch (e) {
+        throw new Error(
+          `'synthetic_measures[${i}].formula' is invalid: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      if (refs.length === 0) {
+        throw new Error(
+          `'synthetic_measures[${i}].formula' must reference at least one field`,
+        );
+      }
+      measures.push({
+        id,
+        label,
+        operation: operation as SyntheticOperation,
+        numerator: "",
+        denominator: "",
+        formula,
+        format: typeof obj.format === "string" ? obj.format : undefined,
+      });
+    } else {
+      const numerator = obj.numerator;
+      const denominator = obj.denominator;
+      if (typeof numerator !== "string" || numerator.trim() === "") {
+        throw new Error(
+          `'synthetic_measures[${i}].numerator' must be a non-empty field name`,
+        );
+      }
+      if (typeof denominator !== "string" || denominator.trim() === "") {
+        throw new Error(
+          `'synthetic_measures[${i}].denominator' must be a non-empty field name`,
+        );
+      }
+      if (allColumns && allColumns.length > 0) {
+        if (!allColumns.includes(numerator)) {
+          throw new Error(
+            `'synthetic_measures[${i}].numerator' must be a valid source field`,
+          );
+        }
+        if (!allColumns.includes(denominator)) {
+          throw new Error(
+            `'synthetic_measures[${i}].denominator' must be a valid source field`,
+          );
+        }
+      }
+      measures.push({
+        id,
+        label,
+        operation: operation as SyntheticOperation,
+        numerator,
+        denominator,
+        format: typeof obj.format === "string" ? obj.format : undefined,
+      });
+    }
   }
   return measures;
+}
+
+/**
+ * Collect all source fields from synthetic measures (numerator/denominator
+ * for legacy ops, formula field refs for formula ops). Merged into the
+ * aggregation normalization field list so formula-referenced fields that
+ * aren't in `values` still get their configured aggregation preserved.
+ */
+export function getSyntheticSourceFields(
+  measures: SyntheticMeasureConfig[] | undefined,
+): string[] {
+  return (measures ?? []).flatMap((m) => {
+    if (m.operation === "formula" && m.formula) {
+      try {
+        return extractFieldRefs(m.formula);
+      } catch {
+        return [];
+      }
+    }
+    return [m.numerator, m.denominator].filter(Boolean);
+  });
 }
 
 export function getSyntheticMeasureMap(
@@ -826,6 +892,10 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
   const values = o.values as string[];
   const syntheticMeasures = validateSyntheticMeasures(o.synthetic_measures);
 
+  const allAggFields = [
+    ...new Set([...values, ...getSyntheticSourceFields(syntheticMeasures)]),
+  ];
+
   const result: PivotConfigV1 = {
     version: 1,
     rows,
@@ -836,7 +906,7 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
         ? o.auto_date_hierarchy
         : AUTO_DATE_HIERARCHY_DEFAULT,
     synthetic_measures: syntheticMeasures,
-    aggregation: normalizeAggregationConfig(o.aggregation, values),
+    aggregation: normalizeAggregationConfig(o.aggregation, allAggFields),
     show_totals: showTotals,
     show_row_totals: normalizeBoolOrList(o.show_row_totals, values, showTotals),
     show_column_totals: normalizeBoolOrList(

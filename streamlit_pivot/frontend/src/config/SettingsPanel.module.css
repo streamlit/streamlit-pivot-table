@@ -701,6 +701,124 @@
   margin-top: 1px;
 }
 
+.formulaSection {
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+.formulaLabelRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.formulaHelpIcon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 30%, transparent);
+  font-size: 0.5em;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--st-text-color) 50%, transparent);
+  cursor: help;
+  flex-shrink: 0;
+}
+.formulaHelpIcon:hover {
+  border-color: color-mix(in srgb, var(--st-text-color) 55%, transparent);
+  color: color-mix(in srgb, var(--st-text-color) 75%, transparent);
+}
+
+.formulaTooltip {
+  position: fixed;
+  z-index: 9999;
+  padding: 8px 10px;
+  border-radius: var(--st-base-radius);
+  background: var(--st-text-color);
+  color: var(--st-background-color);
+  font-family: var(--st-font);
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.formulaTooltipHeading {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  opacity: 0.55;
+  margin-bottom: 2px;
+}
+
+.formulaTooltipList {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+.formulaTooltipList li {
+  margin: 1px 0;
+}
+
+.formulaTooltipNote {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--st-background-color) 20%, transparent);
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.formulaSubtitle {
+  font-size: 0.65em;
+  color: color-mix(in srgb, var(--st-text-color) 40%, transparent);
+  margin-bottom: 2px;
+}
+
+.formulaTextarea {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  resize: vertical;
+  min-height: 48px;
+  line-height: 1.2;
+  font-size: 0.75em;
+}
+
+.formulaFieldHints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 3px;
+}
+
+.formulaFieldHintBtn {
+  all: unset;
+  font-size: 0.7em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 20%, transparent);
+  background: color-mix(in srgb, var(--st-text-color) 5%, transparent);
+  color: var(--st-text-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.formulaFieldHintBtn:hover {
+  background: color-mix(in srgb, var(--st-text-color) 14%, transparent);
+  border-color: color-mix(in srgb, var(--st-text-color) 35%, transparent);
+}
+
+.formulaErrorChip {
+  outline: 1.5px solid var(--st-color-error, #ff4b4b);
+}
+
+.formulaWarningIcon {
+  color: var(--st-color-warning, #faca2b);
+  margin-left: 4px;
+  font-size: 0.85em;
+}
+
 .formatPresets {
   display: flex;
   gap: 4px;

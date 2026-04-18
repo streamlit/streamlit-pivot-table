@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Locator, Page, expect
 
 from e2e_utils import get_pivot, open_settings_panel
 from pivot_table_app_support import _load_main_fixture
@@ -2012,4 +2012,169 @@ def test_settings_panel_also_add_to_columns_from_available_fields(page_at_app: P
     expect(panel.get_by_test_id("settings-values-chip-Revenue")).to_be_visible()
     expect(panel.get_by_test_id("settings-columns-chip-Revenue")).to_be_visible()
 
+    panel.get_by_test_id("settings-cancel").click()
+
+
+# ---------------------------------------------------------------------------
+# Formula measures E2E tests
+# ---------------------------------------------------------------------------
+
+
+def _select_builder_option(
+    page: Page, panel: Locator, test_id: str, value: str
+) -> None:
+    """Choose an option from a SettingsPanel BuilderSelect control."""
+    panel.get_by_test_id(test_id).click()
+    option = page.get_by_test_id(f"{test_id}-{value}")
+    expect(option).to_be_visible(timeout=5000)
+    option.click()
+
+
+def test_formula_measures_render_in_table(page_at_app: Page):
+    """Formula-based synthetic measures render headers and computed values."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_formula")
+    table = container.get_by_test_id("pivot-table")
+    expect(table).to_be_visible(timeout=15000)
+
+    # Check that Margin and Margin % headers are present
+    value_labels = container.locator('[data-testid="pivot-value-label"]')
+    texts = value_labels.all_text_contents()
+    assert "Margin" in texts, f"Expected 'Margin' in {texts}"
+    assert "Margin %" in texts, f"Expected 'Margin %' in {texts}"
+
+    # Verify computed cell values exist and are numeric (not empty/error)
+    data_cells = container.get_by_test_id("pivot-data-cell")
+    expect(data_cells.first).to_be_visible(timeout=5000)
+    assert data_cells.count() > 0
+
+
+def test_formula_computed_values_are_correct(page_at_app: Page):
+    """Verify formula measures produce correct numeric results in cells."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_formula")
+    table = container.get_by_test_id("pivot-table")
+    expect(table).to_be_visible(timeout=15000)
+
+    # Data: US/2023: Rev=100, Cost=40 → Margin=60, Margin%=60.0%
+    #       US/2024: Rev=200, Cost=80 → Margin=120, Margin%=60.0%
+    #       EU/2023: Rev=150, Cost=60 → Margin=90, Margin%=60.0%
+    #       EU/2024: Rev=300, Cost=100 → Margin=200, Margin%=66.7%
+    # Grab all cell text from the table body
+    all_cells = table.locator("tbody td")
+    cell_texts = all_cells.all_text_contents()
+    joined = " ".join(cell_texts)
+
+    # Verify Margin values (Revenue - Cost) appear in table
+    assert "60" in joined, f"Expected Margin=60 for US/2023 in {joined}"
+    assert "120" in joined, f"Expected Margin=120 for US/2024 in {joined}"
+    assert "90" in joined, f"Expected Margin=90 for EU/2023 in {joined}"
+    assert "200" in joined, f"Expected Margin=200 for EU/2024 in {joined}"
+
+    # Verify Margin % values (formatted as percentages) appear
+    assert "60.0%" in joined, f"Expected Margin%=60.0% in {joined}"
+    assert "66.7%" in joined, f"Expected Margin%=66.7% in {joined}"
+
+
+def test_formula_measure_create_apply_and_render(page_at_app: Page):
+    """Create a formula measure through the Settings Panel, Apply, and verify it renders."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_formula")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    panel.get_by_test_id("settings-add-synthetic").click()
+    expect(panel.get_by_test_id("settings-synthetic-builder")).to_be_visible()
+
+    # Fill in the name
+    panel.get_by_test_id("settings-synthetic-builder").locator("input").first.fill(
+        "Double Rev"
+    )
+
+    # Select Formula from the operation dropdown
+    _select_builder_option(page, panel, "settings-synthetic-operation", "formula")
+
+    # Enter a formula
+    panel.get_by_test_id("settings-synthetic-formula").fill('"Revenue" * 2')
+
+    # Save the measure
+    panel.get_by_role("button", name="Save").click()
+
+    # Apply changes
+    panel.get_by_test_id("settings-apply").click()
+
+    # Wait for the table to re-render, then verify the new column header appears
+    table = container.get_by_test_id("pivot-table")
+    expect(table).to_be_visible(timeout=10000)
+    value_labels = container.locator('[data-testid="pivot-value-label"]')
+    texts = value_labels.all_text_contents()
+    assert "Double Rev" in texts, f"Expected 'Double Rev' in {texts}"
+
+    # Verify computed values: US/2023 Revenue=100 → Double Rev=200
+    all_cells = table.locator("tbody td")
+    cell_texts = all_cells.all_text_contents()
+    joined = " ".join(cell_texts)
+    assert "200" in joined, f"Expected Double Rev=200 for US/2023 in {joined}"
+
+
+def test_formula_measure_create_cancel_discards(page_at_app: Page):
+    """Create a formula measure but Cancel — the table should be unchanged."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_formula")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # Count value labels before
+    labels_before = container.locator(
+        '[data-testid="pivot-value-label"]'
+    ).all_text_contents()
+
+    panel = open_settings_panel(page, container)
+
+    panel.get_by_test_id("settings-add-synthetic").click()
+    expect(panel.get_by_test_id("settings-synthetic-builder")).to_be_visible()
+
+    panel.get_by_test_id("settings-synthetic-builder").locator("input").first.fill(
+        "Temp Formula"
+    )
+    _select_builder_option(page, panel, "settings-synthetic-operation", "formula")
+    panel.get_by_test_id("settings-synthetic-formula").fill('"Revenue" + "Cost"')
+    panel.get_by_role("button", name="Save").click()
+
+    # Cancel the panel (discard staged changes)
+    panel.get_by_test_id("settings-cancel").click()
+
+    # Verify the table headers are unchanged
+    labels_after = container.locator(
+        '[data-testid="pivot-value-label"]'
+    ).all_text_contents()
+    assert (
+        labels_before == labels_after
+    ), f"Expected headers unchanged after cancel: {labels_before} vs {labels_after}"
+
+
+def test_formula_empty_validation_in_settings_panel(page_at_app: Page):
+    """An empty formula shows a validation error and prevents saving."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_formula")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    panel.get_by_test_id("settings-add-synthetic").click()
+    expect(panel.get_by_test_id("settings-synthetic-builder")).to_be_visible()
+
+    panel.get_by_test_id("settings-synthetic-builder").locator("input").first.fill(
+        "Bad Formula"
+    )
+    _select_builder_option(page, panel, "settings-synthetic-operation", "formula")
+
+    # Leave formula empty and try to save
+    panel.get_by_role("button", name="Save").click()
+
+    # Builder should still be visible (save rejected) and show an error
+    expect(panel.get_by_test_id("settings-synthetic-builder")).to_be_visible()
+
+    # Cancel to clean up
+    panel.get_by_role("button", name="Cancel").click()
     panel.get_by_test_id("settings-cancel").click()

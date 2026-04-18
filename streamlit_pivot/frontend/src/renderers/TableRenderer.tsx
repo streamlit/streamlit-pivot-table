@@ -633,6 +633,7 @@ export function renderColumnHeaders(
   rowTemporalInfos?: TemporalRowInfo[],
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
+  const formulaErrors = pivotData?.getFormulaErrors();
   const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
   const visibleSlots = colRange
     ? colSlots.slice(colRange[0], colRange[1])
@@ -1503,6 +1504,7 @@ export function renderColumnHeaders(
         ? "Values"
         : getRenderedValueLabel(config, renderedValueFields[0] ?? "") ||
           "Values";
+      const singleField = renderedValueFields[0] ?? "";
       cells.push(
         <th
           key="col-single"
@@ -1513,6 +1515,14 @@ export function renderColumnHeaders(
           data-testid="pivot-header-cell"
         >
           {headerLabel}
+          {formulaErrors?.has(singleField) && (
+            <span
+              className={styles.formulaWarningIcon}
+              title={`Formula error: ${formulaErrors.get(singleField)}`}
+            >
+              ⚠
+            </span>
+          )}
         </th>,
       );
     }
@@ -1554,7 +1564,17 @@ export function renderColumnHeaders(
             data-testid="pivot-value-label"
           >
             <div className={styles.headerCellInner}>
-              <span>{getRenderedValueLabel(config, valField)}</span>
+              <span>
+                {getRenderedValueLabel(config, valField)}
+                {formulaErrors?.has(valField) && (
+                  <span
+                    className={styles.formulaWarningIcon}
+                    title={`Formula error: ${formulaErrors.get(valField)}`}
+                  >
+                    ⚠
+                  </span>
+                )}
+              </span>
               {hasMenu && (
                 <MenuTriggerButton
                   dimension={valField}
@@ -1595,7 +1615,17 @@ export function renderColumnHeaders(
             data-testid="pivot-value-label"
           >
             <div className={styles.headerCellInner}>
-              <span>{getRenderedValueLabel(config, valField)}</span>
+              <span>
+                {getRenderedValueLabel(config, valField)}
+                {formulaErrors?.has(valField) && (
+                  <span
+                    className={styles.formulaWarningIcon}
+                    title={`Formula error: ${formulaErrors.get(valField)}`}
+                  >
+                    ⚠
+                  </span>
+                )}
+              </span>
               {hasMenu && (
                 <MenuTriggerButton
                   dimension={valField}

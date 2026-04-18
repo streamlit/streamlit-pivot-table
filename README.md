@@ -2,7 +2,7 @@
 
 Pivot table component for [Streamlit](https://streamlit.io). Built with Streamlit Components V2, React, and TypeScript.
 
-Supports multi-dimensional pivoting, interactive sorting and filtering, subtotals with collapse/expand, conditional formatting, data export (Excel/CSV/TSV/clipboard), drill-down detail panels, drag-and-drop field configuration, synthetic (derived) measures, date/time hierarchies with period-over-period comparisons, hierarchical row layouts, column resize, fullscreen mode, and server-side pre-aggregation for large datasets.
+Supports multi-dimensional pivoting, interactive sorting and filtering, subtotals with collapse/expand, conditional formatting, data export (Excel/CSV/TSV/clipboard), drill-down detail panels, drag-and-drop field configuration, synthetic (derived) measures with a formula engine, date/time hierarchies with period-over-period comparisons, hierarchical row layouts, column resize, fullscreen mode, and server-side pre-aggregation for large datasets.
 
 ## Installation
 
@@ -163,18 +163,21 @@ st_pivot_table(
 
 In the interactive toolbar, aggregation is edited inside the **Settings Panel**. Open the panel, click the aggregation badge on a value chip to change it, then click **Apply**. Raw measure chips in the toolbar display the selected aggregation inline in a compact name-first format such as `Revenue (Sum)`.
 
-### Synthetic Measures (V1)
+### Synthetic Measures
 
-Synthetic measures let you render derived metrics alongside regular value fields. They are computed from source-field sums at each cell/total context.
+Synthetic measures let you render derived metrics alongside regular value fields.
 
 Supported operations:
 
 - `sum_over_sum` -> `sum(numerator) / sum(denominator)` (returns empty cell value when denominator is 0)
 - `difference` -> `sum(numerator) - sum(denominator)`
+- `formula` -> arbitrary arithmetic expression referencing aggregated fields
 
 Optional synthetic-measure fields:
 
 - `format` -> number format pattern applied only to that synthetic measure (for example `.1%`, `$,.0f`, or `,.2f`)
+
+**Legacy operations** (`sum_over_sum`, `difference`) use `numerator` / `denominator` fields and always operate on sums:
 
 ```python
 st_pivot_table(
@@ -204,7 +207,51 @@ st_pivot_table(
 )
 ```
 
-Per-measure aggregation applies only to raw entries in `values`. Synthetic measures keep their current sum-based formula semantics, so `sum_over_sum` still means `sum(numerator) / sum(denominator)` even when nearby raw measures use `avg`, `count`, or other aggregations.
+**Formula measures** use a `formula` field with an arbitrary expression. Field references are quoted strings. Each field uses its configured aggregation (default: sum).
+
+```python
+st_pivot_table(
+    df,
+    key="formula_example",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Cost", "Headcount"],
+    synthetic_measures=[
+        {
+            "id": "margin",
+            "label": "Margin",
+            "operation": "formula",
+            "formula": '"Revenue" - "Cost"',
+        },
+        {
+            "id": "margin_pct",
+            "label": "Margin %",
+            "operation": "formula",
+            "formula": 'if("Revenue" > 0, ("Revenue" - "Cost") / "Revenue", 0)',
+            "format": ".1%",
+        },
+        {
+            "id": "rev_per_head",
+            "label": "Rev / Head",
+            "operation": "formula",
+            "formula": '"Revenue" / "Headcount"',
+            "format": ",.1f",
+        },
+    ],
+)
+```
+
+Formula supported operations:
+
+- **Arithmetic:** `+` `-` `*` `/` `^` (exponent) `%` (modulo)
+- **Comparison:** `>` `>=` `<` `<=` `==` `!=`
+- **Logical:** `and`, `or`, `not`
+- **Conditional:** `if(condition, then, else)`
+- **Functions:** `abs()`, `min()`, `max()`, `round(x, decimals)`
+
+Division by zero and missing fields produce null values. The `if()` function short-circuits, so `if("Cost" > 0, "Revenue" / "Cost", 0)` safely returns `0` when Cost is zero. Formula evaluation is CSP-safe (no `eval()` or `new Function()`).
+
+Per-measure aggregation applies only to raw entries in `values`. Legacy synthetic measures (`sum_over_sum`, `difference`) always operate on sums. Formula measures use each field's configured aggregation.
 
 `aggregation="sum_over_sum"` is no longer supported as a table-wide aggregation mode. Use `synthetic_measures` for ratio-of-sums behavior.
 In the interactive builder, the **Format** input includes presets (Percent, Currency, Number) and validates custom patterns before save.
@@ -658,7 +705,7 @@ st_pivot_table(
 **Supported aggregations:** All 10 aggregation types are supported in hybrid mode. `count` and `count_distinct` work on any column type; all other aggregations (`sum`, `avg`, `min`, `max`, `median`, `percentile_90`, `first`, `last`) coerce values to numeric and ignore non-numeric entries, consistent with client-only mode behavior. For non-decomposable aggregations (`avg`, `count_distinct`, `median`, `percentile_90`, `first`, `last`), the server computes correct totals and subtotals via a sidecar payload, ensuring accuracy that client-side re-aggregation alone cannot provide.
 
 **Limitations:**
-- Synthetic measures are not supported in hybrid mode (falls back to client-side).
+- Synthetic measures (including formulas) evaluate client-side in hybrid mode — source fields are aggregated locally while hybrid pre-computed totals are used for regular fields.
 
 `row_layout` is supported in both execution paths. Switching between `table` and `hierarchy` does not by itself force a fallback out of `threshold_hybrid`.
 
@@ -700,7 +747,7 @@ The panel contains:
 
 - **Available Fields** — unassigned columns shown as draggable chips. Click a chip's menu to add it to Rows, Columns, or Values. When more than 8 fields are available, a search input appears.
 - **Rows / Columns / Values** drop zones — drag chips to reorder within a zone, drag between zones, or use the `x` button to remove. Value chips show an aggregation picker (click the badge to change). Synthetic `fx` chips appear inline with raw value chips and can be reordered alongside them (the resulting order is persisted as `value_order`).
-- **Synthetic Measures** — click **+ Add measure** to create derived metrics (ratio of sums, difference of sums) with optional format patterns. Existing synthetic chips expose an **✎ Edit** button that reopens the measure editor.
+- **Synthetic Measures** — click **+ Add measure** to create derived metrics. Choose **Sum over Sum**, **Difference**, or **Formula** as the operation. Formula mode provides a text input for arbitrary expressions, clickable field-name chips for quick insertion, and a `?` tooltip listing supported operations. Existing synthetic chips expose an **✎ Edit** button that reopens the measure editor.
 - **Display Toggles** — Row Totals, Column Totals, Subtotals, Repeat Labels, Row Layout, and Sticky Headers.
 - **Invalid drop feedback** — if you drag a chip onto a zone that cannot accept it (e.g. a non-numeric field into Values), the zone turns red and shows an inline hint explaining why.
 

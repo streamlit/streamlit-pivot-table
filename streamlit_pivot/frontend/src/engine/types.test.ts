@@ -947,3 +947,125 @@ describe("getEffectiveDateGrain with adaptiveGrain", () => {
     );
   });
 });
+
+describe("validatePivotConfigV1 — formula synthetic measures", () => {
+  it("accepts formula operation with valid formula", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: ["region"],
+      columns: [],
+      values: ["revenue"],
+      aggregation: {},
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula",
+          formula: '"revenue" - "cost"',
+        },
+      ],
+    });
+    expect(config.synthetic_measures).toHaveLength(1);
+    expect(config.synthetic_measures![0].operation).toBe("formula");
+    expect(config.synthetic_measures![0].formula).toBe('"revenue" - "cost"');
+  });
+
+  it("rejects formula operation with empty formula", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        version: 1,
+        rows: [],
+        columns: [],
+        values: ["revenue"],
+        aggregation: {},
+        synthetic_measures: [
+          {
+            id: "m",
+            label: "M",
+            operation: "formula",
+            formula: "",
+          },
+        ],
+      }),
+    ).toThrow(/must be a non-empty string/);
+  });
+
+  it("rejects formula with no field references", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        version: 1,
+        rows: [],
+        columns: [],
+        values: ["revenue"],
+        aggregation: {},
+        synthetic_measures: [
+          {
+            id: "m",
+            label: "M",
+            operation: "formula",
+            formula: "42 + 1",
+          },
+        ],
+      }),
+    ).toThrow(/must reference at least one field/);
+  });
+
+  it("rejects syntactically invalid formulas", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        version: 1,
+        rows: [],
+        columns: [],
+        values: ["revenue"],
+        aggregation: {},
+        synthetic_measures: [
+          {
+            id: "m",
+            label: "M",
+            operation: "formula",
+            formula: '"Revenue" + * "Cost"',
+          },
+        ],
+      }),
+    ).toThrow(/is invalid/);
+  });
+
+  it("rejects formulas with wrong function arity", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        version: 1,
+        rows: [],
+        columns: [],
+        values: ["revenue"],
+        aggregation: {},
+        synthetic_measures: [
+          {
+            id: "m",
+            label: "M",
+            operation: "formula",
+            formula: 'min("A", "B", "C")',
+          },
+        ],
+      }),
+    ).toThrow(/expects exactly 2/);
+  });
+
+  it("merges formula source fields into aggregation normalization", () => {
+    const config = validatePivotConfigV1({
+      version: 1,
+      rows: [],
+      columns: [],
+      values: ["revenue"],
+      aggregation: { cost: "avg" },
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula",
+          formula: '"revenue" - "cost"',
+        },
+      ],
+    });
+    expect(config.aggregation["cost"]).toBe("avg");
+  });
+});
