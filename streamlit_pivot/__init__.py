@@ -300,8 +300,6 @@ def _apply_source_filters(
 
 
 def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
-    if config.get("synthetic_measures"):
-        return False, "threshold_hybrid currently skips synthetic measures"
     filters = config.get("filters", {})
     if filters:
         dim_set = set(config.get("rows", []) + config.get("columns", []))
@@ -366,7 +364,13 @@ def _prepare_threshold_hybrid_frame(
     date_grains = config.get("date_grains", {})
     auto_date_hierarchy = config.get("auto_date_hierarchy", True)
     aggregation = dict(config.get("aggregation", {}))
-    value_fields = list(config.get("values", []))
+    synth_sources = _get_synthetic_source_fields(config.get("synthetic_measures"))
+    df_cols = set(df.columns)
+    value_fields = [
+        f
+        for f in dict.fromkeys(list(config.get("values", [])) + synth_sources)
+        if f in df_cols
+    ]
 
     if not value_fields:
         if not group_fields:
@@ -1033,19 +1037,25 @@ def _compute_hybrid_totals(
     aggregation = config.get("aggregation", {})
     rows = config.get("rows", [])
     columns = config.get("columns", [])
-    values = config.get("values", [])
+    synth_sources = _get_synthetic_source_fields(config.get("synthetic_measures"))
+    df_cols = set(df.columns)
+    all_value_fields = [
+        f
+        for f in dict.fromkeys(list(config.get("values", [])) + synth_sources)
+        if f in df_cols
+    ]
     show_subtotals = config.get("show_subtotals", False)
     date_grains = config.get("date_grains", {})
     auto_date_hierarchy = config.get("auto_date_hierarchy", True)
 
     sidecar_fields = {
         vf: agg
-        for vf in values
+        for vf in all_value_fields
         if (agg := aggregation.get(vf, "sum")) in _SIDECAR_REQUIRED_AGGS
     }
     remap_only_fields = {
         vf: agg
-        for vf in values
+        for vf in all_value_fields
         if (agg := aggregation.get(vf, "sum")) in ("count", "count_distinct")
         and vf not in sidecar_fields
     }

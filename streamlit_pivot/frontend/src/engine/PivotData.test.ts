@@ -2547,34 +2547,30 @@ describe("PivotData - formula engine in hybrid mode", () => {
     expect(pd.getAggregator(["EU"], ["2024"], "margin").value()).toBe(200);
   });
 
-  it("formula row totals work alongside hybrid pre-computed totals", () => {
+  it("formula row totals use hybrid pre-computed source values when available", () => {
     const cfg = hybridFormulaConfig({ aggregation: "median" });
     const totals = makeHybridTotals(cfg, { revenue: 187.5, cost: 70 }, [
       { key: ["US"], values: { revenue: 150, cost: 60 } },
       { key: ["EU"], values: { revenue: 225, cost: 80 } },
     ]);
     const pd = new PivotData(HYBRID_DATA, cfg, { hybridTotals: totals });
-    // Source field row totals use hybrid pre-computed values
     expect(pd.getRowTotal(["US"], "revenue").value()).toBe(150);
-    // Formula evaluates from client-side median aggregators:
-    // US rows: revenue [100, 200] → median 150, cost [40, 80] → median 60
+    // Formula uses hybrid-precomputed row values: revenue=150, cost=60
     const margin = pd.getRowTotal(["US"], "margin").value();
     expect(margin).toBe(90); // 150 - 60
   });
 
-  it("formula grand total evaluates from client aggregators even with hybrid totals", () => {
+  it("formula grand total uses hybrid pre-computed source values when available", () => {
     const cfg = hybridFormulaConfig({ aggregation: "median" });
     const totals = makeHybridTotals(cfg, { revenue: 999, cost: 888 });
     const pd = new PivotData(HYBRID_DATA, cfg, { hybridTotals: totals });
-    // Hybrid grand total for regular field uses pre-computed
     expect(pd.getGrandTotal("revenue").value()).toBe(999);
-    // Formula grand total uses client-side median aggregators:
-    // revenue [100,200,150,300] → median 175, cost [40,80,60,100] → median 70
+    // Formula uses hybrid-precomputed grand values: revenue=999, cost=888
     const margin = pd.getGrandTotal("margin").value();
-    expect(margin).toBe(105); // 175 - 70
+    expect(margin).toBe(111); // 999 - 888
   });
 
-  it("formula col totals evaluate from client aggregators even with hybrid totals", () => {
+  it("formula col totals use hybrid pre-computed source values when available", () => {
     const cfg = hybridFormulaConfig({ aggregation: "median" });
     const totals = makeHybridTotals(
       cfg,
@@ -2586,10 +2582,8 @@ describe("PivotData - formula engine in hybrid mode", () => {
       ],
     );
     const pd = new PivotData(HYBRID_DATA, cfg, { hybridTotals: totals });
-    // Hybrid col total for regular field uses pre-computed
     expect(pd.getColTotal(["2023"], "revenue").value()).toBe(125);
-    // Formula col total uses client-side median aggregators:
-    // 2023 col: revenue [100, 150] → median 125, cost [40, 60] → median 50
+    // Formula uses hybrid-precomputed col values: revenue=125, cost=50
     const margin = pd.getColTotal(["2023"], "margin").value();
     expect(margin).toBe(75); // 125 - 50
   });
@@ -2613,6 +2607,30 @@ describe("PivotData - formula engine in hybrid mode", () => {
     });
     // US/2023: revenue=100, cost=40 → 100/40 = 2.5
     expect(pd.getAggregator(["US"], ["2023"], "safe_ratio").value()).toBe(2.5);
+  });
+
+  it("formula prefers hybrid values over client-side re-aggregated values", () => {
+    const cfg = hybridFormulaConfig({ aggregation: "median" });
+    // Provide hybrid grand values that differ from what client-side re-aggregation would produce
+    const totals = makeHybridTotals(
+      cfg,
+      { revenue: 500, cost: 200 },
+      [
+        { key: ["US"], values: { revenue: 300, cost: 100 } },
+        { key: ["EU"], values: { revenue: 400, cost: 150 } },
+      ],
+      [
+        { key: ["2023"], values: { revenue: 350, cost: 120 } },
+        { key: ["2024"], values: { revenue: 450, cost: 180 } },
+      ],
+    );
+    const pd = new PivotData(HYBRID_DATA, cfg, { hybridTotals: totals });
+    // Grand total formula should use hybrid values: 500 - 200 = 300
+    expect(pd.getGrandTotal("margin").value()).toBe(300);
+    // Row total formula should use hybrid values: 300 - 100 = 200
+    expect(pd.getRowTotal(["US"], "margin").value()).toBe(200);
+    // Col total formula should use hybrid values: 350 - 120 = 230
+    expect(pd.getColTotal(["2023"], "margin").value()).toBe(230);
   });
 
   it("formula source fields not in values are aggregated correctly in hybrid mode", () => {

@@ -2027,7 +2027,9 @@ def _select_builder_option(
     panel.get_by_test_id(test_id).click()
     option = page.get_by_test_id(f"{test_id}-{value}")
     expect(option).to_be_visible(timeout=5000)
-    option.click()
+    option.evaluate(
+        "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+    )
 
 
 def test_formula_measures_render_in_table(page_at_app: Page):

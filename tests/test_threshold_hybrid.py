@@ -1420,6 +1420,116 @@ class TestComputeHybridTotals:
         assert sc_last["grand"]["revenue"] == 30.0
 
 
+class TestSyntheticMeasuresHybridCompat:
+    """Synthetic measures no longer block threshold_hybrid."""
+
+    def test_can_use_threshold_hybrid_with_synthetics(self, pivot_module):
+        cfg = {
+            "rows": ["region"],
+            "columns": ["year"],
+            "values": ["revenue", "cost"],
+            "aggregation": {"revenue": "sum", "cost": "sum"},
+            "synthetic_measures": [
+                {
+                    "id": "margin",
+                    "label": "Margin",
+                    "operation": "formula",
+                    "formula": '"revenue" - "cost"',
+                    "numerator": "",
+                    "denominator": "",
+                }
+            ],
+        }
+        ok, _msg = pivot_module._can_use_threshold_hybrid(cfg)
+        assert ok is True
+
+    def test_prepare_hybrid_frame_includes_formula_source_fields(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "EU"],
+                "year": ["2023", "2024"],
+                "revenue": [100.0, 200.0],
+                "cost": [40.0, 80.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": ["year"],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "sum", "cost": "sum"},
+            "synthetic_measures": [
+                {
+                    "id": "margin",
+                    "label": "Margin",
+                    "operation": "formula",
+                    "formula": '"revenue" - "cost"',
+                    "numerator": "",
+                    "denominator": "",
+                }
+            ],
+        }
+        result = pivot_module._prepare_threshold_hybrid_frame(df, cfg)
+        assert "cost" in result.columns
+        assert "revenue" in result.columns
+
+    def test_hybrid_frame_excludes_synthetic_ids(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "region": ["US"],
+                "revenue": [100.0],
+                "cost": [40.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "sum", "cost": "sum"},
+            "synthetic_measures": [
+                {
+                    "id": "margin",
+                    "label": "Margin",
+                    "operation": "formula",
+                    "formula": '"revenue" - "cost"',
+                    "numerator": "",
+                    "denominator": "",
+                }
+            ],
+        }
+        result = pivot_module._prepare_threshold_hybrid_frame(df, cfg)
+        assert "margin" not in result.columns
+
+    def test_sidecar_includes_formula_source_fields(self, pivot_module):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU"],
+                "year": ["2023", "2024", "2023"],
+                "revenue": [100.0, 200.0, 150.0],
+                "cost": [40.0, 80.0, 60.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": ["year"],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "median", "cost": "median"},
+            "synthetic_measures": [
+                {
+                    "id": "margin",
+                    "label": "Margin",
+                    "operation": "formula",
+                    "formula": '"revenue" - "cost"',
+                    "numerator": "",
+                    "denominator": "",
+                }
+            ],
+        }
+        sidecar = pivot_module._compute_hybrid_totals(df, cfg, None)
+        assert sidecar is not None
+        assert "cost" in sidecar["grand"]
+        assert "revenue" in sidecar["grand"]
+
+
 class TestAdaptiveGrainFingerprint:
     """Changing adaptive grains alone invalidates the sidecar fingerprint."""
 

@@ -273,10 +273,10 @@ def test_threshold_hybrid_preaggregates_compatible_large_configs(
     assert "Drill-down" in payload["server_mode_reason"]
 
 
-def test_threshold_hybrid_falls_back_for_incompatible_configs(
+def test_threshold_hybrid_works_with_synthetic_measures(
     sample_df, pivot_module, mount_recorder
 ):
-    """Synthetic measures still force fallback to client_only."""
+    """Synthetic measures are now compatible with threshold_hybrid."""
     calls = mount_recorder()
     large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
 
@@ -300,7 +300,7 @@ def test_threshold_hybrid_falls_back_for_incompatible_configs(
     )
 
     payload = calls[0]["data"]
-    assert payload["execution_mode"] == "client_only"
+    assert payload["execution_mode"] == "threshold_hybrid"
 
 
 def test_threshold_hybrid_median_no_longer_falls_back(

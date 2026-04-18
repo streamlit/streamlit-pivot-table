@@ -1210,7 +1210,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => this._rowTotalSumAggs.get(prefix + sf)?.value() ?? null,
-        (sf) => this._rowTotalAggs.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridRowTotals?.get(prefix + sf) ??
+          this._rowTotalAggs.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1233,7 +1236,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => this._colTotalSumAggs.get(prefix + sf)?.value() ?? null,
-        (sf) => this._colTotalAggs.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridColTotals?.get(prefix + sf) ??
+          this._colTotalAggs.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1255,7 +1261,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => this._grandTotalSumAggs.get(sf)?.value() ?? null,
-        (sf) => this._grandTotalAggs.get(sf)?.value() ?? null,
+        (sf) =>
+          this._hybridGrand?.get(sf) ??
+          this._grandTotalAggs.get(sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1366,7 +1375,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => this._subtotalSumAggs?.get(prefix + sf)?.value() ?? null,
-        (sf) => this._subtotalAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridSubtotals?.get(prefix + sf) ??
+          this._subtotalAggs?.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1681,7 +1693,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => this._colSubtotalSumAggs?.get(prefix + sf)?.value() ?? null,
-        (sf) => this._colSubtotalAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridColPrefix?.get(prefix + sf) ??
+          this._colSubtotalAggs?.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1709,7 +1724,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => this._colSubtotalSumAggs?.get(prefix + sf)?.value() ?? null,
-        (sf) => this._colSubtotalAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridColPrefixGrand?.get(`${colPrefixStr}\x01${sf}`) ??
+          this._colSubtotalAggs?.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1741,7 +1759,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => this._crossSubtotalSumAggs?.get(prefix + sf)?.value() ?? null,
-        (sf) => this._crossSubtotalAggs?.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridCrossSubtotals?.get(prefix + sf) ??
+          this._crossSubtotalAggs?.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1869,7 +1890,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => aggs.get(prefix + sf)?.value() ?? null,
-        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridTemporalParent?.get(prefix + sf) ??
+          aggs.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -1899,7 +1923,12 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => aggs.get(prefix + sf)?.value() ?? null,
-        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridTemporalParentGrand?.get(
+            `${modifiedColKeyStr}\x01${sf}`,
+          ) ??
+          aggs.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -2067,7 +2096,10 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => aggs.get(prefix + sf)?.value() ?? null,
-        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridTemporalRowParent?.get(prefix + sf) ??
+          aggs.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
@@ -2096,7 +2128,12 @@ export class PivotData {
       const value = this._evaluateSynthetic(
         synthetic,
         (sf) => aggs.get(prefix + sf)?.value() ?? null,
-        (sf) => aggs.get(prefix + sf)?.value() ?? null,
+        (sf) =>
+          this._hybridTemporalRowParentGrand?.get(
+            `${modifiedRowKeyStr}\x01${sf}`,
+          ) ??
+          aggs.get(prefix + sf)?.value() ??
+          null,
       );
       return this._fixedAggregator(value);
     }
