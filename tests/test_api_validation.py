@@ -487,3 +487,139 @@ def test_invalid_menu_limit_raises(pivot_module, sample_df, menu_limit):
             values=["Revenue"],
             menu_limit=menu_limit,
         )
+
+
+# ---------------------------------------------------------------------------
+# conditional_formatting color_scale — mid_value validation
+# ---------------------------------------------------------------------------
+
+
+def test_color_scale_accepts_mid_value_with_mid_color(
+    pivot_module, sample_df, mount_recorder
+):
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        conditional_formatting=[
+            {
+                "type": "color_scale",
+                "apply_to": ["Revenue"],
+                "min_color": "#ff0000",
+                "mid_color": "#ffffff",
+                "max_color": "#0000ff",
+                "mid_value": 0,
+            },
+        ],
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    rule = sent_config["conditional_formatting"][0]
+    assert rule["mid_value"] == 0
+    assert rule["mid_color"] == "#ffffff"
+
+
+def test_color_scale_mid_value_requires_mid_color(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="'mid_value' requires 'mid_color'"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            conditional_formatting=[
+                {
+                    "type": "color_scale",
+                    "apply_to": ["Revenue"],
+                    "min_color": "#ff0000",
+                    "max_color": "#0000ff",
+                    "mid_value": 0,
+                },
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_mid_value",
+    [
+        True,  # bool (isinstance(True, int) is True in Python)
+        False,
+        "0",  # string
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        [0],  # list
+    ],
+)
+def test_color_scale_mid_value_rejects_non_finite_number(
+    pivot_module, sample_df, bad_mid_value
+):
+    with pytest.raises(TypeError, match=r"\['mid_value'\] must be a finite number"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            conditional_formatting=[
+                {
+                    "type": "color_scale",
+                    "apply_to": ["Revenue"],
+                    "min_color": "#ff0000",
+                    "mid_color": "#ffffff",
+                    "max_color": "#0000ff",
+                    "mid_value": bad_mid_value,
+                },
+            ],
+        )
+
+
+def test_color_scale_mid_color_must_be_string(pivot_module, sample_df):
+    with pytest.raises(TypeError, match=r"\['mid_color'\] must be a string"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            conditional_formatting=[
+                {
+                    "type": "color_scale",
+                    "apply_to": ["Revenue"],
+                    "min_color": "#ff0000",
+                    "mid_color": 123,
+                    "max_color": "#0000ff",
+                },
+            ],
+        )
+
+
+def test_color_scale_mid_value_none_is_ignored(pivot_module, sample_df, mount_recorder):
+    """Passing mid_value=None alongside mid_color is treated as omitted."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        conditional_formatting=[
+            {
+                "type": "color_scale",
+                "apply_to": ["Revenue"],
+                "min_color": "#ff0000",
+                "mid_color": "#ffffff",
+                "max_color": "#0000ff",
+                "mid_value": None,
+            },
+        ],
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    rule = sent_config["conditional_formatting"][0]
+    assert rule.get("mid_value") is None

@@ -526,6 +526,51 @@ describe("buildExcelWorkbook", () => {
       ]);
     });
 
+    it("color_scale: mid_value emits a numeric middle cfvo", () => {
+      const grid = makeCondGrid();
+      grid.conditionalFormatting = [
+        {
+          type: "color_scale",
+          apply_to: ["Revenue"],
+          min_color: "#ff0000",
+          mid_color: "#ffffff",
+          max_color: "#0000ff",
+          mid_value: 0,
+        } as ColorScaleRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      const rule = cfs[0].rules[0];
+      expect(rule.cfvo).toEqual([
+        { type: "min" },
+        { type: "num", value: 0 },
+        { type: "max" },
+      ]);
+      expect(rule.color).toEqual([
+        { argb: "FFFF0000" },
+        { argb: "FFFFFFFF" },
+        { argb: "FF0000FF" },
+      ]);
+    });
+
+    it("color_scale: mid_value without mid_color is ignored (2-color scale)", () => {
+      const grid = makeCondGrid();
+      grid.conditionalFormatting = [
+        {
+          type: "color_scale",
+          apply_to: ["Revenue"],
+          min_color: "#ff0000",
+          max_color: "#0000ff",
+          mid_value: 0,
+        } as ColorScaleRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      const rule = cfs[0].rules[0];
+      // No mid_color means a 2-stop scale regardless of mid_value.
+      expect(rule.cfvo).toEqual([{ type: "min" }, { type: "max" }]);
+    });
+
     // ---- Data bars ----
 
     it("data_bars: produces dataBar rule with gradient flag and correct color", () => {

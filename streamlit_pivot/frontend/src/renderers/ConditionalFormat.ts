@@ -114,6 +114,12 @@ function lerpRgb(c1: RGB, c2: RGB, t: number): RGB {
   ];
 }
 
+function clamp01(t: number): number {
+  if (t < 0) return 0;
+  if (t > 1) return 1;
+  return t;
+}
+
 function rgbString(rgb: RGB): string {
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
 }
@@ -225,11 +231,49 @@ export function computeCellStyle(
       const maxC = parseColor(rule.max_color);
       if (!minC || !maxC) continue;
 
-      const t = stats.range === 0 ? 0.5 : (value - stats.min) / stats.range;
+      const midC = rule.mid_color ? parseColor(rule.mid_color) : null;
+      const hasMidValue =
+        midC !== null &&
+        typeof rule.mid_value === "number" &&
+        Number.isFinite(rule.mid_value);
 
       let bgRgb: RGB;
-      if (rule.mid_color) {
-        const midC = parseColor(rule.mid_color);
+      if (stats.range === 0) {
+        // Constant column (no variance): 3-color scales snap to mid_color;
+        // 2-color scales fall back to a neutral min<->max blend to match
+        // the pre-mid_value shipped behavior rather than implying every
+        // value sits at the floor.
+        bgRgb = midC ?? lerpRgb(minC, maxC, 0.5);
+      } else if (hasMidValue) {
+        // Anchor the gradient at an explicit numeric midpoint so the bend
+        // sits at `mid_value` in value space rather than at the midpoint of
+        // the observed range. Values outside [min, max] clamp to endpoint
+        // colors (no extrapolation).
+        const mid = rule.mid_value as number;
+        if (mid <= stats.min) {
+          // Low segment collapses: interpolate the entire range on mid->max.
+          const denom = stats.max - mid;
+          const t = denom <= 0 ? 0 : clamp01((value - mid) / denom);
+          bgRgb = lerpRgb(midC!, maxC, t);
+        } else if (mid >= stats.max) {
+          // High segment collapses: interpolate the entire range on min->mid.
+          const denom = mid - stats.min;
+          const t = denom <= 0 ? 1 : clamp01((value - stats.min) / denom);
+          bgRgb = lerpRgb(minC, midC!, t);
+        } else if (value <= mid) {
+          const denom = mid - stats.min;
+          const t = denom <= 0 ? 1 : clamp01((value - stats.min) / denom);
+          bgRgb = lerpRgb(minC, midC!, t);
+        } else {
+          const denom = stats.max - mid;
+          const t = denom <= 0 ? 0 : clamp01((value - mid) / denom);
+          bgRgb = lerpRgb(midC!, maxC, t);
+        }
+      } else {
+        // Legacy path: 2-color or mid_color-only 3-color scale. Clamp the
+        // normalized position so totals or outliers outside the body-cell
+        // range render as the endpoint color rather than extrapolating.
+        const t = clamp01((value - stats.min) / stats.range);
         if (midC) {
           bgRgb =
             t <= 0.5
@@ -238,8 +282,6 @@ export function computeCellStyle(
         } else {
           bgRgb = lerpRgb(minC, maxC, t);
         }
-      } else {
-        bgRgb = lerpRgb(minC, maxC, t);
       }
       return {
         backgroundColor: rgbString(bgRgb),

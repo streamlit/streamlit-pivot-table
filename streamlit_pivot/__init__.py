@@ -21,6 +21,7 @@ import json
 import re
 import warnings
 from datetime import date, datetime
+import math
 from math import prod
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
@@ -2325,6 +2326,16 @@ def st_pivot_table(
         Each rule is a dict with ``"type"`` (``"color_scale"``,
         ``"data_bars"``, or ``"threshold"``), ``"apply_to"`` (list of
         field names, empty = all), and type-specific keys.
+        ``color_scale`` rules accept optional ``"mid_color"`` and
+        ``"mid_value"`` keys. When ``"mid_value"`` is provided (a finite
+        number, and only valid alongside ``"mid_color"``), the gradient
+        is anchored at that midpoint for a smooth Excel-like diverging
+        scale (for example, ``mid_value=0`` for PnL columns). ``mid_value``
+        is interpreted in the same numeric space as the underlying
+        aggregated cell values (the raw ``agg.value()`` that feeds all
+        conditional formatting rules), not as a post-``show_values_as``
+        display value. Values outside the observed column range clamp
+        to the endpoint colors.
     number_format : str or dict[str, str] or None
         Number format pattern(s). A single string applies to all
         value fields; a dict maps field names to patterns. Use
@@ -2754,6 +2765,26 @@ def st_pivot_table(
                     raise ValueError(
                         f"conditional_formatting[{i}]: color_scale requires 'min_color' and 'max_color'"
                     )
+                if "mid_color" in rule and not isinstance(
+                    rule.get("mid_color", ""), str
+                ):
+                    raise TypeError(
+                        f"conditional_formatting[{i}]['mid_color'] must be a string"
+                    )
+                if "mid_value" in rule and rule["mid_value"] is not None:
+                    mv = rule["mid_value"]
+                    if not rule.get("mid_color"):
+                        raise ValueError(
+                            f"conditional_formatting[{i}]: 'mid_value' requires 'mid_color'"
+                        )
+                    if (
+                        isinstance(mv, bool)
+                        or not isinstance(mv, (int, float))
+                        or not math.isfinite(mv)
+                    ):
+                        raise TypeError(
+                            f"conditional_formatting[{i}]['mid_value'] must be a finite number"
+                        )
             elif rtype == "threshold":
                 conditions = rule.get("conditions")
                 if not isinstance(conditions, list) or len(conditions) == 0:

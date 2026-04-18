@@ -413,6 +413,21 @@ export interface ColorScaleRule extends ConditionalFormatRule {
   min_color: string;
   max_color: string;
   mid_color?: string;
+  /**
+   * Explicit numeric midpoint for the diverging gradient. Requires `mid_color`.
+   *
+   * Interpreted in the same numeric space as the underlying aggregated cell
+   * values (the raw `agg.value()` shared by all conditional formatting rules),
+   * which is the same space as `min_color` / `max_color`. Conditional
+   * formatting runs before any `show_values_as` transformation, so
+   * `mid_value` is not aligned to a transformed display mode like
+   * `"pct_of_total"`.
+   *
+   * When provided, produces a smooth diverging gradient anchored at this
+   * value; the gradient clamps at the endpoint colors when a cell value falls
+   * outside the column's observed range.
+   */
+  mid_value?: number;
 }
 
 export interface DataBarsRule extends ConditionalFormatRule {
@@ -1065,6 +1080,22 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
         throw new Error(
           `'conditional_formatting[${i}].apply_to' must be an array of strings`,
         );
+      }
+      if (ruleType === "color_scale") {
+        const midValue = (rule as Record<string, unknown>).mid_value;
+        if (midValue !== undefined && midValue !== null) {
+          if (typeof midValue !== "number" || !Number.isFinite(midValue)) {
+            throw new Error(
+              `'conditional_formatting[${i}].mid_value' must be a finite number`,
+            );
+          }
+          const midColor = (rule as Record<string, unknown>).mid_color;
+          if (typeof midColor !== "string" || midColor.length === 0) {
+            throw new Error(
+              `'conditional_formatting[${i}].mid_value' requires 'mid_color'`,
+            );
+          }
+        }
       }
     }
     result.conditional_formatting =

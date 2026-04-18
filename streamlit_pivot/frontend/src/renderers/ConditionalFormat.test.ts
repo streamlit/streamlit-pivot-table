@@ -152,6 +152,188 @@ describe("computeCellStyle - color scale", () => {
     const style = computeCellStyle(100, "revenue", [darkRule], pd, false);
     expect(style?.color).toBe("#f0f2f6");
   });
+
+  // -------------------------------------------------------------------------
+  // mid_value (explicit numeric midpoint)
+  // -------------------------------------------------------------------------
+
+  it("mid_value anchors the gradient at the specified numeric value", () => {
+    // Range is [100, 400]; anchor at 200 so the bend is off-center.
+    const midRule: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      mid_color: "#ffffff",
+      max_color: "#0000ff",
+      mid_value: 200,
+    };
+    const config = makeConfig({ conditional_formatting: [midRule] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+
+    // A cell exactly at mid_value renders as mid_color.
+    expect(
+      computeCellStyle(200, "revenue", [midRule], pd, false)?.backgroundColor,
+    ).toBe("rgb(255, 255, 255)");
+    // Endpoints still render as endpoint colors.
+    expect(
+      computeCellStyle(100, "revenue", [midRule], pd, false)?.backgroundColor,
+    ).toBe("rgb(255, 0, 0)");
+    expect(
+      computeCellStyle(400, "revenue", [midRule], pd, false)?.backgroundColor,
+    ).toBe("rgb(0, 0, 255)");
+    // Halfway through the upper segment [200, 400] is value 300.
+    expect(
+      computeCellStyle(300, "revenue", [midRule], pd, false)?.backgroundColor,
+    ).toBe("rgb(128, 128, 255)");
+  });
+
+  it("asymmetric mid_value differs from the mid_color-only midpoint", () => {
+    // mid_color-only: midpoint is (min+max)/2 = 250 -> white.
+    // With mid_value=150, the value 250 sits ~66% along the [150, 400]
+    // segment and should be noticeably blue.
+    const asymmetric: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      mid_color: "#ffffff",
+      max_color: "#0000ff",
+      mid_value: 150,
+    };
+    const config = makeConfig({ conditional_formatting: [asymmetric] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const style = computeCellStyle(250, "revenue", [asymmetric], pd, false);
+    // t = (250 - 150) / (400 - 150) = 0.4; lerp(white, blue, 0.4) = (153, 153, 255)
+    expect(style?.backgroundColor).toBe("rgb(153, 153, 255)");
+  });
+
+  it("mid_value <= min collapses the low segment", () => {
+    const collapsed: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      mid_color: "#ffffff",
+      max_color: "#0000ff",
+      mid_value: 0, // below observed min of 100
+    };
+    const config = makeConfig({ conditional_formatting: [collapsed] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    // Every value renders on the mid -> max segment.
+    // At observed min (100): t = (100 - 0) / (400 - 0) = 0.25 -> light blue.
+    expect(
+      computeCellStyle(100, "revenue", [collapsed], pd, false)?.backgroundColor,
+    ).toBe("rgb(191, 191, 255)");
+    expect(
+      computeCellStyle(400, "revenue", [collapsed], pd, false)?.backgroundColor,
+    ).toBe("rgb(0, 0, 255)");
+  });
+
+  it("mid_value >= max collapses the high segment", () => {
+    const collapsed: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      mid_color: "#ffffff",
+      max_color: "#0000ff",
+      mid_value: 1000, // above observed max of 400
+    };
+    const config = makeConfig({ conditional_formatting: [collapsed] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    // Every value renders on the min -> mid segment.
+    // At observed min (100): t = (100 - 100) / (1000 - 100) = 0 -> min_color.
+    expect(
+      computeCellStyle(100, "revenue", [collapsed], pd, false)?.backgroundColor,
+    ).toBe("rgb(255, 0, 0)");
+    // At observed max (400): t = (400 - 100) / (1000 - 100) = 0.333.
+    // lerp(red, white, 0.333) = (255, 85, 85).
+    expect(
+      computeCellStyle(400, "revenue", [collapsed], pd, false)?.backgroundColor,
+    ).toBe("rgb(255, 85, 85)");
+  });
+
+  it("clamps out-of-range totals/values to endpoint colors", () => {
+    const clampRule: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      mid_color: "#ffffff",
+      max_color: "#0000ff",
+      mid_value: 250,
+      include_totals: true,
+    };
+    const config = makeConfig({ conditional_formatting: [clampRule] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    // Simulate a grand-total value larger than the body-cell max of 400.
+    expect(
+      computeCellStyle(1000, "revenue", [clampRule], pd, true)?.backgroundColor,
+    ).toBe("rgb(0, 0, 255)");
+    // And a value smaller than the body-cell min.
+    expect(
+      computeCellStyle(-50, "revenue", [clampRule], pd, true)?.backgroundColor,
+    ).toBe("rgb(255, 0, 0)");
+  });
+
+  it("legacy mid_color-only path also clamps out-of-range values", () => {
+    const legacy: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      mid_color: "#ffffff",
+      max_color: "#0000ff",
+      include_totals: true,
+    };
+    const config = makeConfig({ conditional_formatting: [legacy] });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    // Before clamping, a value of 1000 would extrapolate past the max color.
+    expect(
+      computeCellStyle(1000, "revenue", [legacy], pd, true)?.backgroundColor,
+    ).toBe("rgb(0, 0, 255)");
+  });
+
+  it("constant column (range === 0) with mid_color renders as mid_color", () => {
+    const constantData: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 50 },
+      { region: "US", year: "2024", revenue: 50 },
+      { region: "EU", year: "2023", revenue: 50 },
+      { region: "EU", year: "2024", revenue: 50 },
+    ];
+    const rule3: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      mid_color: "#ffffff",
+      max_color: "#0000ff",
+      mid_value: 0,
+    };
+    const config = makeConfig({ conditional_formatting: [rule3] });
+    const pd = new PivotData(constantData, config);
+    // With no range, 3-color rules fall back to mid_color.
+    expect(
+      computeCellStyle(50, "revenue", [rule3], pd, false)?.backgroundColor,
+    ).toBe("rgb(255, 255, 255)");
+  });
+
+  it("constant column (range === 0) with 2-color rule renders as neutral min<->max blend", () => {
+    const constantData: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 50 },
+      { region: "US", year: "2024", revenue: 50 },
+      { region: "EU", year: "2023", revenue: 50 },
+      { region: "EU", year: "2024", revenue: 50 },
+    ];
+    const rule2: ColorScaleRule = {
+      type: "color_scale",
+      apply_to: [],
+      min_color: "#ff0000",
+      max_color: "#0000ff",
+    };
+    const config = makeConfig({ conditional_formatting: [rule2] });
+    const pd = new PivotData(constantData, config);
+    // Regression: zero-range 2-color scales must return a 50/50 blend of
+    // min_color and max_color (matches pre-mid_value shipped behavior),
+    // not pure min_color which would imply every value is at the floor.
+    expect(
+      computeCellStyle(50, "revenue", [rule2], pd, false)?.backgroundColor,
+    ).toBe("rgb(128, 0, 128)");
+  });
 });
 
 describe("computeCellStyle - data bars", () => {

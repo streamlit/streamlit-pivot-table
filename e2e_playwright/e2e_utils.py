@@ -118,6 +118,7 @@ INTERACTIONS_PIVOT_KEYS = [
 DATA_PIVOT_KEYS = [
     "test_pivot",
     "test_pivot_cond_fmt",
+    "test_pivot_cond_fmt_mid_value",
     "test_pivot_number_fmt",
     "test_pivot_empty",
     "test_pivot_single_row",

@@ -290,12 +290,23 @@ function applyConditionalFormatting(
 
       if (rule.type === "color_scale") {
         const csRule = rule as ColorScaleRule;
+        const hasMidValue =
+          csRule.mid_color !== undefined &&
+          typeof csRule.mid_value === "number" &&
+          Number.isFinite(csRule.mid_value);
+        // Midpoint CFVO: numeric anchor when mid_value is provided,
+        // otherwise fall back to the legacy 50th-percentile midpoint so
+        // existing mid_color-only rules keep producing the same workbook.
+        // ExcelJS's TS types don't enumerate { type: "num" } on color-scale
+        // CFVOs, so cast via unknown like the data-bar branch below.
+        const midCfvo = hasMidValue
+          ? ({ type: "num", value: csRule.mid_value } as unknown as {
+              type: "percentile";
+              value: number;
+            })
+          : { type: "percentile" as const, value: 50 };
         const cfvo = csRule.mid_color
-          ? [
-              { type: "min" as const },
-              { type: "percentile" as const, value: 50 },
-              { type: "max" as const },
-            ]
+          ? [{ type: "min" as const }, midCfvo, { type: "max" as const }]
           : [{ type: "min" as const }, { type: "max" as const }];
         const color = csRule.mid_color
           ? [

@@ -597,6 +597,39 @@ are supported:
         conditional_formatting=cond_fmt_rules,
     )
 
+    st.markdown(
+        """
+#### Diverging color scale anchored at a numeric midpoint (`mid_value`)
+
+Pass `mid_color` with a numeric `mid_value` to anchor a smooth diverging
+gradient at a meaningful midpoint (e.g. `0` for PnL, or a target value).
+Below, the average-profit column is rendered red-white-blue around the
+overall average so cells below average appear red and cells above appear
+blue, regardless of the column's min/max.
+"""
+    )
+
+    avg_profit = float(df["Profit"].mean())
+    st_pivot_table(
+        df,
+        key="cond_fmt_mid_value",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Profit"],
+        aggregation="avg",
+        number_format={"Profit": ",.0f"},
+        conditional_formatting=[
+            {
+                "type": "color_scale",
+                "apply_to": ["Profit"],
+                "min_color": "#c62828",
+                "mid_color": "#ffffff",
+                "max_color": "#1565c0",
+                "mid_value": avg_profit,
+            },
+        ],
+    )
+
     with st.expander("View Code"):
         st.code(
             """
@@ -626,6 +659,26 @@ st_pivot_table(
                 {"operator": "gt", "value": 250,
                  "background": "#1565c0", "bold": True},
             ],
+        },
+    ],
+)
+
+# Diverging color scale anchored at a numeric midpoint:
+st_pivot_table(
+    df,
+    key="cond_fmt_mid_value",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Profit"],
+    aggregation="avg",
+    conditional_formatting=[
+        {
+            "type": "color_scale",
+            "apply_to": ["Profit"],
+            "min_color": "#c62828",   # red for below-midpoint
+            "mid_color": "#ffffff",   # neutral at mid_value
+            "max_color": "#1565c0",   # blue for above-midpoint
+            "mid_value": df["Profit"].mean(),  # anchor at overall average
         },
     ],
 )

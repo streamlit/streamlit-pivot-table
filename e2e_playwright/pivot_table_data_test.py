@@ -47,6 +47,34 @@ def test_conditional_formatting_color_scale(page_at_app: Page):
     ), "Expected at least one data cell to have background-color from color scale"
 
 
+def test_conditional_formatting_color_scale_mid_value(page_at_app: Page):
+    """mid_value anchors the gradient at the specified numeric value.
+
+    Uses the deterministic `test_pivot_cond_fmt_mid_value` fixture whose three
+    row values are exactly min (-100), mid_value (0), and max (100), so the
+    rendered background colors must be the exact endpoint/mid colors
+    configured on the rule.
+    """
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cond_fmt_mid_value")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    cells = container.get_by_test_id("pivot-data-cell")
+    expect(cells.first).to_be_visible(timeout=5000)
+    # Three Region rows, one Year column -> exactly three data cells.
+    assert cells.count() == 3
+
+    def bg(cell) -> str:
+        return cell.evaluate("el => window.getComputedStyle(el).backgroundColor")
+
+    # Row order matches dataframe order: AA_Low (min), BB_Mid (mid), CC_High (max).
+    assert bg(cells.nth(0)) == "rgb(255, 0, 0)", "min cell should render min_color"
+    assert (
+        bg(cells.nth(1)) == "rgb(255, 255, 255)"
+    ), "cell at mid_value should render mid_color"
+    assert bg(cells.nth(2)) == "rgb(0, 0, 255)", "max cell should render max_color"
+
+
 def test_conditional_formatting_data_bars(page_at_app: Page):
     """Data bars formatting applies background-image (gradient) to cells."""
     page = page_at_app

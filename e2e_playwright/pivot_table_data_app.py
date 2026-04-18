@@ -81,6 +81,40 @@ def render_app(data):
         on_config_change=noop,
     )
 
+    st.subheader("Conditional Format Pivot - Mid Value")
+    # Deterministic fixture for e2e mid_value regression: a 3x1 pivot where
+    # the middle cell's value equals `mid_value`, so the browser must render
+    # it with `mid_color` (white) and the other cells with the endpoint
+    # colors (pure red and pure blue).
+    cond_fmt_mid_df = pd.DataFrame(
+        [
+            {"Region": "AA_Low", "Year": 2024, "Value": -100.0},
+            {"Region": "BB_Mid", "Year": 2024, "Value": 0.0},
+            {"Region": "CC_High", "Year": 2024, "Value": 100.0},
+        ]
+    )
+    st_pivot_table(
+        cond_fmt_mid_df,
+        key="test_pivot_cond_fmt_mid_value",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Value"],
+        aggregation="sum",
+        show_totals=False,
+        conditional_formatting=[
+            {
+                "type": "color_scale",
+                "apply_to": ["Value"],
+                "min_color": "#ff0000",
+                "mid_color": "#ffffff",
+                "max_color": "#0000ff",
+                "mid_value": 0,
+            },
+        ],
+        interactive=True,
+        on_config_change=noop,
+    )
+
     st.subheader("Number Format Pivot")
     st_pivot_table(
         df,

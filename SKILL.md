@@ -291,9 +291,19 @@ Gradient fill between 2 or 3 colors based on min/mid/max values in the column.
     "min_color": "#ffffff",       # required
     "max_color": "#2e7d32",       # required
     "mid_color": "#a5d6a7",       # optional (3-color scale)
+    "mid_value": 0,               # optional numeric anchor (requires mid_color)
     "include_totals": False,      # optional, default False
 }
 ```
+
+When `mid_value` is set, the gradient is anchored at that numeric value for a
+smooth Excel-like diverging scale (e.g. `mid_value=0` for PnL). `mid_value` is
+interpreted in the same numeric space as the underlying aggregated cell values
+(the raw `agg.value()` used by all conditional formatting rules), i.e. the same
+space as `min_color` / `max_color`. Conditional formatting runs **before** any
+`show_values_as` transformation, so anchoring against a transformed display
+mode like `"pct_of_total"` is not supported. Values outside the observed column
+range clamp to the endpoint colors.
 
 #### Data Bars
 

@@ -517,9 +517,38 @@ Gradient fill between 2 or 3 colors based on min/mid/max values in the column.
     "min_color": "#ffffff",       # required
     "max_color": "#2e7d32",       # required
     "mid_color": "#a5d6a7",       # optional (3-color scale)
+    "mid_value": 0,               # optional numeric anchor for the midpoint
     "include_totals": False,      # optional, default False
 }
 ```
+
+When `mid_color` is provided without `mid_value`, the gradient bends at the
+visual midpoint of the observed column range (current default behavior).
+
+When `mid_value` is also provided, the gradient is anchored at that numeric
+value for a smooth Excel-like diverging scale — ideal for PnL or variance
+columns where `0` should always be the neutral color:
+
+```python
+{
+    "type": "color_scale",
+    "apply_to": ["PnL"],
+    "min_color": "#ff0000",       # darker red for more negative
+    "mid_color": "#ffffff",       # white at 0
+    "max_color": "#0000ff",       # darker blue for more positive
+    "mid_value": 0,
+}
+```
+
+`mid_value` is interpreted in the same numeric space as the underlying
+**aggregated cell values** (i.e. the raw `agg.value()` used by all
+conditional formatting rules), which is the same space as `min_color` /
+`max_color`. This is the natural fit for typical use cases like PnL or
+variance anchored at `0`. Conditional formatting runs **before** any
+`show_values_as` transformation, so pairing `mid_value` with a mode such
+as `"pct_of_total"` will anchor on the raw aggregate, not on the displayed
+percentage. Values outside the observed column range (for example, grand
+totals) clamp to the endpoint colors rather than extrapolating past them.
 
 #### Data Bars
 
