@@ -99,6 +99,9 @@ class PivotConfig(TypedDict, total=False):
     number_format: dict[str, str]
     dimension_format: dict[str, str]
     column_alignment: dict[str, str]
+    field_labels: dict[str, str]
+    field_help: dict[str, str]
+    field_widths: dict[str, int | str]
 
 
 VALID_AGGREGATIONS = frozenset(
@@ -770,49 +773,243 @@ def _guess_format_pattern(formatted: str, probe: float) -> str | None:
     return result
 
 
+# ---------------------------------------------------------------------------
+# column_config translation
+# ---------------------------------------------------------------------------
+
+# Keys we consume from a column_config entry. See SKILL.md / README.md for
+# the documented support matrix.
+_COLUMN_CONFIG_READ_KEYS = frozenset(
+    (
+        "format",
+        "type",
+        "type_config",
+        "label",
+        "help",
+        "pinned",
+        "width",
+        "alignment",
+    )
+)
+
+# Streamlit's column_config objects (e.g. st.column_config.NumberColumn) are
+# dicts with these additional defaults. They're always present but usually
+# unset; reading them would be noise, so we silently ignore rather than warn.
+# Note: `alignment` is intentionally NOT in this set — it's a supported
+# user-facing key (see _COLUMN_CONFIG_READ_KEYS) and absent values simply
+# contribute nothing.
+_COLUMN_CONFIG_STREAMLIT_DEFAULTS = frozenset(("disabled", "required", "default"))
+
+# Tier 3 column types that we explicitly do not support. Hitting one of these
+# emits a one-shot warning so users aren't left wondering why nothing rendered.
+_COLUMN_CONFIG_UNSUPPORTED_TYPES = frozenset(
+    (
+        "line_chart",
+        "bar_chart",
+        "area_chart",
+        "selectbox",
+        "list",
+        "json",
+    )
+)
+
+_VALID_WIDTH_PRESETS = frozenset(("small", "medium", "large"))
+_WIDTH_PX_MIN = 20
+_WIDTH_PX_MAX = 2000
+
+
+class _ColumnConfigTranslation(TypedDict, total=False):
+    """Result of translating Streamlit column_config into pivot config dicts."""
+
+    number_format: dict[str, str]
+    dimension_format: dict[str, str]
+    field_labels: dict[str, str]
+    field_help: dict[str, str]
+    field_widths: dict[str, int | str]
+    pinned_fields: list[str]
+    column_alignment: dict[str, str]
+
+
 def _translate_column_config(
     column_config: dict[str, Any],
     df: Any,
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Translate Streamlit column_config into number_format and dimension_format dicts.
+) -> _ColumnConfigTranslation:
+    """Translate Streamlit column_config into pivot config dicts.
 
-    Returns (number_format_additions, dimension_format_additions).
+    Returns a dict with optional keys:
+        number_format, dimension_format, field_labels, field_help,
+        field_widths, pinned_fields, column_alignment.
+
+    Keys absent from the column_config entry are absent from the result;
+    callers merge these into the broader config with explicit-override
+    precedence.
+
+    Unknown top-level keys in a dict-literal spec trigger a one-shot warning
+    per (field, key). Unknown keys from Streamlit object-style specs
+    (recognized by the presence of the Streamlit-defaults keys) are silently
+    ignored. Recognized but unsupported column types (e.g. LineChartColumn)
+    emit a one-shot warning per (field, type).
     """
     number_additions: dict[str, str] = {}
     dimension_additions: dict[str, str] = {}
+    label_additions: dict[str, str] = {}
+    help_additions: dict[str, str] = {}
+    width_additions: dict[str, int | str] = {}
+    pinned_fields: list[str] = []
+    alignment_additions: dict[str, str] = {}
+
+    # Per-call dedupe for warn-and-skip messages. Keyed by (field, key/topic)
+    # so the same invalid spec surfacing on multiple reruns/fields warns only
+    # once per distinct case within a single st_pivot_table call.
+    warned: set[tuple[str, str]] = set()
+
+    def _warn_once(field: str, topic: str, message: str) -> None:
+        key = (field, topic)
+        if key in warned:
+            return
+        warned.add(key)
+        warnings.warn(message, stacklevel=3)
 
     for col_name, col_spec in column_config.items():
+        # Track whether the spec was provided as a Streamlit `st.column_config.*`
+        # object (expanded here via to_dict/__dict__) vs a user-typed dict
+        # literal. Object-style specs carry internal defaults the user never
+        # set; dict literals do not. This distinction is what drives the
+        # unknown-key warning policy — we must decide it at the expansion
+        # site, not later from the resulting shape (a user may legitimately
+        # include `type_config` in a dict literal).
+        is_object_style = False
         if not isinstance(col_spec, dict):
-            # Could be a column type string like "number" — try to extract
-            # the format from the object's attributes if it has them
             if hasattr(col_spec, "to_dict"):
                 col_spec = col_spec.to_dict()
+                is_object_style = True
             elif hasattr(col_spec, "__dict__"):
                 col_spec = col_spec.__dict__
+                is_object_style = True
             else:
                 continue
 
+        if not is_object_style:
+            for key in col_spec:
+                if (
+                    key in _COLUMN_CONFIG_READ_KEYS
+                    or key in _COLUMN_CONFIG_STREAMLIT_DEFAULTS
+                ):
+                    continue
+                _warn_once(
+                    col_name,
+                    f"unknown_key:{key}",
+                    f"column_config[{col_name!r}]: ignoring unrecognized key "
+                    f"{key!r}. Supported keys: "
+                    f"{sorted(_COLUMN_CONFIG_READ_KEYS)}.",
+                )
+
+        type_config = col_spec.get("type_config")
+        type_config = type_config if isinstance(type_config, dict) else {}
+        col_type = col_spec.get("type") or type_config.get("type") or ""
+
+        # Warn once per (field, type) on recognized-but-unsupported types so
+        # the user knows why nothing rendered.
+        if col_type in _COLUMN_CONFIG_UNSUPPORTED_TYPES:
+            _warn_once(
+                col_name,
+                f"unsupported_type:{col_type}",
+                f"column_config[{col_name!r}]: column type {col_type!r} is "
+                f"not supported by st_pivot_table and will be ignored.",
+            )
+
+        # ---------------- format → number_format / dimension_format
         fmt = col_spec.get("format")
         if not isinstance(fmt, str) or not fmt:
-            continue
+            fmt_nested = type_config.get("format")
+            fmt = fmt_nested if isinstance(fmt_nested, str) and fmt_nested else None
+        if isinstance(fmt, str) and fmt:
+            if col_type in ("date", "datetime", "time"):
+                dimension_additions[col_name] = fmt
+            else:
+                translated = fmt[1:] if fmt.startswith("%") else fmt
+                number_additions[col_name] = translated
 
-        type_name = (
-            col_spec.get("type_config", {}).get("type", "")
-            if isinstance(col_spec.get("type_config"), dict)
-            else ""
-        )
-        col_type = col_spec.get("type", type_name)
+        # ---------------- label
+        label = col_spec.get("label")
+        if isinstance(label, str):
+            label_additions[col_name] = label
 
-        if col_type in ("date", "datetime", "time"):
-            dimension_additions[col_name] = fmt
-        else:
-            # Translate Streamlit printf-style "%,.2f" to d3-style ",.2f"
-            translated = fmt
-            if translated.startswith("%"):
-                translated = translated[1:]
-            number_additions[col_name] = translated
+        # ---------------- help
+        help_text = col_spec.get("help")
+        if isinstance(help_text, str) and help_text:
+            help_additions[col_name] = help_text
 
-    return number_additions, dimension_additions
+        # ---------------- width
+        width = col_spec.get("width")
+        if width is not None:
+            if isinstance(width, str) and width in _VALID_WIDTH_PRESETS:
+                width_additions[col_name] = width
+            elif (
+                isinstance(width, int)
+                and not isinstance(width, bool)
+                and _WIDTH_PX_MIN <= width <= _WIDTH_PX_MAX
+            ):
+                width_additions[col_name] = width
+            else:
+                _warn_once(
+                    col_name,
+                    "width_invalid",
+                    f"column_config[{col_name!r}]: invalid width {width!r}; "
+                    f"expected one of {sorted(_VALID_WIDTH_PRESETS)} or an "
+                    f"int in [{_WIDTH_PX_MIN}, {_WIDTH_PX_MAX}]. Leaving "
+                    f"column at default width.",
+                )
+
+        # ---------------- pinned
+        pinned = col_spec.get("pinned")
+        if pinned is True or pinned == "left":
+            pinned_fields.append(col_name)
+        elif pinned == "right":
+            _warn_once(
+                col_name,
+                "pinned_right",
+                f"column_config[{col_name!r}]: pinned='right' is not "
+                f"supported; st_pivot_table only supports left-side field "
+                f"locking. Field will not be locked.",
+            )
+
+        # ---------------- alignment
+        # Streamlit's column_config objects always carry an `alignment` key
+        # (default None); only contribute when the user set an actual value.
+        # Invalid values warn-and-skip rather than raise, matching the width
+        # policy (and so a stray `dict(st.column_config.Column())` without
+        # alignment just no-ops).
+        alignment = col_spec.get("alignment")
+        if alignment is not None:
+            if isinstance(alignment, str) and alignment in VALID_ALIGNMENTS:
+                alignment_additions[col_name] = alignment
+            else:
+                _warn_once(
+                    col_name,
+                    "alignment_invalid",
+                    f"column_config[{col_name!r}]: invalid alignment "
+                    f"{alignment!r}; expected one of "
+                    f"{sorted(VALID_ALIGNMENTS)}. Leaving column at default "
+                    f"alignment.",
+                )
+
+    result: _ColumnConfigTranslation = {}
+    if number_additions:
+        result["number_format"] = number_additions
+    if dimension_additions:
+        result["dimension_format"] = dimension_additions
+    if label_additions:
+        result["field_labels"] = label_additions
+    if help_additions:
+        result["field_help"] = help_additions
+    if width_additions:
+        result["field_widths"] = width_additions
+    if pinned_fields:
+        result["pinned_fields"] = pinned_fields
+    if alignment_additions:
+        result["column_alignment"] = alignment_additions
+    return result
 
 
 def _get_null_mode(field: str, null_handling: Any) -> str:
@@ -1963,6 +2160,9 @@ def _default_config(
     number_format: str | dict[str, str] | None = None,
     column_alignment: dict[str, str] | None = None,
     dimension_format: dict[str, str] | None = None,
+    field_labels: dict[str, str] | None = None,
+    field_help: dict[str, str] | None = None,
+    field_widths: dict[str, int | str] | None = None,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -2039,6 +2239,12 @@ def _default_config(
         cfg["column_alignment"] = column_alignment
     if dimension_format is not None:
         cfg["dimension_format"] = dimension_format
+    if field_labels:
+        cfg["field_labels"] = field_labels
+    if field_help:
+        cfg["field_help"] = field_help
+    if field_widths:
+        cfg["field_widths"] = field_widths
     return cfg
 
 
@@ -2859,23 +3065,45 @@ def st_pivot_table(
             merged_sdf.update(dimension_format)
             dimension_format = merged_sdf
 
-    # Merge column_config formats: column_config fills gaps, explicit params override
+    cc_field_labels: dict[str, str] | None = None
+    cc_field_help: dict[str, str] | None = None
+    cc_field_widths: dict[str, int | str] | None = None
+    cc_pinned_fields: list[str] = []
     if column_config is not None:
-        cc_number, cc_dimension = _translate_column_config(column_config, filtered_data)
+        translated = _translate_column_config(column_config, filtered_data)
+        cc_number = translated.get("number_format") or {}
+        cc_dimension = translated.get("dimension_format") or {}
         if cc_number:
             if number_format is None:
-                number_format = cc_number
+                number_format = dict(cc_number)
             elif isinstance(number_format, dict):
                 merged_nf = dict(cc_number)
                 merged_nf.update(number_format)
                 number_format = merged_nf
         if cc_dimension:
             if dimension_format is None:
-                dimension_format = cc_dimension
+                dimension_format = dict(cc_dimension)
             elif isinstance(dimension_format, dict):
                 merged_df = dict(cc_dimension)
                 merged_df.update(dimension_format)
                 dimension_format = merged_df
+        # Merge column_config.alignment with explicit column_alignment kwarg.
+        # Explicit wins (same precedence as number_format above). The explicit
+        # kwarg has already been validated by the column_alignment validator
+        # above; values sourced from column_config were already filtered to
+        # VALID_ALIGNMENTS by _translate_column_config (warn-and-skip).
+        cc_alignment = translated.get("column_alignment") or {}
+        if cc_alignment:
+            if column_alignment is None:
+                column_alignment = dict(cc_alignment)
+            elif isinstance(column_alignment, dict):
+                merged_ca = dict(cc_alignment)
+                merged_ca.update(column_alignment)
+                column_alignment = merged_ca
+        cc_field_labels = translated.get("field_labels") or None
+        cc_field_help = translated.get("field_help") or None
+        cc_field_widths = translated.get("field_widths") or None
+        cc_pinned_fields = translated.get("pinned_fields") or []
 
     # Normalize number_format: str -> {"__all__": str}
     if isinstance(number_format, str):
@@ -2921,6 +3149,9 @@ def st_pivot_table(
         dimension_format=dimension_format
         if isinstance(dimension_format, dict)
         else None,
+        field_labels=cc_field_labels,
+        field_help=cc_field_help,
+        field_widths=cc_field_widths,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal
@@ -2986,8 +3217,18 @@ def st_pivot_table(
         data_payload["hidden_attributes"] = hidden_attributes
     if hidden_from_aggregators is not None:
         data_payload["hidden_from_aggregators"] = hidden_from_aggregators
-    _frozen = frozen_columns or hidden_from_drag_drop
-    if _frozen is not None:
+    _frozen_base = frozen_columns or hidden_from_drag_drop
+    _frozen: list[str] | None = None
+    if _frozen_base is not None or cc_pinned_fields:
+        merged_frozen: list[str] = []
+        seen_frozen: set[str] = set()
+        for src in (_frozen_base or [], cc_pinned_fields):
+            for field in src:
+                if field not in seen_frozen:
+                    seen_frozen.add(field)
+                    merged_frozen.append(field)
+        _frozen = merged_frozen
+    if _frozen:
         data_payload["hidden_from_drag_drop"] = _frozen
     if sorters is not None:
         data_payload["sorters"] = sorters

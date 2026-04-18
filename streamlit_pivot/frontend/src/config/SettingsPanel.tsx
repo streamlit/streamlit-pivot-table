@@ -47,6 +47,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  getDimensionLabel,
+  getRenderedValueLabel,
   normalizeAggregationConfig,
   reconcileValueOrder,
   stringifyPivotConfig,
@@ -402,6 +404,9 @@ interface ZoneChipProps {
   id: string;
   zone: ZoneKey;
   field: string;
+  /** Optional display-name override (e.g. from column_config.label or
+   * temporal-grain suffix). Falls back to `field` when absent/blank. */
+  displayLabel?: string;
   isFrozen?: boolean;
   isValues?: boolean;
   aggLabel?: string;
@@ -414,6 +419,7 @@ const ZoneChip: FC<ZoneChipProps> = ({
   id,
   zone,
   field,
+  displayLabel,
   isFrozen,
   isValues,
   aggLabel,
@@ -459,7 +465,7 @@ const ZoneChip: FC<ZoneChipProps> = ({
       data-testid={`settings-${zone}-chip-${field}`}
     >
       {!isFrozen && <GripDotsIcon />}
-      {field}
+      {displayLabel ?? field}
       {isValues && aggLabel && (
         <span className={styles.chipAggLabel}>({aggLabel})</span>
       )}
@@ -628,6 +634,7 @@ const DropZone: FC<DropZoneProps> = ({
 
 interface DraggableAvailableChipProps {
   field: string;
+  displayLabel?: string;
   onToggleMenu: () => void;
   chipRef?: (el: HTMLSpanElement | null) => void;
   isAssigned?: boolean;
@@ -635,6 +642,7 @@ interface DraggableAvailableChipProps {
 
 const DraggableAvailableChip: FC<DraggableAvailableChipProps> = ({
   field,
+  displayLabel,
   onToggleMenu,
   chipRef,
   isAssigned,
@@ -656,7 +664,7 @@ const DraggableAvailableChip: FC<DraggableAvailableChipProps> = ({
       {...listeners}
     >
       <GripDotsIcon />
-      {field}
+      {displayLabel ?? field}
     </span>
   );
 };
@@ -2359,6 +2367,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                 <DraggableAvailableChip
                   key={f}
                   field={f}
+                  displayLabel={getRenderedValueLabel(config, f)}
                   onToggleMenu={() => {
                     if (getAvailableChipMenu(f).length === 0) return;
                     openAddMenu(f);
@@ -2435,6 +2444,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                     id={makeZoneItemId("rows", field)}
                     zone="rows"
                     field={field}
+                    displayLabel={getDimensionLabel(config, field)}
                     isFrozen={frozenColumns?.has(field)}
                     onRemove={(f) => removeFromZone(f, "rows")}
                     menuItems={[]}
@@ -2493,6 +2503,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                     id={makeZoneItemId("columns", field)}
                     zone="columns"
                     field={field}
+                    displayLabel={getDimensionLabel(config, field)}
                     isFrozen={frozenColumns?.has(field)}
                     onRemove={(f) => removeFromZone(f, "columns")}
                     menuItems={[]}
@@ -2539,6 +2550,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                       id={makeZoneItemId("values", field)}
                       zone="values"
                       field={field}
+                      displayLabel={getRenderedValueLabel(config, field)}
                       isFrozen={frozenColumns?.has(field)}
                       isValues
                       aggLabel={

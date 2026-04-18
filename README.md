@@ -89,7 +89,7 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `column_alignment` | `dict[str, str] \| None` | `None` | Per-field text alignment: `"left"`, `"center"`, or `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Visual formatting rules. See [Conditional Formatting](#conditional-formatting). |
-| `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column format hints, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Each entry is a dict with a `format` key (d3-style or printf-style `"%,.2f"`) and optionally `type` (`"date"` / `"datetime"` / `"time"` map to `dimension_format`; everything else maps to `number_format`). Explicit `number_format` / `dimension_format` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
+| `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column display configuration, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Supported keys: `format`, `type`, `label`, `help`, `width` (`"small"` / `"medium"` / `"large"` / integer px), `pinned` (locks the field in the config UI; does not create a sticky column), and `alignment` (`"left"` / `"center"` / `"right"`, unions with the `column_alignment` kwarg; explicit kwarg wins). Explicit `number_format` / `dimension_format` / `column_alignment` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
 | `empty_cell_value` | `str` | `"-"` | Display string for cells with no data. |
 
 #### Layout
@@ -480,10 +480,17 @@ st_pivot_table(
 # -> number_format = {"Revenue": "$,.0f", "Profit": ",.2f"}
 ```
 
-**`column_config`.** A dict mapping column names to a small subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Each entry is read for:
+**`column_config`.** A dict mapping column names to a small subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Both plain dict literals and `st.column_config.*` typed objects are accepted. Supported keys:
 
 - `format` — a format string. d3-style patterns (`",.2f"`, `"$,.0f"`) pass through as-is. Streamlit printf-style patterns (`"%,.2f"`) are normalized by stripping the leading `%`.
 - `type` — if it resolves to `"date"`, `"datetime"`, or `"time"`, the pattern contributes to `dimension_format`; otherwise it contributes to `number_format`. Plain `type_config = {"type": ...}` nesting is also accepted.
+- `label` — display name override for the field. Renames the field in row-dim headers, measure headers, chips (toolbar + settings panel), and exported header rows. The **underlying field id is unchanged** in the serialized config — sort, filter, and conditional-formatting rules still target the canonical id. Empty / whitespace-only labels fall back to the field id.
+- `help` — text rendered as a native `title` tooltip on the corresponding dimension or measure header.
+- `width` — either a preset (`"small"`=100px, `"medium"`=120px, `"large"`=200px) or an integer pixel value in the range `[20, 2000]`. Applies to row-dimension columns and measure columns (for the `col-single` header in single-value mode, and per-measure value-label cells in multi-value mode). Out-of-range / unparseable widths warn once per field and are skipped. **Interactive resize drags override the configured width at runtime but are not persisted to config**, so the width returns to the configured value after rerun/remount.
+- `pinned` — when `True` or `"left"`, locks the field in the **config UI** (equivalent to adding it to `frozen_columns`): the field cannot be removed from its zone or reordered via drag-and-drop. This does **not** create a visually sticky column. `"right"` is currently warned and ignored.
+- `alignment` — one of `"left"`, `"center"`, `"right"`. Unions with the `column_alignment` kwarg; when both set a value for the same field, the explicit `column_alignment` kwarg wins. Invalid values warn once per field and are skipped (unlike the `column_alignment` kwarg, which still raises on invalid values).
+
+Unknown keys in dict literals warn once per `(field, key)` pair. Streamlit's internal defaults from typed `st.column_config.*` objects (`disabled`, `required`, `default`) are silently ignored. Recognized but unsupported column types (e.g. `line_chart`, `selectbox`) warn once per `(field, type)`.
 
 ```python
 st_pivot_table(
@@ -493,14 +500,15 @@ st_pivot_table(
     columns=["Order Date"],
     values=["Revenue", "Units"],
     column_config={
-        "Revenue": {"format": "$,.0f"},
-        "Units": {"format": ",.0f"},
+        "Region": {"label": "Area", "help": "Geographic region", "width": "large", "pinned": True},
+        "Revenue": {"format": "$,.0f", "label": "Rev", "width": 180, "alignment": "right"},
+        "Units": {"format": ",.0f", "alignment": "center"},
         "Order Date": {"format": "YYYY-MM-DD", "type": "date"},
     },
 )
 ```
 
-**Precedence.** `explicit number_format / dimension_format` > `column_config` > `Styler`. The lower-priority sources only fill gaps — any field already present in an explicit format dict keeps the caller-supplied pattern.
+**Precedence.** For format fields: `explicit number_format / dimension_format` > `column_config` > `Styler`. For alignment: `explicit column_alignment` > `column_config.alignment` > default (right-aligned measures, left-aligned dimensions). The lower-priority sources only fill gaps — any field already present in an explicit format or alignment dict keeps the caller-supplied value. `label`, `help`, and `width` are `column_config`-driven only (no legacy kwargs). `pinned` **unions** with `frozen_columns` / `hidden_from_drag_drop`.
 
 ### Conditional Formatting
 

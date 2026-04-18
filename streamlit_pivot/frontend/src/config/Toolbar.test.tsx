@@ -115,6 +115,98 @@ describe("Toolbar - rendering", () => {
   });
 });
 
+describe("Toolbar - column_config.label rendering", () => {
+  it("renders row chips using the label override", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          field_labels: { region: "Area" },
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    const chip = screen.getByTestId("toolbar-rows-chip-region");
+    expect(chip).toHaveTextContent("Area");
+    expect(chip).not.toHaveTextContent(/^region/);
+  });
+
+  it("renders value chips using the label override", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          values: ["revenue"],
+          field_labels: { revenue: "Rev" },
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("toolbar-values-chip-revenue")).toHaveTextContent(
+      "Rev",
+    );
+  });
+
+  it("empty-string label falls back to field id", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          field_labels: { region: "" },
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("toolbar-rows-chip-region")).toHaveTextContent(
+      "region",
+    );
+  });
+
+  it("whitespace-only label falls back to field id", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          field_labels: { region: "   " },
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("toolbar-rows-chip-region")).toHaveTextContent(
+      "region",
+    );
+  });
+
+  it("settings panel chips also use the label override", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          values: ["revenue"],
+          field_labels: { region: "Area", revenue: "Rev" },
+        })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    expect(screen.getByTestId("settings-rows-chip-region")).toHaveTextContent(
+      "Area",
+    );
+    expect(
+      screen.getByTestId("settings-values-chip-revenue"),
+    ).toHaveTextContent("Rev");
+  });
+});
+
 describe("Toolbar - interactions", () => {
   it("fires onConfigChange when a value aggregation changes via settings panel", () => {
     const handleChange = vi.fn();
@@ -1323,6 +1415,34 @@ describe("Toolbar - frozen columns", () => {
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     const chip = screen.getByTestId("settings-rows-chip-region");
     expect(chip.className).toContain("Frozen");
+  });
+
+  // Contract: Python-side column_config.pinned unions into
+  // hidden_from_drag_drop, which PivotRoot passes to Toolbar as
+  // frozenColumns. This test anchors the frontend side of that pipeline:
+  // fields delivered via frozenColumns (whether from explicit
+  // frozen_columns kwarg or column_config.pinned) lock equally.
+  it("column_config.pinned entries lock the chip like frozen_columns", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: ["region", "category"] })}
+        allColumns={ALL_COLUMNS}
+        numericColumns={NUMERIC_COLUMNS}
+        onConfigChange={vi.fn()}
+        frozenColumns={new Set(["category"])}
+      />,
+    );
+    expect(
+      screen.queryByTestId("toolbar-rows-remove-category"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("toolbar-rows-remove-region"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const lockedChip = screen.getByTestId("settings-rows-chip-category");
+    const unlockedChip = screen.getByTestId("settings-rows-chip-region");
+    expect(lockedChip.className).toContain("Frozen");
+    expect(unlockedChip.className).not.toContain("Frozen");
   });
 });
 

@@ -44,6 +44,7 @@ TOOLBAR_SCRIPT = Path(__file__).parent / "pivot_table_toolbar_app.py"
 INTERACTIONS_SCRIPT = Path(__file__).parent / "pivot_table_interactions_app.py"
 DATA_SCRIPT = Path(__file__).parent / "pivot_table_data_app.py"
 GOLDEN_SCRIPT = Path(__file__).parent / "pivot_table_golden_app.py"
+COLUMN_CONFIG_SCRIPT = Path(__file__).parent / "pivot_table_column_config_app.py"
 
 PIVOT_KEYS = [
     "test_pivot",
@@ -149,6 +150,14 @@ GOLDEN_PIVOT_KEYS = [
     "golden_export",
 ]
 
+COLUMN_CONFIG_PIVOT_KEYS = [
+    "test_pivot_cc_label",
+    "test_pivot_cc_help",
+    "test_pivot_cc_width_px",
+    "test_pivot_cc_width_preset",
+    "test_pivot_cc_pinned",
+]
+
 APP_CONFIGS = {
     "default": {"script": SCRIPT, "pivot_keys": PIVOT_KEYS},
     "pivot_table_test.py": {"script": TOOLBAR_SCRIPT, "pivot_keys": TOOLBAR_PIVOT_KEYS},
@@ -160,6 +169,10 @@ APP_CONFIGS = {
     "pivot_table_golden_test.py": {
         "script": GOLDEN_SCRIPT,
         "pivot_keys": GOLDEN_PIVOT_KEYS,
+    },
+    "pivot_table_column_config_test.py": {
+        "script": COLUMN_CONFIG_SCRIPT,
+        "pivot_keys": COLUMN_CONFIG_PIVOT_KEYS,
     },
 }
 

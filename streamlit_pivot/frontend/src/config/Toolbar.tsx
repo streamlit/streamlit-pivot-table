@@ -52,6 +52,7 @@ import {
 import {
   getDimensionLabel,
   getRenderedValueFields,
+  getRenderedValueLabel,
   normalizeAggregationConfig,
   reconcileValueOrder,
   stringifyPivotConfig,
@@ -688,6 +689,7 @@ const Toolbar: FC<ToolbarProps> = ({
           onRemoveSynthetic={handleRemoveSynthetic}
           aggPortalTarget={toolbarRef.current}
           aggTestIdPrefix="toolbar-values-agg"
+          displayLabelForField={(field) => getRenderedValueLabel(config, field)}
         />
         <DragOverlay dropAnimation={{ duration: 200 }}>
           {activeField ? (

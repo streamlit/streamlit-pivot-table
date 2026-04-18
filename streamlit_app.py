@@ -2023,6 +2023,113 @@ st_pivot_table(
 section_settings()
 
 # ---------------------------------------------------------------------------
+# Section 20: column_config (Tier 1: label, help, width, pinned, alignment)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("20. Column Config (label, help, width, pinned, alignment)")
+
+
+@st.fragment
+def section_column_config():
+    st.markdown(
+        """
+Pass a ``column_config`` dict to customize **display** properties per field
+without changing the underlying data identity. Supported Tier 1 keys:
+
+- ``label`` — override the display name shown in all headers, chips, and
+  exported header rows. Canonical field ids in the serialized config are
+  **unchanged** (sort/filter/conditional formatting still target ids).
+  Empty / whitespace-only labels fall back to the field id.
+- ``help`` — text rendered as a native ``title`` tooltip on dimension and
+  measure headers.
+- ``width`` — either a preset (``"small"``=100px, ``"medium"``=120px,
+  ``"large"``=200px) or an integer pixel value in the range ``[20, 2000]``.
+  Applies to row dimension columns and measure columns. Interactive resize
+  drags override this at runtime (but are **not** persisted to config).
+- ``pinned`` — when ``True`` or ``"left"``, locks the field in the config
+  UI (equivalent to adding it to ``frozen_columns``). This does **not**
+  create a visually sticky column — that's a separate concern.
+- ``alignment`` — ``"left"``, ``"center"``, or ``"right"``. Unions with the
+  ``column_alignment`` kwarg; explicit kwarg wins on conflicts.
+
+Both plain dict literals and ``st.column_config.*`` typed objects are
+accepted. Unknown keys in dict literals warn once per (field, key);
+Streamlit's internal defaults from typed objects are silently ignored.
+"""
+    )
+
+    st_pivot_table(
+        df,
+        key="column_config_demo",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        column_config={
+            "Region": {
+                "label": "Area",
+                "help": "Geographic region",
+                "width": "large",
+                "pinned": True,
+                "alignment": "left",
+            },
+            "Revenue": {
+                "label": "Rev",
+                "help": "Total revenue in USD",
+                "width": 180,
+                "alignment": "right",
+            },
+            "Profit": {
+                "label": "Net",
+                "help": "Net profit in USD",
+                "alignment": "center",
+            },
+        },
+        show_totals=True,
+        interactive=True,
+    )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+st_pivot_table(
+    df,
+    key="column_config_demo",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    aggregation={"Revenue": "sum", "Profit": "sum"},
+    column_config={
+        "Region": {
+            "label": "Area",
+            "help": "Geographic region",
+            "width": "large",
+            "pinned": True,
+            "alignment": "left",
+        },
+        "Revenue": {
+            "label": "Rev",
+            "help": "Total revenue in USD",
+            "width": 180,
+            "alignment": "right",
+        },
+        "Profit": {
+            "label": "Net",
+            "help": "Net profit in USD",
+            "alignment": "center",
+        },
+    },
+    show_totals=True,
+    interactive=True,
+)
+""",
+            language="python",
+        )
+
+
+section_column_config()
+
+# ---------------------------------------------------------------------------
 # Footer: Raw Data
 # ---------------------------------------------------------------------------
 st.divider()

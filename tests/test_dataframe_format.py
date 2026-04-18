@@ -227,8 +227,8 @@ class TestTranslateColumnConfig:
             "Revenue": {"format": ",.2f"},
         }
         df = pd.DataFrame({"Revenue": [100.0]})
-        nf, df_fmt = pivot_module._translate_column_config(config, df)
-        assert nf.get("Revenue") == ",.2f"
+        result = pivot_module._translate_column_config(config, df)
+        assert result["number_format"].get("Revenue") == ",.2f"
 
     def test_date_column_format(self, pivot_module):
         """DateColumn -> dimension_format."""
@@ -236,21 +236,425 @@ class TestTranslateColumnConfig:
             "order_date": {"format": "YYYY-MM-DD", "type": "date"},
         }
         df = pd.DataFrame({"order_date": pd.to_datetime(["2024-01-15"])})
-        nf, df_fmt = pivot_module._translate_column_config(config, df)
-        assert df_fmt.get("order_date") == "YYYY-MM-DD"
+        result = pivot_module._translate_column_config(config, df)
+        assert result["dimension_format"].get("order_date") == "YYYY-MM-DD"
 
     def test_empty_config(self, pivot_module):
         df = pd.DataFrame({"x": [1]})
-        nf, df_fmt = pivot_module._translate_column_config({}, df)
-        assert nf == {}
-        assert df_fmt == {}
+        result = pivot_module._translate_column_config({}, df)
+        assert result == {}
 
     def test_printf_style_translated(self, pivot_module):
         """Streamlit printf-style '%,.2f' -> d3-style ',.2f'."""
         config = {"Revenue": {"format": "%,.2f"}}
         df = pd.DataFrame({"Revenue": [100.0]})
-        nf, _ = pivot_module._translate_column_config(config, df)
-        assert nf["Revenue"] == ",.2f"
+        result = pivot_module._translate_column_config(config, df)
+        assert result["number_format"]["Revenue"] == ",.2f"
+
+    def test_label_emitted(self, pivot_module):
+        config = {"Revenue": {"label": "Total Revenue"}}
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_labels"] == {"Revenue": "Total Revenue"}
+
+    def test_help_emitted(self, pivot_module):
+        config = {"Revenue": {"help": "USD, pre-tax"}}
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_help"] == {"Revenue": "USD, pre-tax"}
+
+    def test_help_blank_string_ignored(self, pivot_module):
+        config = {"Revenue": {"help": ""}}
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "field_help" not in result
+
+    def test_width_presets(self, pivot_module):
+        df = pd.DataFrame({"A": [1], "B": [1], "C": [1]})
+        result = pivot_module._translate_column_config(
+            {
+                "A": {"width": "small"},
+                "B": {"width": "medium"},
+                "C": {"width": "large"},
+            },
+            df,
+        )
+        assert result["field_widths"] == {
+            "A": "small",
+            "B": "medium",
+            "C": "large",
+        }
+
+    def test_width_pixel_int_accepted(self, pivot_module):
+        df = pd.DataFrame({"A": [1]})
+        result = pivot_module._translate_column_config({"A": {"width": 150}}, df)
+        assert result["field_widths"] == {"A": 150}
+
+    def test_width_bounds_20_and_2000_accepted(self, pivot_module):
+        df = pd.DataFrame({"A": [1], "B": [1]})
+        result = pivot_module._translate_column_config(
+            {"A": {"width": 20}, "B": {"width": 2000}}, df
+        )
+        assert result["field_widths"] == {"A": 20, "B": 2000}
+
+    def test_width_rejects_below_min(self, pivot_module, recwarn):
+        df = pd.DataFrame({"A": [1]})
+        result = pivot_module._translate_column_config({"A": {"width": 5}}, df)
+        assert "field_widths" not in result
+        assert any("invalid width" in str(w.message).lower() for w in recwarn)
+
+    def test_width_rejects_above_max(self, pivot_module, recwarn):
+        df = pd.DataFrame({"A": [1]})
+        result = pivot_module._translate_column_config({"A": {"width": 99999}}, df)
+        assert "field_widths" not in result
+        assert any("invalid width" in str(w.message).lower() for w in recwarn)
+
+    def test_width_rejects_zero_and_negative(self, pivot_module, recwarn):
+        df = pd.DataFrame({"A": [1], "B": [1]})
+        result = pivot_module._translate_column_config(
+            {"A": {"width": 0}, "B": {"width": -50}}, df
+        )
+        assert "field_widths" not in result
+        assert sum(1 for w in recwarn if "invalid width" in str(w.message).lower()) == 2
+
+    def test_width_rejects_float(self, pivot_module, recwarn):
+        df = pd.DataFrame({"A": [1]})
+        result = pivot_module._translate_column_config({"A": {"width": 120.0}}, df)
+        assert "field_widths" not in result
+        assert any("invalid width" in str(w.message).lower() for w in recwarn)
+
+    def test_width_rejects_bool(self, pivot_module, recwarn):
+        df = pd.DataFrame({"A": [1]})
+        # bool is int in Python; must be explicitly excluded
+        result = pivot_module._translate_column_config({"A": {"width": True}}, df)
+        assert "field_widths" not in result
+        assert any("invalid width" in str(w.message).lower() for w in recwarn)
+
+    def test_width_rejects_unknown_preset(self, pivot_module, recwarn):
+        df = pd.DataFrame({"A": [1]})
+        result = pivot_module._translate_column_config({"A": {"width": "huge"}}, df)
+        assert "field_widths" not in result
+        assert any("invalid width" in str(w.message).lower() for w in recwarn)
+
+    def test_width_one_shot_warning_per_field_key(self, pivot_module, recwarn):
+        df = pd.DataFrame({"A": [1], "B": [1]})
+        pivot_module._translate_column_config(
+            {"A": {"width": -1}, "B": {"width": -2}}, df
+        )
+        width_warnings = [
+            w for w in recwarn if "invalid width" in str(w.message).lower()
+        ]
+        # Distinct fields each get their own warning.
+        assert len(width_warnings) == 2
+
+    def test_pinned_left_emitted(self, pivot_module):
+        config = {"Region": {"pinned": "left"}, "Revenue": {"pinned": True}}
+        df = pd.DataFrame({"Region": ["E"], "Revenue": [1.0]})
+        result = pivot_module._translate_column_config(config, df)
+        assert sorted(result["pinned_fields"]) == ["Region", "Revenue"]
+
+    def test_pinned_false_and_none_ignored(self, pivot_module):
+        config = {
+            "A": {"pinned": False},
+            "B": {"pinned": None},
+        }
+        df = pd.DataFrame({"A": [1], "B": [1]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "pinned_fields" not in result
+
+    def test_pinned_right_warns_and_is_ignored(self, pivot_module, recwarn):
+        config = {"A": {"pinned": "right"}}
+        df = pd.DataFrame({"A": [1]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "pinned_fields" not in result
+        assert any("right" in str(w.message).lower() for w in recwarn)
+
+    def test_dict_literal_unknown_key_warns(self, pivot_module, recwarn):
+        """Unknown top-level key in a dict-literal triggers a warning."""
+        config = {"Revenue": {"format": ",.2f", "nonsense": "x"}}
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["number_format"]["Revenue"] == ",.2f"
+        assert any(
+            "nonsense" in str(w.message) and "unrecognized" in str(w.message)
+            for w in recwarn
+        )
+
+    def test_dict_literal_with_type_config_still_warns_on_typos(
+        self, pivot_module, recwarn
+    ):
+        """A dict-literal that happens to include `type_config` must still
+        surface typos on sibling keys. The object-style bypass must only kick
+        in when the spec was an actual st.column_config.* object."""
+        config = {
+            "Revenue": {
+                "type_config": {"format": "$,.0f"},
+                "lable": "Total Revenue",
+            }
+        }
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["number_format"]["Revenue"] == "$,.0f"
+        assert any(
+            "lable" in str(w.message) and "unrecognized" in str(w.message)
+            for w in recwarn
+        )
+
+    def test_object_style_silent_on_streamlit_defaults(self, pivot_module, recwarn):
+        """st.column_config.NumberColumn(...) expands to a dict with many
+        internal defaults. We must not warn on those."""
+        import streamlit as st
+
+        spec = dict(st.column_config.NumberColumn(format="$,.2f"))
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config({"Revenue": spec}, df)
+        assert result["number_format"]["Revenue"] == "$,.2f"
+        assert [w for w in recwarn if "unrecognized" in str(w.message)] == []
+
+    def test_object_style_reads_nested_format(self, pivot_module):
+        """Format nested inside type_config (Streamlit object shape) is read."""
+        import streamlit as st
+
+        spec = dict(st.column_config.NumberColumn(format="$,.0f"))
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config({"Revenue": spec}, df)
+        assert result["number_format"]["Revenue"] == "$,.0f"
+
+    def test_object_style_label_and_help(self, pivot_module):
+        import streamlit as st
+
+        spec = dict(
+            st.column_config.NumberColumn(
+                label="Total Revenue", help="USD, pre-tax", pinned=True
+            )
+        )
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config({"Revenue": spec}, df)
+        assert result["field_labels"] == {"Revenue": "Total Revenue"}
+        assert result["field_help"] == {"Revenue": "USD, pre-tax"}
+        assert result["pinned_fields"] == ["Revenue"]
+
+    def test_unsupported_type_warns_once(self, pivot_module, recwarn):
+        import streamlit as st
+
+        spec = dict(st.column_config.LineChartColumn())
+        df = pd.DataFrame({"Sales": [1.0]})
+        pivot_module._translate_column_config({"Sales": spec}, df)
+        lc_warnings = [w for w in recwarn if "line_chart" in str(w.message)]
+        assert len(lc_warnings) == 1
+
+    def test_selectbox_warns_as_unsupported(self, pivot_module, recwarn):
+        import streamlit as st
+
+        spec = dict(st.column_config.SelectboxColumn(options=["a", "b"]))
+        df = pd.DataFrame({"Choice": ["a"]})
+        pivot_module._translate_column_config({"Choice": spec}, df)
+        assert any("selectbox" in str(w.message).lower() for w in recwarn)
+
+    def test_width_frontend_bound_via_mount(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        """field_widths round-trips into PivotConfig for the frontend."""
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_fw",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            column_config={
+                "Revenue": {"width": "large"},
+                "Region": {"width": 150},
+            },
+        )
+        config = calls[0]["default"]["config"]
+        assert config["field_widths"] == {"Revenue": "large", "Region": 150}
+
+    def test_label_and_help_round_trip_to_config(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_lh",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            column_config={
+                "Revenue": {"label": "Rev.", "help": "USD"},
+            },
+        )
+        config = calls[0]["default"]["config"]
+        assert config["field_labels"] == {"Revenue": "Rev."}
+        assert config["field_help"] == {"Revenue": "USD"}
+        # Canonical field ids preserved in rows/columns/values:
+        assert config["values"] == ["Revenue"]
+        assert config["rows"] == ["Region"]
+
+    def test_pinned_unions_with_frozen_columns(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        """column_config pinned + explicit frozen_columns must union."""
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_pin",
+            rows=["Region", "Category"],
+            columns=["Year"],
+            values=["Revenue"],
+            frozen_columns=["Region"],
+            column_config={"Category": {"pinned": True}},
+        )
+        data = calls[0]["data"]
+        assert sorted(data["hidden_from_drag_drop"]) == sorted(["Region", "Category"])
+
+    def test_pinned_alone_populates_hidden_from_drag_drop(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_pin_alone",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            column_config={"Region": {"pinned": True}},
+        )
+        data = calls[0]["data"]
+        assert data["hidden_from_drag_drop"] == ["Region"]
+
+
+# ---------------------------------------------------------------------------
+# column_config.alignment ↔ column_alignment reconciliation
+# ---------------------------------------------------------------------------
+
+
+class TestAlignmentReconciliation:
+    """column_config.alignment is a supported key that unions with the
+    `column_alignment` kwarg. Precedence: explicit kwarg > column_config >
+    default. Invalid values from column_config warn-and-skip (mirrors width
+    policy); invalid values via the kwarg still raise (unchanged behavior)."""
+
+    def test_dict_literal_alignment_populates_translation(self, pivot_module):
+        config = {"Revenue": {"alignment": "right"}, "Region": {"alignment": "center"}}
+        df = pd.DataFrame({"Revenue": [1.0], "Region": ["A"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["column_alignment"] == {"Revenue": "right", "Region": "center"}
+
+    def test_object_style_alignment_populates_translation(self, pivot_module):
+        """st.column_config.Column(alignment=...) flows through."""
+        import streamlit as st
+
+        spec = dict(st.column_config.NumberColumn(alignment="center"))
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config({"Revenue": spec}, df)
+        assert result["column_alignment"] == {"Revenue": "center"}
+
+    def test_object_style_alignment_none_is_silently_ignored(
+        self, pivot_module, recwarn
+    ):
+        """st.column_config.Column() with no alignment set must not warn or
+        contribute an entry (alignment defaults to None in the object)."""
+        import streamlit as st
+
+        spec = dict(st.column_config.NumberColumn(format="$,.0f"))
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config({"Revenue": spec}, df)
+        assert "column_alignment" not in result
+        assert [w for w in recwarn if "alignment" in str(w.message).lower()] == []
+
+    def test_invalid_alignment_warns_and_skips(self, pivot_module, recwarn):
+        config = {"Revenue": {"alignment": "middle"}}
+        df = pd.DataFrame({"Revenue": [1.0]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "column_alignment" not in result
+        assert any(
+            "alignment" in str(w.message).lower() and "middle" in str(w.message)
+            for w in recwarn
+        )
+
+    def test_invalid_alignment_warns_once_per_field(self, pivot_module, recwarn):
+        config = {"Revenue": {"alignment": "bogus"}}
+        df = pd.DataFrame({"Revenue": [1.0]})
+        pivot_module._translate_column_config(config, df)
+        pivot_module._translate_column_config(config, df)
+        align_warnings = [w for w in recwarn if "alignment" in str(w.message).lower()]
+        # Each call creates its own `warned` set; one-shot cadence is per-call.
+        assert len(align_warnings) == 2
+
+    def test_alignment_allowlist_no_unknown_key_warning(self, pivot_module, recwarn):
+        """`alignment` must be in the user-facing allowlist, so a dict-literal
+        with only alignment does not trip the unknown-key warning."""
+        config = {"Revenue": {"alignment": "right"}}
+        df = pd.DataFrame({"Revenue": [1.0]})
+        pivot_module._translate_column_config(config, df)
+        assert [w for w in recwarn if "unrecognized" in str(w.message).lower()] == []
+
+    def test_column_config_alignment_reaches_mounted_config(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_align_cc",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            column_config={"Revenue": {"alignment": "center"}},
+        )
+        config = calls[0]["default"]["config"]
+        assert config["column_alignment"] == {"Revenue": "center"}
+
+    def test_explicit_kwarg_overrides_column_config(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        """Explicit column_alignment kwarg wins for fields set in both."""
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_align_override",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            column_alignment={"Revenue": "left"},
+            column_config={"Revenue": {"alignment": "right"}},
+        )
+        config = calls[0]["default"]["config"]
+        assert config["column_alignment"]["Revenue"] == "left"
+
+    def test_column_config_fills_gap_when_kwarg_misses_field(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        """Fields only mentioned in column_config still contribute."""
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_align_gap",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue", "Profit"],
+            column_alignment={"Revenue": "left"},
+            column_config={"Profit": {"alignment": "center"}},
+        )
+        config = calls[0]["default"]["config"]
+        assert config["column_alignment"]["Revenue"] == "left"
+        assert config["column_alignment"]["Profit"] == "center"
+
+    def test_explicit_kwarg_invalid_still_raises(self, pivot_module, sample_df):
+        """The existing kwarg validator is unchanged; bad explicit values
+        still raise ValueError even when column_config is also set."""
+        import pytest
+
+        with pytest.raises(ValueError, match="column_alignment"):
+            pivot_module.st_pivot_table(
+                sample_df,
+                key="pivot_align_bad",
+                rows=["Region"],
+                columns=["Year"],
+                values=["Revenue"],
+                column_alignment={"Revenue": "middle"},
+                column_config={"Revenue": {"alignment": "right"}},
+            )
 
 
 # ---------------------------------------------------------------------------

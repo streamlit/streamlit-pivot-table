@@ -64,6 +64,7 @@ import {
 } from "./temporalHierarchy";
 import { useHeaderMenu } from "./useHeaderMenu";
 import tableStyles from "./TableRenderer.module.css";
+import { resolveEffectiveWidth, resolveFieldWidth } from "./fieldWidthResolver";
 
 export interface VirtualizedTableRendererProps {
   pivotData: PivotData;
@@ -768,13 +769,46 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     ? columnWidth * renderedValueFields.length
     : columnWidth;
 
+  // Per-slot configured width from `column_config.field_widths`. Each data
+  // slot represents one column-key position in the column-header grid. In
+  // single-value mode the slot width is the single measure's configured
+  // width; in multi-value mode a slot contains every measure, so the width
+  // is the sum of each measure's configured width (falling back to the
+  // default per-measure `columnWidth` when no entry is configured). This
+  // keeps the body column widths in sync with the per-measure header cells
+  // rendered by the shared `renderColumnHeaders` helper.
+  const configuredSlotWidth = useMemo(() => {
+    if (!config.field_widths) return undefined;
+    if (hasMultipleValues) {
+      let total = 0;
+      let anyConfigured = false;
+      for (const f of renderedValueFields) {
+        const w = resolveFieldWidth(config, f);
+        if (w != null) anyConfigured = true;
+        total += w ?? columnWidth;
+      }
+      return anyConfigured ? total : undefined;
+    }
+    const singleField = renderedValueFields[0];
+    return resolveFieldWidth(config, singleField);
+  }, [config, hasMultipleValues, renderedValueFields, columnWidth]);
+
+  // Merge runtime resize (per-slot user drag) with configured widths.
+  // Precedence per slot: runtime `columnWidthMap` > `field_widths` >
+  // uniform `dataColWidth` fallback. The array is only materialized when
+  // *either* source contributes at least one non-default width; otherwise
+  // we return `undefined` so `VirtualScroll` uses the uniform fast path.
   const variableColumnWidths = useMemo(() => {
-    if (columnWidthMap.size === 0) return undefined;
+    if (columnWidthMap.size === 0 && configuredSlotWidth == null) {
+      return undefined;
+    }
     return Array.from(
       { length: totalDataColumns },
-      (_, i) => columnWidthMap.get(i) ?? dataColWidth,
+      (_, i) =>
+        resolveEffectiveWidth(columnWidthMap.get(i), configuredSlotWidth) ??
+        dataColWidth,
     );
-  }, [columnWidthMap, totalDataColumns, dataColWidth]);
+  }, [columnWidthMap, totalDataColumns, dataColWidth, configuredSlotWidth]);
 
   return (
     <>

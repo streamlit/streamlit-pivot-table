@@ -492,6 +492,46 @@ describe("buildExportGrid", () => {
   });
 });
 
+describe("buildExportGrid with field_labels (column_config.label)", () => {
+  it("renders row-dim headers using the label override", () => {
+    const config = makeConfig({
+      field_labels: { region: "Area" },
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    expect(grid[0][0]).toBe("Area");
+  });
+
+  it("renders value-field (measure) headers using the label override", () => {
+    const config = makeConfig({
+      values: ["revenue"],
+      columns: [],
+      field_labels: { revenue: "Rev" },
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    expect(grid[0]).toContain("Rev");
+    expect(grid[0]).not.toContain("revenue");
+  });
+
+  it("falls back to field id when label is empty/whitespace", () => {
+    const config = makeConfig({
+      field_labels: { region: "   " },
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    expect(grid[0][0]).toBe("region");
+  });
+
+  it("does not alter canonical field ids in the config (identity contract)", () => {
+    const config = makeConfig({
+      field_labels: { region: "Area", revenue: "Rev" },
+    });
+    expect(config.rows).toEqual(["region"]);
+    expect(config.values).toEqual(["revenue"]);
+  });
+});
+
 describe("gridToCSV", () => {
   it("serializes a simple grid", () => {
     const grid = [

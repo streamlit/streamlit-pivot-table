@@ -2767,3 +2767,309 @@ describe("Dimension toggle - temporal hierarchy breadcrumb via simplified handle
     expect(onCollapseChange).toHaveBeenCalledWith("row", expect.any(Array));
   });
 });
+
+describe("TableRenderer - column_config.help tooltips", () => {
+  it("sets title on row dimension header from field_help", () => {
+    const pd = createPivotData();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          field_help: { region: "Geographic region" },
+        })}
+      />,
+    );
+    const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
+    expect(rowDimTh.getAttribute("title")).toBe("Geographic region");
+  });
+
+  it("omits title attribute when no help is provided for a row dim", () => {
+    const pd = createPivotData();
+    render(<TableRenderer pivotData={pd} config={makeConfig()} />);
+    const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
+    expect(rowDimTh.getAttribute("title")).toBeNull();
+  });
+
+  it("sets title on single-value column header from field_help", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ columns: [], values: ["revenue"] }),
+    );
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          columns: [],
+          values: ["revenue"],
+          field_help: { revenue: "Total revenue in USD" },
+        })}
+      />,
+    );
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    const measureHeader = headerCells.find(
+      (cell) => cell.getAttribute("title") === "Total revenue in USD",
+    );
+    expect(measureHeader).toBeDefined();
+  });
+
+  it("sets title on measure headers (multi-value) from field_help", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ values: ["revenue", "profit"] }),
+    );
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          values: ["revenue", "profit"],
+          field_help: {
+            revenue: "Total revenue",
+            profit: "Net profit",
+          },
+        })}
+      />,
+    );
+    const valueLabels = screen.getAllByTestId("pivot-value-label");
+    const revenueLabels = valueLabels.filter(
+      (el) => el.getAttribute("title") === "Total revenue",
+    );
+    const profitLabels = valueLabels.filter(
+      (el) => el.getAttribute("title") === "Net profit",
+    );
+    expect(revenueLabels.length).toBeGreaterThan(0);
+    expect(profitLabels.length).toBeGreaterThan(0);
+  });
+
+  it("empty help string does not set title attribute", () => {
+    const pd = createPivotData();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          field_help: { region: "" },
+        })}
+      />,
+    );
+    const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
+    expect(rowDimTh.getAttribute("title")).toBeNull();
+  });
+});
+
+describe("TableRenderer - column_config.width", () => {
+  it("applies configured pixel width to a row-dim header", () => {
+    const pd = createPivotData();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({ field_widths: { region: 180 } })}
+      />,
+    );
+    const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
+    expect((rowDimTh as HTMLElement).style.width).toBe("180px");
+    expect((rowDimTh as HTMLElement).style.minWidth).toBe("180px");
+    expect((rowDimTh as HTMLElement).style.maxWidth).toBe("180px");
+  });
+
+  it("maps preset 'small' to 100px on row dim", () => {
+    const pd = createPivotData();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({ field_widths: { region: "small" } })}
+      />,
+    );
+    const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
+    expect((rowDimTh as HTMLElement).style.width).toBe("100px");
+  });
+
+  it("maps preset 'large' to 200px on row dim", () => {
+    const pd = createPivotData();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({ field_widths: { region: "large" } })}
+      />,
+    );
+    const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
+    expect((rowDimTh as HTMLElement).style.width).toBe("200px");
+  });
+
+  it("rejects out-of-bounds pixel widths on the frontend (clamp to none)", () => {
+    const pd = createPivotData();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({ field_widths: { region: 9999 } })}
+      />,
+    );
+    const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
+    expect((rowDimTh as HTMLElement).style.width).toBe("");
+  });
+
+  it("applies measure width to single-value column leaf headers", () => {
+    const pd = createPivotData();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          values: ["revenue"],
+          field_widths: { revenue: 180 },
+        })}
+      />,
+    );
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    const leafCells = headerCells.filter(
+      (h) => (h as HTMLElement).style.width === "180px",
+    );
+    expect(leafCells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("applies measure width to value label cells in multi-value mode", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ values: ["revenue", "profit"] }),
+    );
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          values: ["revenue", "profit"],
+          field_widths: { revenue: 180, profit: 150 },
+        })}
+      />,
+    );
+    const valueLabels = screen.getAllByTestId("pivot-value-label");
+    const rev = valueLabels.filter(
+      (v) => (v as HTMLElement).style.width === "180px",
+    );
+    const prof = valueLabels.filter(
+      (v) => (v as HTMLElement).style.width === "150px",
+    );
+    expect(rev.length).toBeGreaterThan(0);
+    expect(prof.length).toBeGreaterThan(0);
+  });
+
+  it("applies measure width to total measure cells (show_row_totals)", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        values: ["revenue", "profit"],
+        show_row_totals: true,
+      }),
+    );
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          values: ["revenue", "profit"],
+          show_row_totals: true,
+          field_widths: { revenue: 180 },
+        })}
+      />,
+    );
+    const valueLabels = screen.getAllByTestId("pivot-value-label");
+    const revCells = valueLabels.filter(
+      (v) => (v as HTMLElement).style.width === "180px",
+    );
+    // Expect at least 2 revenue cells (one per column slot + total column)
+    expect(revCells.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("applies single-value column header width when columns are empty", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ columns: [], values: ["revenue"] }),
+    );
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          columns: [],
+          values: ["revenue"],
+          field_widths: { revenue: 220 },
+        })}
+      />,
+    );
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    const wide = headerCells.filter(
+      (h) => (h as HTMLElement).style.width === "220px",
+    );
+    expect(wide.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("applies measure width to single-measure totals header", () => {
+    // For a single value field with row totals on, the only header cell for
+    // the totals column is the `total-header` th itself (no separate
+    // per-measure value-label row is emitted). That cell must honor
+    // column_config.width so the totals column stays consistent with the
+    // non-total measure header.
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        values: ["revenue"],
+        show_row_totals: true,
+      }),
+    );
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          values: ["revenue"],
+          show_row_totals: true,
+          field_widths: { revenue: 170 },
+        })}
+      />,
+    );
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    const totalsHeader = headerCells.find((h) =>
+      (h as HTMLElement).className.includes("totalsCol"),
+    );
+    expect(totalsHeader).toBeDefined();
+    expect((totalsHeader as HTMLElement).style.width).toBe("170px");
+    expect((totalsHeader as HTMLElement).style.minWidth).toBe("170px");
+    expect((totalsHeader as HTMLElement).style.maxWidth).toBe("170px");
+  });
+
+  it("does not apply a single width to multi-measure totals header span", () => {
+    // In multi-measure mode the totals header th spans all measures; per-
+    // measure widths are applied on the per-measure value-label row below.
+    // We must not force a single width onto the spanning cell.
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({
+        values: ["revenue", "profit"],
+        show_row_totals: true,
+      }),
+    );
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          values: ["revenue", "profit"],
+          show_row_totals: true,
+          field_widths: { revenue: 170 },
+        })}
+      />,
+    );
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    const totalsHeader = headerCells.find((h) =>
+      (h as HTMLElement).className.includes("totalsCol"),
+    );
+    expect(totalsHeader).toBeDefined();
+    expect((totalsHeader as HTMLElement).style.width).toBe("");
+  });
+
+  it("unknown field in field_widths is ignored (no crash)", () => {
+    const pd = createPivotData();
+    expect(() =>
+      render(
+        <TableRenderer
+          pivotData={pd}
+          config={makeConfig({
+            field_widths: { nonexistent_field: 180 },
+          })}
+        />,
+      ),
+    ).not.toThrow();
+  });
+});

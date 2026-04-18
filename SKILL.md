@@ -201,7 +201,7 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `column_alignment` | `dict[str, str] \| None` | `None` | `"left"` / `"center"` / `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Color scales, data bars, thresholds. |
-| `column_config` | `dict[str, Any] \| None` | `None` | Streamlit-style format hints; auto-routed to `number_format` or `dimension_format`. |
+| `column_config` | `dict[str, Any] \| None` | `None` | Streamlit-style per-column display config. Keys: `format`, `type`, `label`, `help`, `width` (`"small"`/`"medium"`/`"large"`/int px ∈ [20, 2000]), `pinned` (config-UI lock only, not sticky), `alignment` (`"left"`/`"center"`/`"right"`; unions with `column_alignment` kwarg, explicit kwarg wins). Both dict literals and `st.column_config.*` objects are accepted. |
 | `empty_cell_value` | `str` | `"-"` | String for empty cells. |
 
 #### Layout
@@ -371,12 +371,35 @@ st_pivot_table(
 )
 ```
 
-**Auto-formats from upstream sources.** Precedence: explicit `number_format` / `dimension_format` > `column_config` > Pandas `Styler`.
+**Auto-formats from upstream sources.** Precedence for format fields: explicit `number_format` / `dimension_format` > `column_config` > Pandas `Styler`. For alignment: explicit `column_alignment` > `column_config.alignment` > default (measures right, dims left). `label`, `help`, and `width` are `column_config`-driven only (no legacy kwargs). `pinned` **unions** with `frozen_columns`.
 
 ```python
 styled = df.style.format({"Revenue": "${:,.0f}"})
 st_pivot_table(styled, key="styler_demo", rows=["Region"], values=["Revenue"])
 ```
+
+**Display-oriented `column_config` keys (Tier 1).**
+
+```python
+st_pivot_table(
+    df,
+    key="column_config_display",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    column_config={
+        "Region": {"label": "Area", "help": "Geographic region", "width": "large", "pinned": True},
+        "Revenue": {"label": "Rev", "help": "Total revenue (USD)", "width": 180, "format": "$,.0f", "alignment": "right"},
+    },
+)
+```
+
+- `label` overrides display text only. The **canonical field id is unchanged** in the serialized config; sort, filter, and conditional-formatting rules still target the id. Empty / whitespace-only labels fall back to the id.
+- `help` renders as a native `title` tooltip on the dim/measure header.
+- `width` presets: `"small"`=100px, `"medium"`=120px, `"large"`=200px. Integers must be in `[20, 2000]`; out-of-range values warn once per field and are skipped. **Interactive resize drags override the configured width at runtime but are not persisted to config** (width returns to the configured value after rerun/remount).
+- `pinned=True` (or `"left"`) locks the field in the **config UI** — no drag, no remove. It does **not** create a visually sticky column. `"right"` warns and is ignored.
+- `alignment` accepts `"left"`, `"center"`, or `"right"`. It **unions** with the `column_alignment` kwarg; if both set a value for the same field, the explicit `column_alignment` kwarg wins. Invalid values warn once per field and are skipped (unlike the `column_alignment` kwarg, which still raises on invalid input).
+- Unknown keys in dict literals warn once per `(field, key)`; internal defaults on `st.column_config.*` objects (`disabled`, `required`, `default`) are silently ignored; recognized-but-unsupported column types (e.g. `line_chart`, `selectbox`) warn once per `(field, type)`.
 
 ### Conditional Formatting
 

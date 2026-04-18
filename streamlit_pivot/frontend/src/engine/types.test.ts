@@ -21,8 +21,10 @@ import {
   AGGREGATOR_CLASS,
   CONFIG_SCHEMA_VERSION,
   DEFAULT_CONFIG,
+  getDimensionLabel,
   getDrilledDateGrain,
   getEffectiveDateGrain,
+  getRenderedValueLabel,
   getTemporalGroupingMode,
   type AggregationConfig,
   getAggregationForField,
@@ -421,6 +423,129 @@ describe("validatePivotConfigV1", () => {
     expect(result.filters).toBeUndefined();
     expect(result.row_sort).toBeUndefined();
     expect(result.col_sort).toBeUndefined();
+  });
+});
+
+describe("validatePivotConfigV1 — column_config display metadata", () => {
+  it("accepts valid field_labels map", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_labels: { Revenue: "Total Revenue", Region: "Area" },
+    });
+    expect(result.field_labels).toEqual({
+      Revenue: "Total Revenue",
+      Region: "Area",
+    });
+  });
+
+  it("accepts empty field_labels map", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_labels: {},
+    });
+    expect(result.field_labels).toEqual({});
+  });
+
+  it("rejects non-string field_labels values", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_labels: { Revenue: 123 },
+      }),
+    ).toThrow("field_labels");
+  });
+
+  it("accepts valid field_help map", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_help: { Revenue: "USD, pre-tax" },
+    });
+    expect(result.field_help).toEqual({ Revenue: "USD, pre-tax" });
+  });
+
+  it("rejects non-string field_help values", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_help: { Revenue: true },
+      }),
+    ).toThrow("field_help");
+  });
+
+  it("accepts field_widths preset strings", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_widths: { A: "small", B: "medium", C: "large" },
+    });
+    expect(result.field_widths).toEqual({
+      A: "small",
+      B: "medium",
+      C: "large",
+    });
+  });
+
+  it("accepts field_widths pixel numbers", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_widths: { A: 100, B: 220 },
+    });
+    expect(result.field_widths).toEqual({ A: 100, B: 220 });
+  });
+
+  it("rejects unknown preset string for field_widths", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_widths: { A: "huge" },
+      }),
+    ).toThrow("field_widths");
+  });
+
+  it("rejects non-positive field_widths values", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_widths: { A: 0 },
+      }),
+    ).toThrow("field_widths");
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_widths: { A: -10 },
+      }),
+    ).toThrow("field_widths");
+  });
+
+  it("rejects NaN / Infinity field_widths values", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_widths: { A: Number.NaN },
+      }),
+    ).toThrow("field_widths");
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_widths: { A: Number.POSITIVE_INFINITY },
+      }),
+    ).toThrow("field_widths");
+  });
+
+  it("backward compat: omits new fields when absent", () => {
+    const result = validatePivotConfigV1({ ...DEFAULT_CONFIG });
+    expect(result.field_labels).toBeUndefined();
+    expect(result.field_help).toBeUndefined();
+    expect(result.field_widths).toBeUndefined();
+  });
+
+  it("accepts a config with only some of the new fields set", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_labels: { Revenue: "Rev" },
+    });
+    expect(result.field_labels).toEqual({ Revenue: "Rev" });
+    expect(result.field_help).toBeUndefined();
+    expect(result.field_widths).toBeUndefined();
   });
 });
 
@@ -1067,5 +1192,155 @@ describe("validatePivotConfigV1 — formula synthetic measures", () => {
       ],
     });
     expect(config.aggregation["cost"]).toBe("avg");
+  });
+});
+
+describe("getRenderedValueLabel with field_labels", () => {
+  it("returns field id when no override is set", () => {
+    const config = makeConfig({ values: ["Revenue"] });
+    expect(getRenderedValueLabel(config, "Revenue")).toBe("Revenue");
+  });
+
+  it("returns column_config.label when set", () => {
+    const config = makeConfig({
+      values: ["Revenue"],
+      field_labels: { Revenue: "Total Revenue" },
+    });
+    expect(getRenderedValueLabel(config, "Revenue")).toBe("Total Revenue");
+  });
+
+  it("falls back to field id when label is empty string", () => {
+    const config = makeConfig({
+      values: ["Revenue"],
+      field_labels: { Revenue: "" },
+    });
+    expect(getRenderedValueLabel(config, "Revenue")).toBe("Revenue");
+  });
+
+  it("falls back to field id when label is whitespace-only", () => {
+    const config = makeConfig({
+      values: ["Revenue"],
+      field_labels: { Revenue: "   " },
+    });
+    expect(getRenderedValueLabel(config, "Revenue")).toBe("Revenue");
+  });
+
+  it("trims whitespace around a real label", () => {
+    const config = makeConfig({
+      values: ["Revenue"],
+      field_labels: { Revenue: "  Rev  " },
+    });
+    expect(getRenderedValueLabel(config, "Revenue")).toBe("Rev");
+  });
+
+  it("override takes precedence over synthetic measure label", () => {
+    const config = makeConfig({
+      values: [],
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "difference",
+          numerator: "Revenue",
+          denominator: "Cost",
+        },
+      ],
+      field_labels: { margin: "Gross Margin" },
+    });
+    expect(getRenderedValueLabel(config, "margin")).toBe("Gross Margin");
+  });
+
+  it("uses synthetic measure label when no override", () => {
+    const config = makeConfig({
+      values: [],
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "difference",
+          numerator: "Revenue",
+          denominator: "Cost",
+        },
+      ],
+    });
+    expect(getRenderedValueLabel(config, "margin")).toBe("Margin");
+  });
+});
+
+describe("getDimensionLabel with field_labels", () => {
+  it("returns field id when no override and no grain", () => {
+    const config = makeConfig({ rows: ["Region"] });
+    expect(getDimensionLabel(config, "Region")).toBe("Region");
+  });
+
+  it("returns column_config.label when set (no grain)", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      field_labels: { Region: "Area" },
+    });
+    expect(getDimensionLabel(config, "Region")).toBe("Area");
+  });
+
+  it("falls back to field id for empty label (no grain)", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      field_labels: { Region: "" },
+    });
+    expect(getDimensionLabel(config, "Region")).toBe("Region");
+  });
+
+  it("falls back to field id for whitespace-only label (no grain)", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      field_labels: { Region: "   " },
+    });
+    expect(getDimensionLabel(config, "Region")).toBe("Region");
+  });
+
+  it("appends temporal grain suffix to the override when set", () => {
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: [],
+      field_labels: { order_date: "Order" },
+      auto_date_hierarchy: true,
+    });
+    expect(getDimensionLabel(config, "order_date", "date", "month")).toBe(
+      "Order (Month)",
+    );
+  });
+
+  it("appends temporal grain suffix to the field id when no override", () => {
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: [],
+      auto_date_hierarchy: true,
+    });
+    expect(getDimensionLabel(config, "order_date", "date", "month")).toBe(
+      "order_date (Month)",
+    );
+  });
+
+  it("empty label still appends grain suffix to field id fallback", () => {
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: [],
+      field_labels: { order_date: "" },
+      auto_date_hierarchy: true,
+    });
+    expect(getDimensionLabel(config, "order_date", "date", "year")).toBe(
+      "order_date (Year)",
+    );
+  });
+
+  it("identity contract: label override does not change field id in config", () => {
+    // Labels are display-only: the canonical ids remain untouched, so
+    // sort/filter/CF keyed on the id continue to work.
+    const config = makeConfig({
+      rows: ["Region"],
+      values: ["Revenue"],
+      field_labels: { Region: "Area", Revenue: "Rev" },
+    });
+    expect(config.rows).toEqual(["Region"]);
+    expect(config.values).toEqual(["Revenue"]);
   });
 });

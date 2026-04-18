@@ -99,6 +99,24 @@ export interface PivotConfigV1 {
   dimension_format?: Record<string, string>;
   /** Phase 3d: per-field alignment override. */
   column_alignment?: Record<string, "left" | "center" | "right">;
+  /**
+   * Per-field display-label override. Populated from column_config.label.
+   * Display-only: does NOT rewrite canonical field ids in rows/columns/values.
+   * Empty or whitespace-only values fall back to the field id via
+   * getDimensionLabel / getRenderedValueLabel.
+   */
+  field_labels?: Record<string, string>;
+  /**
+   * Per-field tooltip text. Populated from column_config.help. Rendered on
+   * the corresponding dimension/measure header cells.
+   */
+  field_help?: Record<string, string>;
+  /**
+   * Per-field width override. Populated from column_config.width.
+   * Value is either a size preset ("small" | "medium" | "large") or a pixel
+   * int in the range [20, 2000] (frontend clamps as defense-in-depth).
+   */
+  field_widths?: Record<string, number | "small" | "medium" | "large">;
 }
 
 export type SyntheticOperation = "sum_over_sum" | "difference" | "formula";
@@ -681,11 +699,40 @@ export function getRenderedValueFields(config: PivotConfigV1): string[] {
   return reconcileValueOrder(config.value_order, config);
 }
 
+/**
+ * Resolve a user-provided display override for `field`, with fallback rules:
+ *   1. Missing / non-string → undefined (no override).
+ *   2. Empty or whitespace-only → undefined (falls back to field id).
+ *   3. Otherwise → the trimmed override.
+ *
+ * Centralizing the fallback here keeps every label consumer in sync.
+ */
+function resolveLabelOverride(
+  config: PivotConfigV1,
+  field: string,
+): string | undefined {
+  const override = config.field_labels?.[field];
+  if (typeof override !== "string") return undefined;
+  const trimmed = override.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/**
+ * Resolves the display label for a value field (measure).
+ *
+ * Precedence: `column_config.label` > synthetic measure label > field id.
+ * Synthetic measures (e.g. calculated fields, running totals) carry their
+ * own internal `label` property derived from their definition, but a
+ * user-supplied `column_config.label` still wins so users can always rename
+ * any visible column by id. Empty/whitespace-only overrides fall through.
+ */
 export function getRenderedValueLabel(
   config: PivotConfigV1,
   valueField: string,
 ): string {
   const synthetic = getSyntheticMeasureMap(config).get(valueField);
+  const override = resolveLabelOverride(config, valueField);
+  if (override !== undefined) return override;
   return synthetic?.label ?? valueField;
 }
 
@@ -696,15 +743,24 @@ export function isSyntheticMeasure(
   return getSyntheticMeasureMap(config).has(valueField);
 }
 
+/**
+ * Resolves the display label for a dimension field, appending the active
+ * temporal grain suffix (e.g. "Order Date (Month)") when applicable.
+ *
+ * Precedence: `column_config.label` > field id, then the grain suffix is
+ * appended to whichever base was chosen. Empty / whitespace-only overrides
+ * fall back to the field id via `resolveLabelOverride`.
+ */
 export function getDimensionLabel(
   config: PivotConfigV1,
   field: string,
   columnType?: ColumnType,
   adaptiveGrain?: DateGrain,
 ): string {
+  const base = resolveLabelOverride(config, field) ?? field;
   const grain = getEffectiveDateGrain(config, field, columnType, adaptiveGrain);
-  if (!grain) return field;
-  return `${field} (${DATE_GRAIN_LABELS[grain]})`;
+  if (!grain) return base;
+  return `${base} (${DATE_GRAIN_LABELS[grain]})`;
 }
 
 export function getExplicitDateGrain(
@@ -1142,6 +1198,60 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       }
     }
     result.column_alignment = ca as Record<string, "left" | "center" | "right">;
+  }
+  if (
+    o.field_labels !== undefined &&
+    typeof o.field_labels === "object" &&
+    !Array.isArray(o.field_labels) &&
+    o.field_labels !== null
+  ) {
+    const fl = o.field_labels as Record<string, unknown>;
+    for (const [k, v] of Object.entries(fl)) {
+      if (typeof v !== "string") {
+        throw new Error(`'field_labels["${k}"]' must be a string`);
+      }
+    }
+    result.field_labels = fl as Record<string, string>;
+  }
+  if (
+    o.field_help !== undefined &&
+    typeof o.field_help === "object" &&
+    !Array.isArray(o.field_help) &&
+    o.field_help !== null
+  ) {
+    const fh = o.field_help as Record<string, unknown>;
+    for (const [k, v] of Object.entries(fh)) {
+      if (typeof v !== "string") {
+        throw new Error(`'field_help["${k}"]' must be a string`);
+      }
+    }
+    result.field_help = fh as Record<string, string>;
+  }
+  if (
+    o.field_widths !== undefined &&
+    typeof o.field_widths === "object" &&
+    !Array.isArray(o.field_widths) &&
+    o.field_widths !== null
+  ) {
+    const VALID_PRESETS = new Set<string>(["small", "medium", "large"]);
+    const fw = o.field_widths as Record<string, unknown>;
+    for (const [k, v] of Object.entries(fw)) {
+      if (typeof v === "string") {
+        if (!VALID_PRESETS.has(v)) {
+          throw new Error(
+            `'field_widths["${k}"]' must be a positive number or one of: ${[...VALID_PRESETS].join(", ")}`,
+          );
+        }
+      } else if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
+        throw new Error(
+          `'field_widths["${k}"]' must be a positive number or one of: ${[...VALID_PRESETS].join(", ")}`,
+        );
+      }
+    }
+    result.field_widths = fw as Record<
+      string,
+      number | "small" | "medium" | "large"
+    >;
   }
   return result;
 }

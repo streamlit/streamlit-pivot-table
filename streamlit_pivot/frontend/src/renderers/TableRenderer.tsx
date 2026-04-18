@@ -88,6 +88,7 @@ import {
   formatTemporalParentLabel,
 } from "../engine/dateGrouping";
 import { getEffectiveDateGrain, type ColumnTypeMap } from "../engine/types";
+import { resolveEffectiveWidth, resolveFieldWidth } from "./fieldWidthResolver";
 import styles from "./TableRenderer.module.css";
 
 export type MenuAxis = "row" | "col" | "value";
@@ -974,10 +975,12 @@ export function renderColumnHeaders(
                           adaptiveDateGrains?.[dim],
                         );
 
+                    const breadcrumbHelp = config.field_help?.[dim];
                     return (
                       <div
                         key={`hierarchy-breadcrumb-${rowHeaderIdx}`}
                         className={styles.hierarchyBreadcrumb}
+                        title={breadcrumbHelp || undefined}
                       >
                         {rowHeaderIdx > 0 && (
                           <span
@@ -1100,7 +1103,10 @@ export function renderColumnHeaders(
               rowLevel.dimIndex === 0 && rowLevel.hierarchyOffset === 0;
 
             const rowDimResizeIdx = -(rowHeaderIdx + 1);
-            const rowDimResizeWidth = columnWidthMap?.get(rowDimResizeIdx);
+            const rowDimResizeWidth = resolveEffectiveWidth(
+              columnWidthMap?.get(rowDimResizeIdx),
+              resolveFieldWidth(config, dim),
+            );
             const rowDimCellStyle: React.CSSProperties | undefined =
               rowDimResizeWidth != null
                 ? {
@@ -1111,12 +1117,14 @@ export function renderColumnHeaders(
                   }
                 : stickyTop;
 
+            const rowDimHelp = config.field_help?.[dim];
             cells.push(
               <th
                 key={`row-dim-${rowHeaderIdx}`}
                 className={`${styles.headerCell} ${isPrimaryRowHierarchy ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${rowSortDir ? styles.headerSorted : ""} ${isFirstRowDim ? styles.headerRowPinned : ""} ${canToggleThisDim ? styles.dimensionToggleCell : ""} ${isGroupingDimHeader ? styles.groupingDimHeader : ""}`}
                 rowSpan={cornerFullRowSpan}
                 style={rowDimCellStyle}
+                title={rowDimHelp || undefined}
                 data-testid={
                   canToggleThisDim
                     ? `pivot-dim-toggle-row-${rowHeaderIdx}-${slugify(dim)}`
@@ -1376,10 +1384,21 @@ export function renderColumnHeaders(
               onToggleColGroup);
           const groupKeyStr = makeKeyString(slot.key.slice(0, keyIndex + 1));
 
-          const resizeWidth =
-            columnWidthMap && (level === numColLevels - 1 || isCollapseLevel)
+          const isLeafLevel = level === numColLevels - 1 || isCollapseLevel;
+          const runtimeWidth =
+            columnWidthMap && isLeafLevel
               ? columnWidthMap.get(slotIdx)
               : undefined;
+          const configuredLeafWidth =
+            isLeafLevel &&
+            !hasMultipleValues &&
+            renderedValueFields.length === 1
+              ? resolveFieldWidth(config, renderedValueFields[0])
+              : undefined;
+          const resizeWidth = resolveEffectiveWidth(
+            runtimeWidth,
+            configuredLeafWidth,
+          );
           const cellStyle: React.CSSProperties | undefined =
             resizeWidth != null
               ? {
@@ -1505,13 +1524,29 @@ export function renderColumnHeaders(
         : getRenderedValueLabel(config, renderedValueFields[0] ?? "") ||
           "Values";
       const singleField = renderedValueFields[0] ?? "";
+      const singleFieldHelp = singleField
+        ? config.field_help?.[singleField]
+        : undefined;
+      const singleFieldConfigWidth = hasMultipleValues
+        ? undefined
+        : resolveFieldWidth(config, singleField);
+      const singleHeaderStyle: React.CSSProperties | undefined =
+        singleFieldConfigWidth != null
+          ? {
+              ...(stickyTop ?? {}),
+              width: singleFieldConfigWidth,
+              minWidth: singleFieldConfigWidth,
+              maxWidth: singleFieldConfigWidth,
+            }
+          : stickyTop;
       cells.push(
         <th
           key="col-single"
           scope="col"
           className={styles.headerCell}
           colSpan={colSpanVal}
-          style={stickyTop}
+          style={singleHeaderStyle}
+          title={singleFieldHelp || undefined}
           data-testid="pivot-header-cell"
         >
           {headerLabel}
@@ -1529,6 +1564,25 @@ export function renderColumnHeaders(
 
     if (rowTotalValueFields.length > 0 && level === 0) {
       const totalColSpan = hasMultipleValues ? rowTotalValueFields.length : 1;
+      // In single-measure mode this totals th is the only header cell for the
+      // total column, so it must honor `column_config.width` for the measure
+      // to stay consistent with the non-total measure header above. In
+      // multi-measure mode the per-measure value-label row cells carry the
+      // width (one per measure), so spanning a single width here would be
+      // incorrect.
+      const totalSingleField =
+        !hasMultipleValues && rowTotalValueFields.length === 1
+          ? rowTotalValueFields[0]
+          : undefined;
+      const totalConfigWidth = resolveFieldWidth(config, totalSingleField);
+      const totalHeaderStyle: React.CSSProperties | undefined =
+        totalConfigWidth != null
+          ? {
+              width: totalConfigWidth,
+              minWidth: totalConfigWidth,
+              maxWidth: totalConfigWidth,
+            }
+          : undefined;
       cells.push(
         <th
           key="total-header"
@@ -1536,6 +1590,7 @@ export function renderColumnHeaders(
           className={`${styles.headerCell} ${styles.totalsCol}`}
           rowSpan={numColLevels}
           colSpan={totalColSpan}
+          style={totalHeaderStyle}
           data-testid="pivot-header-cell"
         >
           Total
@@ -1556,11 +1611,23 @@ export function renderColumnHeaders(
       if ((slot as TemporalColSlot).temporalCollapse) continue;
       for (let vfi = 0; vfi < renderedValueFields.length; vfi++) {
         const valField = renderedValueFields[vfi];
+        const valFieldHelp = config.field_help?.[valField];
+        const valFieldConfigWidth = resolveFieldWidth(config, valField);
+        const valCellStyle: React.CSSProperties =
+          valFieldConfigWidth != null
+            ? {
+                top: valueLabelTop,
+                width: valFieldConfigWidth,
+                minWidth: valFieldConfigWidth,
+                maxWidth: valFieldConfigWidth,
+              }
+            : { top: valueLabelTop };
         valueCells.push(
           <th
             key={`val-${slot.key.join("\x00")}-${valField}`}
             className={styles.valueLabel}
-            style={{ top: valueLabelTop }}
+            style={valCellStyle}
+            title={valFieldHelp || undefined}
             data-testid="pivot-value-label"
           >
             <div className={styles.headerCellInner}>
@@ -1607,11 +1674,23 @@ export function renderColumnHeaders(
     }
     if (rowTotalValueFields.length > 0) {
       for (const valField of rowTotalValueFields) {
+        const valFieldHelp = config.field_help?.[valField];
+        const valFieldConfigWidth = resolveFieldWidth(config, valField);
+        const valTotalCellStyle: React.CSSProperties =
+          valFieldConfigWidth != null
+            ? {
+                top: valueLabelTop,
+                width: valFieldConfigWidth,
+                minWidth: valFieldConfigWidth,
+                maxWidth: valFieldConfigWidth,
+              }
+            : { top: valueLabelTop };
         valueCells.push(
           <th
             key={`val-total-${valField}`}
             className={`${styles.valueLabel} ${styles.totalsCol}`}
-            style={{ top: valueLabelTop }}
+            style={valTotalCellStyle}
+            title={valFieldHelp || undefined}
             data-testid="pivot-value-label"
           >
             <div className={styles.headerCellInner}>
