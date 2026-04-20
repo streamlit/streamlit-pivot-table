@@ -623,3 +623,180 @@ def test_color_scale_mid_value_none_is_ignored(pivot_module, sample_df, mount_re
     sent_config = calls[0]["data"]["config"]
     rule = sent_config["conditional_formatting"][0]
     assert rule.get("mid_value") is None
+
+
+# ---------------------------------------------------------------------------
+# style= validation tests
+# ---------------------------------------------------------------------------
+
+
+def test_style_invalid_preset_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="unknown preset"):
+        pivot_module._resolve_style("nonexistent_preset")
+
+
+def test_style_invalid_density_raises(pivot_module):
+    with pytest.raises(ValueError, match="density"):
+        pivot_module._resolve_style({"density": "ultracompact"})
+
+
+def test_style_invalid_borders_raises(pivot_module):
+    with pytest.raises(ValueError, match="borders"):
+        pivot_module._resolve_style({"borders": "All"})  # case-sensitive
+
+
+def test_style_invalid_font_weight_raises(pivot_module):
+    with pytest.raises(ValueError, match="font_weight"):
+        pivot_module._resolve_style({"column_header": {"font_weight": "700"}})
+
+
+def test_style_invalid_font_size_raises(pivot_module):
+    with pytest.raises(ValueError, match="font_size"):
+        pivot_module._resolve_style({"font_size": "13"})  # missing unit
+
+
+def test_style_font_size_accepts_css_functions(pivot_module):
+    """calc(), clamp(), min(), max() are valid CSS size values and must not raise."""
+    for value in [
+        "calc(1rem + 2px)",
+        "clamp(12px, 2vw, 16px)",
+        "min(14px, 1.2em)",
+        "max(12px, 0.8rem)",
+    ]:
+        result = pivot_module._resolve_style({"font_size": value})
+        assert result is not None
+        assert result["font_size"] == value
+
+
+def test_style_invalid_color_empty_raises(pivot_module):
+    with pytest.raises(ValueError, match="non-empty string"):
+        pivot_module._resolve_style({"background_color": ""})
+
+
+def test_style_composition_merges_regions(pivot_module):
+    result = pivot_module._resolve_style(
+        [
+            {"column_header": {"font_weight": "bold"}},
+            {"column_header": {"background_color": "#000"}},
+        ]
+    )
+    assert result is not None
+    assert result["column_header"]["font_weight"] == "bold"
+    assert result["column_header"]["background_color"] == "#000"
+
+
+def test_style_composition_merges_data_cell_by_measure(pivot_module):
+    result = pivot_module._resolve_style(
+        [
+            {"data_cell_by_measure": {"Revenue": {"background_color": "red"}}},
+            {
+                "data_cell_by_measure": {
+                    "Revenue": {"font_weight": "bold"},
+                    "Profit": {"text_color": "green"},
+                }
+            },
+        ]
+    )
+    assert result is not None
+    dcbm = result["data_cell_by_measure"]
+    assert dcbm["Revenue"]["background_color"] == "red"
+    assert dcbm["Revenue"]["font_weight"] == "bold"
+    assert dcbm["Profit"]["text_color"] == "green"
+
+
+def test_style_data_cell_by_measure_unknown_field_warns(
+    pivot_module, sample_df, mount_recorder
+):
+    mount_recorder()
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            style={
+                "data_cell_by_measure": {"NonExistent": {"background_color": "red"}}
+            },
+        )
+    messages = [str(warning.message) for warning in w]
+    assert any("NonExistent" in m for m in messages)
+
+
+def test_style_data_cell_by_measure_invalid_value_raises(pivot_module):
+    with pytest.raises(TypeError):
+        pivot_module._resolve_style({"data_cell_by_measure": {"Revenue": "not_a_dict"}})
+
+
+def test_style_unknown_top_level_key_warns(pivot_module):
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        pivot_module._resolve_style({"unknown_key_xyz": "value"})
+    messages = [str(warning.message) for warning in w]
+    assert any("unknown_key_xyz" in m for m in messages)
+
+
+def test_style_unknown_region_key_warns(pivot_module):
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        pivot_module._resolve_style({"column_header": {"unknown_region_key": "val"}})
+    messages = [str(warning.message) for warning in w]
+    assert any("unknown_region_key" in m for m in messages)
+
+
+def test_style_composition_none_overridden_by_later_value(pivot_module):
+    """Later item (string value) wins over earlier None sentinel."""
+    result = pivot_module._resolve_style(["minimal", {"row_hover_color": "blue"}])
+    assert result is not None
+    assert result.get("row_hover_color") == "blue"
+
+
+def test_style_composition_value_overridden_by_later_none(pivot_module):
+    """Later None sentinel wins over earlier color string."""
+    result = pivot_module._resolve_style(
+        [{"stripe_color": "red"}, {"stripe_color": None}]
+    )
+    assert result is not None
+    assert result.get("stripe_color") is None
+
+
+def test_style_data_cell_by_measure_with_null_values_no_crash(
+    pivot_module, mount_recorder
+):
+    """data_cell_by_measure key warning must not crash when values=None.
+
+    Regression test for the set(resolved_values) bug: if the user provides
+    rows+columns but not values (so auto-detect is bypassed and resolved_values
+    stays None), and also provides data_cell_by_measure, the warning code path
+    must use set(resolved_values or []) and not raise TypeError.
+    """
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "Region": ["East", "West"],
+            "Category": ["A", "B"],
+            "Revenue": [100, 200],
+        }
+    )
+    mount_recorder()
+    import warnings
+
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        # Provide rows+columns but NOT values — resolved_values stays None
+        pivot_module.st_pivot_table(
+            df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            # values intentionally omitted
+            style={"data_cell_by_measure": {"Revenue": {"background_color": "red"}}},
+        )

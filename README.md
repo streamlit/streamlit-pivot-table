@@ -89,6 +89,7 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `column_alignment` | `dict[str, str] \| None` | `None` | Per-field text alignment: `"left"`, `"center"`, or `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Visual formatting rules. See [Conditional Formatting](#conditional-formatting). |
+| `style` | `str \| PivotStyle \| list \| None` | `None` | Region-based table styling. Pass a preset name, a `PivotStyle` dict, or a list that composes presets + overrides. See [Styling](#styling). |
 | `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column display configuration, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Supported keys: `format`, `type`, `label`, `help`, `width` (`"small"` / `"medium"` / `"large"` / integer px), `pinned` (locks the field in the config UI; does not create a sticky column), `alignment` (`"left"` / `"center"` / `"right"`, unions with the `column_alignment` kwarg; explicit kwarg wins), and row-dim cell renderers via `type`: `"link"` (with optional `display_text`), `"image"`, `"checkbox"`, and `"text"` with `max_chars`. Explicit `number_format` / `dimension_format` / `column_alignment` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
 | `empty_cell_value` | `str` | `"-"` | Display string for cells with no data. |
 
@@ -630,6 +631,151 @@ st_pivot_table(
     ],
 )
 ```
+
+### Styling
+
+> **Works with Streamlit theming.** `style=` is a per-table layer over the app's `[theme]` configuration. The pivot tracks the Streamlit theme automatically — including light/dark mode and custom fonts. Use `var(--st-...)` tokens as color string values for theme-aware custom colors.
+
+```python
+# Recommended: theme-aware color using a Streamlit token
+style={"column_header": {"background_color": "var(--st-primary-color)"}}
+
+# Not recommended: raw hex breaks dark mode compatibility
+style={"column_header": {"background_color": "#1a73e8"}}
+```
+
+#### Presets
+
+Six built-in presets are available as string shorthand. All preset colors use `color-mix(… var(--st-...))` — no raw hex — so they adapt to dark mode and custom themes automatically.
+
+| Preset | Description |
+|--------|-------------|
+| `"default"` | No overrides; tracks Streamlit theme defaults. |
+| `"striped"` | Alternating-row banding using the secondary background color. |
+| `"minimal"` | Flat layout: no borders, no hover, no stripes. Good for static output. |
+| `"compact"` | Tight padding + reduced virtualized row height. |
+| `"comfortable"` | Generous padding — easier to scan on large monitors or in reports. |
+| `"contrast"` | Bold emphasized headers, bold totals, subtle stripe. Power BI "Contrast" parity. |
+
+```python
+from streamlit_pivot import st_pivot_table, PivotStyle, RegionStyle, PIVOT_STYLE_PRESETS
+
+st_pivot_table(df, key="p", rows=["Region"], values=["Revenue"], style="striped")
+```
+
+#### `PivotStyle` and `RegionStyle`
+
+```python
+class RegionStyle(TypedDict, total=False):
+    background_color: str
+    text_color: str
+    font_weight: str   # "normal" | "bold"
+
+class PivotStyle(TypedDict, total=False):
+    # Table-wide
+    density: str           # "compact" | "default" | "comfortable"
+    font_size: str         # e.g. "13px", "0.875rem"
+    background_color: str  # cascades to all regions
+    text_color: str        # cascades to all regions
+    stripe_color: str | None   # None = disable striping
+    row_hover_color: str | None  # None = disable hover
+    borders: str           # "all" | "outer" | "rows" | "columns" | "none"
+    border_color: str
+
+    # Region overrides
+    column_header: RegionStyle
+    row_header: RegionStyle
+    data_cell: RegionStyle
+    row_total: RegionStyle      # grand totals per row (rightmost column)
+    column_total: RegionStyle   # grand totals per column (bottom row)
+    subtotal: RegionStyle
+
+    # Per-measure overrides for non-total data cells only
+    data_cell_by_measure: dict[str, RegionStyle]
+```
+
+#### Cascade rules
+
+Precedence from highest to lowest:
+
+1. **Conditional formatting** (per-cell inline via CF rule)
+2. **`data_cell_by_measure[field]`** (per-cell inline; non-total data cells only)
+3. **Region overrides** — `column_header`, `row_header`, `data_cell`, `row_total`, `column_total`, `subtotal`
+4. **Table-wide cascade** — `background_color` / `text_color` cascade to all regions
+5. **Streamlit theme** (`--st-*` fallbacks)
+
+#### Borders modes
+
+| `borders` value | Appearance |
+|-----------------|------------|
+| `"all"` (default) | Full grid — all horizontal and vertical lines |
+| `"outer"` | Outer frame only — no internal gridlines |
+| `"rows"` | Horizontal rules only — financial / editorial style |
+| `"columns"` | Vertical lines only |
+| `"none"` | Completely flat — no borders at all |
+
+#### Naming note: `row_total` vs. `column_total`
+
+API names follow user intent, not CSS class names:
+
+| API field | What it styles | CSS class |
+|-----------|---------------|-----------|
+| `row_total` | Grand total *of* each row — rightmost column | `.totalsCol` |
+| `column_total` | Grand total *of* each column — bottom row | `.totalsRow` |
+
+#### Per-measure styling
+
+`data_cell_by_measure` applies background/text/weight overrides to non-total data cells of a specific measure. Total cells are **not** affected — they use `row_total` / `column_total` region overrides instead (matching Power BI's Values-only scoping).
+
+```python
+st_pivot_table(
+    df, key="per_measure",
+    values=["Revenue", "Profit"],
+    style=PivotStyle(
+        data_cell_by_measure={
+            "Revenue": RegionStyle(
+                background_color="color-mix(in srgb, var(--st-primary-color) 8%, transparent)"
+            ),
+            "Profit": RegionStyle(
+                text_color="color-mix(in srgb, var(--st-text-color) 65%, transparent)",
+                font_weight="bold",
+            ),
+        }
+    ),
+)
+```
+
+#### Composition
+
+Pass a **list** to compose presets and custom overrides. Items are merged left-to-right; later items win:
+
+```python
+_tint = "color-mix(in srgb, var(--st-primary-color) 15%, var(--st-background-color))"
+st_pivot_table(
+    df, key="composed",
+    style=[
+        "compact",
+        "contrast",
+        PivotStyle(
+            row_total=RegionStyle(background_color=_tint),
+            column_total=RegionStyle(background_color=_tint),
+        ),
+    ],
+)
+```
+
+#### Deferred from v1
+
+The following are not yet supported and are planned for a future release:
+
+- Font family (`--st-font` from Streamlit theme is always used)
+- Per-region font size (only table-wide `font_size` is supported)
+- Italic / `font_style`
+- Per-level subtotal styling
+- Hierarchy subtotal styling via the `subtotal` region
+- Per-measure styling on totals (`row_total_by_measure`, `column_total_by_measure`)
+- Thin / thick border widths
+- CSS escape hatch (`class_name`)
 
 ### Null Handling
 

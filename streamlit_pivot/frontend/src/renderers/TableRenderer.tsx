@@ -57,6 +57,14 @@ import {
   type SortConfig,
 } from "../engine/types";
 import { renderCellContent } from "./cellRenderer";
+import {
+  styleToCSS,
+  densityClass,
+  bordersClass,
+  stripesOffClass,
+  hoverOffClass,
+  dataCellByMeasureStyle,
+} from "./styleHelpers";
 import { computeCellStyle } from "./ConditionalFormat";
 import HeaderMenu from "./HeaderMenu";
 import { useHeaderMenu } from "./useHeaderMenu";
@@ -2562,10 +2570,12 @@ export function renderDataRow(
                 false,
               )
             : undefined;
+          const measureStyle = dataCellByMeasureStyle(valField, config.style);
           const cellStyle: React.CSSProperties = {
             ...(align
               ? { textAlign: align as React.CSSProperties["textAlign"] }
               : {}),
+            ...measureStyle,
             ...condStyle,
           };
           const cellInteractive = interactive && cellValue !== null;
@@ -4055,8 +4065,17 @@ const TableRenderer: FC<TableRendererProps> = ({
       )}
       <div
         ref={wrapperRef}
-        className={styles.tableWrapper}
+        className={[
+          styles.tableWrapper,
+          densityClass(config.style, styles),
+          bordersClass(config.style, styles),
+          stripesOffClass(config.style, styles),
+          hoverOffClass(config.style, styles),
+        ]
+          .filter(Boolean)
+          .join(" ")}
         style={{
+          ...styleToCSS(config.style),
           ...(scrollable
             ? { flex: "1 1 0", minHeight: 0 }
             : maxHeight != null

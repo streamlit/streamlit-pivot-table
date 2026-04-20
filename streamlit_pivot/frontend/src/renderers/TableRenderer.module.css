@@ -15,11 +15,25 @@
  * limitations under the License.
  */
 
+/* ---------------------------------------------------------------------------
+ * CSS custom property (--pivot-*) layer
+ *
+ * Every --pivot-* var is set on the .tableWrapper div by styleHelpers.ts when
+ * the user passes a `style=` argument. When no style is set the var is absent
+ * and the fallback chain (which always terminates at a --st-* Streamlit token
+ * or a color-mix against one) produces the original production appearance —
+ * zero visual change guarantee for style=None.
+ *
+ * Precedence stack for any given cell property:
+ *   CF inline > data_cell_by_measure inline > region --pivot-* var > table-wide
+ *   --pivot-bg/--pivot-color > --st-* Streamlit theme fallback
+ * --------------------------------------------------------------------------- */
+
 .tableWrapper {
   width: 100%;
   overflow: auto;
   border-radius: var(--st-base-radius);
-  border: 1px solid var(--st-dataframe-border-color);
+  border: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
 }
 
 .pivotTable {
@@ -27,20 +41,26 @@
   border-collapse: separate;
   border-spacing: 0;
   font-family: var(--st-font);
-  font-size: 0.875rem;
-  color: var(--st-text-color);
-  background-color: var(--st-background-color);
+  font-size: var(--pivot-font-size, 0.875rem);
+  color: var(--pivot-color, var(--st-text-color));
+  background-color: var(--pivot-bg, var(--st-background-color));
   table-layout: auto;
 }
 
 .headerCell {
   padding: 6px 10px;
   text-align: center;
-  font-weight: 500;
-  background-color: var(--st-dataframe-header-background-color, var(--st-secondary-background-color));
-  color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
-  border-bottom: 1px solid var(--st-dataframe-border-color);
-  border-right: 1px solid var(--st-dataframe-border-color);
+  font-weight: var(--pivot-column-header-font-weight, 500);
+  background-color: var(
+    --pivot-column-header-bg,
+    var(--st-dataframe-header-background-color, var(--pivot-bg, var(--st-secondary-background-color)))
+  );
+  color: var(
+    --pivot-column-header-color,
+    color-mix(in srgb, var(--pivot-color, var(--st-text-color)) 66%, transparent)
+  );
+  border-bottom: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
+  border-right: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
   white-space: nowrap;
   position: sticky;
   top: 0;
@@ -48,13 +68,19 @@
 }
 
 .columnHeaderPrimary {
-  font-weight: 600;
-  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+  font-weight: var(--pivot-column-header-font-weight, 600);
+  color: var(
+    --pivot-column-header-color,
+    color-mix(in srgb, var(--pivot-color, var(--st-text-color)) 82%, transparent)
+  );
 }
 
 .columnHeaderSecondary {
-  font-weight: 500;
-  color: color-mix(in srgb, var(--st-text-color) 72%, transparent);
+  font-weight: var(--pivot-column-header-font-weight, 500);
+  color: var(
+    --pivot-column-header-color,
+    color-mix(in srgb, var(--pivot-color, var(--st-text-color)) 72%, transparent)
+  );
 }
 
 /* Opt out of sticky positioning */
@@ -67,29 +93,46 @@
 .rowHeaderCell {
   padding: 6px 10px;
   text-align: left;
-  font-weight: 400;
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 60%, var(--st-background-color));
-  color: var(--st-text-color);
-  border-right: 1px solid var(--st-dataframe-border-color);
-  border-bottom: 1px solid var(--st-dataframe-border-color);
+  font-weight: var(--pivot-row-header-font-weight, 400);
+  background-color: var(
+    --pivot-row-header-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 60%, var(--pivot-bg, var(--st-background-color)))
+  );
+  color: var(--pivot-row-header-color, var(--pivot-color, var(--st-text-color)));
+  border-right: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
+  border-bottom: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
   white-space: nowrap;
 }
 
 .rowHeaderPrimary {
-  font-weight: 600;
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 68%,
-    var(--st-background-color)
+  font-weight: var(--pivot-row-header-font-weight, 600);
+  background-color: var(
+    --pivot-row-header-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 68%, var(--pivot-bg, var(--st-background-color)))
   );
 }
 
 .rowHeaderSecondary {
-  font-weight: 500;
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 60%,
-    var(--st-background-color)
+  font-weight: var(--pivot-row-header-font-weight, 500);
+  background-color: var(
+    --pivot-row-header-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 60%, var(--pivot-bg, var(--st-background-color)))
+  );
+}
+
+/* Row-dimension label cells sit inside the column-header band. When both
+   .headerCell and .rowHeaderPrimary/.rowHeaderSecondary are present (the
+   row-dim corner cell), the column-header region variables should win.
+   Compound specificity 0-2-0 beats either class alone (0-1-0). */
+.headerCell.rowHeaderPrimary,
+.headerCell.rowHeaderSecondary {
+  background-color: var(
+    --pivot-column-header-bg,
+    var(--st-dataframe-header-background-color, var(--pivot-bg, var(--st-secondary-background-color)))
+  );
+  color: var(
+    --pivot-column-header-color,
+    color-mix(in srgb, var(--pivot-color, var(--st-text-color)) 82%, transparent)
   );
 }
 
@@ -102,20 +145,29 @@
 .dataCell {
   padding: 6px 10px;
   text-align: right;
-  border-bottom: 1px solid var(--st-dataframe-border-color);
-  border-right: 1px solid var(--st-dataframe-border-color);
+  background-color: var(--pivot-data-cell-bg, var(--pivot-bg, transparent));
+  color: var(--pivot-data-cell-color, var(--pivot-color, var(--st-text-color)));
+  font-weight: var(--pivot-data-cell-font-weight, 400);
+  border-bottom: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
+  border-right: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
 }
 
-/* Full-row hover highlight for cross-row tracking */
-.pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover td,
-.pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover th {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 30%, var(--st-background-color));
+/* Full-row hover highlight for cross-row tracking.
+   IMPORTANT: the :not(.hoverOff) prefix is part of the disable semantics for
+   row_hover_color=None. All hierarchy hover rules below MUST carry the same
+   prefix so their specificity stays equal and source order decides. */
+.tableWrapper:not(.hoverOff) .pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover td,
+.tableWrapper:not(.hoverOff) .pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover th {
+  background-color: var(
+    --pivot-row-hover-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 30%, var(--pivot-bg, var(--st-background-color)))
+  );
 }
 
 /* Conditionally formatted cells have inline background-color that overrides
    the row hover rule above. A neutral inset shadow tints toward mid-gray,
    giving visible hover feedback on both light AND dark backgrounds. */
-.pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover .condFormatted {
+.tableWrapper:not(.hoverOff) .pivotTable tbody tr:not(.totalsRow):not(.subtotalRow):hover .condFormatted {
   box-shadow: inset 0 0 0 100vmax rgba(128, 128, 128, 0.1);
 }
 
@@ -135,20 +187,41 @@
   opacity: 0.45;
 }
 
+/* column_total region — grand total per column, rendered in the bottom .totalsRow */
 .totalsRow {
-  font-weight: 600;
+  font-weight: var(--pivot-column-total-font-weight, 600);
 }
 
 .totalsRow td,
 .totalsRow th {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 75%, var(--st-background-color));
+  background-color: var(
+    --pivot-column-total-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 75%, var(--pivot-bg, var(--st-background-color)))
+  );
+  color: var(--pivot-column-total-color, var(--pivot-color, var(--st-text-color)));
   border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
-  font-weight: 600;
+  font-weight: var(--pivot-column-total-font-weight, 600);
 }
 
+/* row_total region — grand total per row, rendered in the rightmost .totalsCol */
 .totalsCol {
-  font-weight: 600;
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-background-color));
+  font-weight: var(--pivot-row-total-font-weight, 600);
+  background-color: var(
+    --pivot-row-total-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--pivot-bg, var(--st-background-color)))
+  );
+  color: var(--pivot-row-total-color, var(--pivot-color, var(--st-text-color)));
+}
+
+/* Value labels that sit in the row-total column inherit row_total region styling
+   rather than column_header styling (specificity 0-2-0 beats .valueLabel 0-1-0). */
+.valueLabel.totalsCol {
+  background-color: var(
+    --pivot-row-total-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--pivot-bg, var(--st-background-color)))
+  );
+  color: var(--pivot-row-total-color, var(--pivot-color, var(--st-text-color)));
+  font-weight: var(--pivot-row-total-font-weight, 600);
 }
 
 .totalsCol.dataCell {
@@ -157,39 +230,42 @@
 
 /* Group-relative zebra striping: class is applied by the renderer based on
    the data row's index within its group (resets after each subtotal).
-   This avoids nth-child parity drift caused by interleaved subtotal rows. */
-.pivotTable tbody .evenDataRow td:not(.totalsCol) {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 30%,
-    var(--st-background-color)
+   This avoids nth-child parity drift caused by interleaved subtotal rows.
+
+   IMPORTANT: These rules are scoped to :not(.stripesOff) wrappers as part of
+   the disable semantics for stripe_color=None. The negative-scope approach
+   removes the stripe layer entirely so each cell's own base rule wins —
+   setting the var to `transparent` would not correctly handle the four
+   different color-mix % baked into each selector's fallback. */
+.tableWrapper:not(.stripesOff) .pivotTable tbody .evenDataRow td:not(.totalsCol) {
+  background-color: var(
+    --pivot-stripe-color,
+    color-mix(in srgb, var(--st-secondary-background-color) 30%, var(--pivot-bg, var(--st-background-color)))
   );
 }
 
-/* Row header stripe: drop from the default toward background so the
-   band is visible against the slightly lighter odd-row headers.
-   Primary/secondary overrides preserve hierarchy contrast on even rows. */
-.pivotTable tbody .evenDataRow th.rowHeaderCell:not(.groupingDimCell) {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 48%,
-    var(--st-background-color)
+/* Row header stripe: offset percentages are tuned against the row-header base
+   (60 / 68 / 60%) so even rows are visibly lighter than odd rows.
+   NOTE: stripe_color must be an opaque value — transparent stripe colors cause
+   see-through sticky row headers when the table scrolls horizontally. */
+.tableWrapper:not(.stripesOff) .pivotTable tbody .evenDataRow th.rowHeaderCell:not(.groupingDimCell) {
+  background-color: var(
+    --pivot-stripe-color,
+    color-mix(in srgb, var(--st-secondary-background-color) 48%, var(--pivot-bg, var(--st-background-color)))
   );
 }
 
-.pivotTable tbody .evenDataRow th.rowHeaderPrimary:not(.groupingDimCell) {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 56%,
-    var(--st-background-color)
+.tableWrapper:not(.stripesOff) .pivotTable tbody .evenDataRow th.rowHeaderPrimary:not(.groupingDimCell) {
+  background-color: var(
+    --pivot-stripe-color,
+    color-mix(in srgb, var(--st-secondary-background-color) 56%, var(--pivot-bg, var(--st-background-color)))
   );
 }
 
-.pivotTable tbody .evenDataRow th.rowHeaderSecondary:not(.groupingDimCell) {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 48%,
-    var(--st-background-color)
+.tableWrapper:not(.stripesOff) .pivotTable tbody .evenDataRow th.rowHeaderSecondary:not(.groupingDimCell) {
+  background-color: var(
+    --pivot-stripe-color,
+    color-mix(in srgb, var(--st-secondary-background-color) 48%, var(--pivot-bg, var(--st-background-color)))
   );
 }
 
@@ -212,9 +288,12 @@
 }
 
 .emptyCorner {
-  background-color: var(--st-secondary-background-color);
-  border-right: 1px solid var(--st-dataframe-border-color);
-  border-bottom: 1px solid var(--st-dataframe-border-color);
+  background-color: var(
+    --pivot-column-header-bg,
+    var(--st-dataframe-header-background-color, var(--pivot-bg, var(--st-secondary-background-color)))
+  );
+  border-right: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
+  border-bottom: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
   position: sticky;
   top: 0;
   left: 0;
@@ -229,16 +308,38 @@
 
 .valueLabel {
   font-size: 0.86em;
-  color: color-mix(in srgb, var(--st-text-color) 80%, transparent);
+  color: var(
+    --pivot-column-header-color,
+    color-mix(in srgb, var(--pivot-color, var(--st-text-color)) 80%, transparent)
+  );
+  font-weight: var(--pivot-column-header-font-weight, bold);
   padding: 4px 10px;
   text-align: center;
-  background-color: var(--st-dataframe-header-background-color, var(--st-secondary-background-color));
-  border-bottom: 1px solid var(--st-dataframe-border-color);
-  border-right: 1px solid var(--st-dataframe-border-color);
+  background-color: var(
+    --pivot-column-header-bg,
+    var(--st-dataframe-header-background-color, var(--pivot-bg, var(--st-secondary-background-color)))
+  );
+  border-bottom: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
+  border-right: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
   position: sticky;
   /* top is set via inline style from renderColumnHeaders based on number of
      column-dimension header rows above this value-label row. */
   z-index: 2;
+}
+
+/* subtotal region */
+.subtotalRow {
+  font-weight: var(--pivot-subtotal-font-weight, 600);
+}
+
+.subtotalRow td,
+.subtotalRow th {
+  background-color: var(
+    --pivot-subtotal-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 65%, var(--pivot-bg, var(--st-background-color)))
+  );
+  color: var(--pivot-subtotal-color, var(--pivot-color, var(--st-text-color)));
+  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
 }
 
 .emptyState {
@@ -381,18 +482,8 @@
 
 /* --- Subtotal rows (Phase 3a) --- */
 
-.subtotalRow {
-  font-weight: 600;
-}
-
-.subtotalRow td,
-.subtotalRow th {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 65%, var(--st-background-color));
-  border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
-}
-
 .subtotalHeaderCell {
-  font-weight: 600;
+  font-weight: var(--pivot-subtotal-font-weight, 600);
 }
 
 .subtotalLabel {
@@ -402,11 +493,17 @@
 }
 
 .subtotalRow[data-level="1"] .subtotalHeaderCell {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 58%, var(--st-background-color));
+  background-color: var(
+    --pivot-subtotal-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 58%, var(--pivot-bg, var(--st-background-color)))
+  );
 }
 
 .subtotalRow[data-level="2"] .subtotalHeaderCell {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 50%, var(--st-background-color));
+  background-color: var(
+    --pivot-subtotal-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 50%, var(--pivot-bg, var(--st-background-color)))
+  );
 }
 
 .groupToggle {
@@ -525,18 +622,27 @@
   font-weight: 500;
 }
 
-.hierarchyDataRow th.rowHeaderCell,
+/* Hierarchy data-row header: light tint that reveals row-body background;
+   routed through --pivot-row-header-bg so row_header.background_color takes effect. */
+.hierarchyDataRow th.rowHeaderCell {
+  background-color: var(
+    --pivot-row-header-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 10%, var(--pivot-bg, var(--st-background-color)))
+  );
+}
+
+/* Hierarchy subtotal-row header: same light tint by default, but routed
+   through --pivot-subtotal-bg so subtotal.background_color takes effect. */
 .hierarchySubtotalRow th.rowHeaderCell {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 10%,
-    var(--st-background-color)
+  background-color: var(
+    --pivot-subtotal-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 10%, var(--pivot-bg, var(--st-background-color)))
   );
 }
 
 .hierarchySubtotalRow td:not(.totalsCol),
 .hierarchySubtotalRow th {
-  background-color: var(--st-background-color);
+  background-color: var(--pivot-subtotal-bg, var(--pivot-bg, var(--st-background-color)));
   border-top: 1px solid color-mix(in srgb, var(--st-text-color) 12%, transparent);
 }
 
@@ -547,10 +653,9 @@
 .hierarchySubtotalRow[data-level="0"] td:not(.totalsCol),
 .hierarchySubtotalRow[data-level="0"] th,
 .hierarchySubtotalRow[data-level="0"] .subtotalHeaderCell {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 18%,
-    var(--st-background-color)
+  background-color: var(
+    --pivot-subtotal-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 18%, var(--pivot-bg, var(--st-background-color)))
   );
 }
 
@@ -573,7 +678,7 @@
 
 /* Grouping dimension cell tinting — distinguish non-leaf from leaf cells */
 .groupingDimCell {
-  background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--st-background-color));
+  background-color: color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--pivot-bg, var(--st-background-color)));
   font-weight: 600;
 }
 
@@ -583,7 +688,7 @@
   background-color: color-mix(
     in srgb,
     var(--st-secondary-background-color) 10%,
-    var(--st-background-color)
+    var(--pivot-bg, var(--st-background-color))
   );
   font-weight: 400;
 }
@@ -592,28 +697,35 @@
   background-color: color-mix(
     in srgb,
     var(--st-secondary-background-color) 18%,
-    var(--st-background-color)
+    var(--pivot-bg, var(--st-background-color))
   );
   font-weight: 600;
 }
 
-/* The hierarchy pane tint is more specific than the generic row hover rule,
-   so re-apply hover explicitly for hierarchy row-header cells. */
-.pivotTable tbody tr.hierarchyDataRow:hover th.rowHeaderCell {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 24%,
-    var(--st-background-color)
+/* Hierarchy row-header hover rules. MUST carry the same .tableWrapper:not(.hoverOff)
+   prefix as the generic hover rule above so specificity stays equal and source
+   order determines which wins (these rules appear later and therefore win). */
+.tableWrapper:not(.hoverOff) .pivotTable tbody tr.hierarchyDataRow:hover th.rowHeaderCell {
+  background-color: var(
+    --pivot-row-hover-bg,
+    color-mix(
+      in srgb,
+      var(--st-secondary-background-color) 24%,
+      var(--pivot-bg, var(--st-background-color))
+    )
   );
 }
 
-.pivotTable tbody tr.hierarchySubtotalRow:hover td:not(.totalsCol),
-.pivotTable tbody tr.hierarchySubtotalRow:hover th.rowHeaderCell,
-.pivotTable tbody tr.hierarchySubtotalRow:hover th.subtotalHeaderCell {
-  background-color: color-mix(
-    in srgb,
-    var(--st-secondary-background-color) 24%,
-    var(--st-background-color)
+.tableWrapper:not(.hoverOff) .pivotTable tbody tr.hierarchySubtotalRow:hover td:not(.totalsCol),
+.tableWrapper:not(.hoverOff) .pivotTable tbody tr.hierarchySubtotalRow:hover th.rowHeaderCell,
+.tableWrapper:not(.hoverOff) .pivotTable tbody tr.hierarchySubtotalRow:hover th.subtotalHeaderCell {
+  background-color: var(
+    --pivot-row-hover-bg,
+    color-mix(
+      in srgb,
+      var(--st-secondary-background-color) 24%,
+      var(--pivot-bg, var(--st-background-color))
+    )
   );
 }
 
@@ -621,7 +733,7 @@
   background-color: color-mix(
     in srgb,
     var(--st-secondary-background-color) 10%,
-    var(--st-background-color)
+    var(--pivot-bg, var(--st-background-color))
   );
   font-weight: 400;
 }
@@ -642,9 +754,22 @@
   border-bottom-width: 2px;
 }
 
+/* Stub cells: row-dim header cells rendered in the column-header band.
+   Tagged with both .headerCell and .rowHeaderPrimary/.rowHeaderSecondary.
+   Routes through row_header vars (with column_header color as nearer fallback
+   so setting column_header.text_color also affects stub cells when row_header
+   is not explicitly overridden). Specificity 0-2-0 beats .rowHeaderPrimary /
+   .rowHeaderSecondary (0-1-0) so these win for stub cells. */
 .headerCell.rowHeaderPrimary,
 .headerCell.rowHeaderSecondary {
-  font-weight: 500;
+  font-weight: var(--pivot-row-header-font-weight, 500);
+  color: var(
+    --pivot-row-header-color,
+    var(
+      --pivot-column-header-color,
+      color-mix(in srgb, var(--st-text-color) 66%, transparent)
+    )
+  );
 }
 
 /* --- Dimension-level collapse toggle --- */
@@ -776,3 +901,88 @@
 .resizeHandle:hover::after {
   background: color-mix(in srgb, var(--st-primary-color) 50%, transparent);
 }
+
+/* ===========================================================================
+ * Density modifier classes
+ * Applied to the .tableWrapper div when style.density is set.
+ * =========================================================================== */
+
+.densityCompact .headerCell,
+.densityCompact .dataCell,
+.densityCompact .rowHeaderCell,
+.densityCompact .valueLabel,
+.densityCompact .emptyCorner {
+  padding: 3px 6px;
+}
+
+.densityComfortable .headerCell,
+.densityComfortable .dataCell,
+.densityComfortable .rowHeaderCell,
+.densityComfortable .valueLabel,
+.densityComfortable .emptyCorner {
+  padding: 10px 14px;
+}
+
+/* ===========================================================================
+ * Border mode modifier classes
+ * Applied to the .tableWrapper div when style.borders is set.
+ * Selectors MUST include .emptyCorner and .valueLabel so corner/value-label
+ * cells don't keep stray gridlines in the reduced-border modes.
+ * =========================================================================== */
+
+/* "all" is the default — no modifier class needed */
+
+.bordersOuter .headerCell,
+.bordersOuter .rowHeaderCell,
+.bordersOuter .dataCell,
+.bordersOuter .emptyCorner,
+.bordersOuter .valueLabel {
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+
+.bordersRows .headerCell,
+.bordersRows .rowHeaderCell,
+.bordersRows .dataCell,
+.bordersRows .emptyCorner,
+.bordersRows .valueLabel {
+  border-right-color: transparent;
+}
+
+.bordersColumns .headerCell,
+.bordersColumns .rowHeaderCell,
+.bordersColumns .dataCell,
+.bordersColumns .emptyCorner,
+.bordersColumns .valueLabel {
+  border-bottom-color: transparent;
+}
+
+.bordersNone .headerCell,
+.bordersNone .rowHeaderCell,
+.bordersNone .dataCell,
+.bordersNone .emptyCorner,
+.bordersNone .valueLabel {
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+
+.tableWrapper.bordersNone {
+  border-color: transparent;
+}
+
+/* ===========================================================================
+ * Stripe / hover disable modifier classes
+ * stripesOff and hoverOff are applied to .tableWrapper when stripe_color=None
+ * or row_hover_color=None is explicitly passed. The negative-scope pattern on
+ * the stripe/hover rules above means adding these classes simply causes those
+ * rules to stop matching — the cell's own base background declaration wins
+ * without needing a separate "off" override.
+ * =========================================================================== */
+
+/* .stripesOff and .hoverOff are applied as classes on .tableWrapper.
+   The actual "off" behavior is implemented via :not(.stripesOff) and
+   :not(.hoverOff) prefixes on the stripe/hover rules above, so no
+   additional declarations are needed here — the classes just need to exist
+   in the stylesheet so CSS modules generates exported names for them. */
+.stripesOff {}
+.hoverOff {}

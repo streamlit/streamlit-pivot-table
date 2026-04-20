@@ -41,6 +41,80 @@ export const CONFIG_SCHEMA_VERSION = 1;
 
 export type RowLayout = "table" | "hierarchy";
 
+// ---------------------------------------------------------------------------
+// Styling types (Phase 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Style properties for a single visual region of the pivot table.
+ * All fields are optional; absent fields inherit from the table-wide cascade.
+ */
+export interface RegionStyle {
+  background_color?: string;
+  text_color?: string;
+  /** Narrow enum matching the validation on the Python side. */
+  font_weight?: "normal" | "bold";
+}
+
+/**
+ * Region-based styling for the pivot table.
+ *
+ * API naming note — `row_total` vs `column_total`:
+ *   - `row_total`    = grand total *of* each row   → rendered in `.totalsCol` cells (rightmost column)
+ *   - `column_total` = grand total *of* each column → rendered in `.totalsRow` cells (bottom row)
+ *
+ * Precedence stack (highest to lowest):
+ *   conditional_formatting > data_cell_by_measure > region overrides > table-wide cascade > Streamlit theme
+ */
+export interface PivotStyle {
+  /** Cell padding + virtualized row height. */
+  density?: "compact" | "default" | "comfortable";
+  /** Base font size for all cells, e.g. "13px" or "0.875rem". */
+  font_size?: string;
+  /** Table-wide background; cascades to all regions unless a region override is set. */
+  background_color?: string;
+  /** Table-wide text color; cascades to all regions unless a region override is set. */
+  text_color?: string;
+  /**
+   * Alternating-row stripe color. Set to `null` to disable striping entirely.
+   * When absent the theme default (subtle secondary-bg tint) is used.
+   */
+  stripe_color?: string | null;
+  /**
+   * Full-row hover highlight color. Set to `null` to disable hover entirely.
+   * When absent the theme default is used.
+   */
+  row_hover_color?: string | null;
+  /** Cell gridline direction. Defaults to "all" (current behavior). */
+  borders?: "all" | "outer" | "rows" | "columns" | "none";
+  /** Override the gridline color for all active borders. */
+  border_color?: string;
+  /** Column label cells (all levels of multi-level column headers). */
+  column_header?: RegionStyle;
+  /** Row dimension cells ("the stub"). */
+  row_header?: RegionStyle;
+  /** Measure value cells (all measures, non-total only). */
+  data_cell?: RegionStyle;
+  /**
+   * Grand total per-row cells — rendered in the rightmost `.totalsCol` column.
+   * (API name `row_total` maps to the `.totalsCol` CSS class.)
+   */
+  row_total?: RegionStyle;
+  /**
+   * Grand total per-column cells — rendered in the bottom `.totalsRow` row.
+   * (API name `column_total` maps to the `.totalsRow` CSS class.)
+   */
+  column_total?: RegionStyle;
+  /** Subtotal cells (regular subtotals; hierarchy subtotals are deferred to v2). */
+  subtotal?: RegionStyle;
+  /**
+   * Per-measure background/text/weight overrides for non-total data cells.
+   * Keys are value-field names (must match the `values` list).
+   * Does NOT apply to totals cells — use row_total / column_total for those.
+   */
+  data_cell_by_measure?: Record<string, RegionStyle>;
+}
+
 export interface PivotConfigV1 {
   version: 1;
   rows: string[];
@@ -99,6 +173,8 @@ export interface PivotConfigV1 {
   dimension_format?: Record<string, string>;
   /** Phase 3d: per-field alignment override. */
   column_alignment?: Record<string, "left" | "center" | "right">;
+  /** Phase 5: region-based visual styling. See PivotStyle for the full shape. */
+  style?: PivotStyle;
   /**
    * Per-field display-label override. Populated from column_config.label.
    * Display-only: does NOT rewrite canonical field ids in rows/columns/values.
@@ -1349,6 +1425,14 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       }
     }
     result.field_renderers = validated;
+  }
+  // style is a Python-only field — pass it through as-is (no frontend validation needed).
+  if (
+    o.style !== undefined &&
+    o.style !== null &&
+    typeof o.style === "object"
+  ) {
+    result.style = o.style as PivotStyle;
   }
   return result;
 }

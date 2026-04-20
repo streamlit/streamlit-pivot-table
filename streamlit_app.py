@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from streamlit_pivot import st_pivot_table
+from streamlit_pivot import st_pivot_table, PivotStyle, RegionStyle, PIVOT_STYLE_PRESETS
 
 import streamlit as st
 
@@ -2239,6 +2239,361 @@ st_pivot_table(
 
 
 section_column_config_renderers()
+
+
+# ---------------------------------------------------------------------------
+# Section N: Styling API
+# ---------------------------------------------------------------------------
+def section_styling() -> None:
+    st.divider()
+    st.subheader("Styling API")
+    st.markdown(
+        """
+The `style=` parameter accepts a **preset name**, a `PivotStyle` dict, or a **list** that
+composes presets and overrides (merged left-to-right). Styles are a thin per-table layer over
+Streamlit's `[theme]` — they automatically adapt to light/dark mode and custom themes.
+
+> **Tip:** Use `var(--st-...)` tokens for theme-aware custom colors.
+        """
+    )
+
+    _style_df = df_medium.copy()
+
+    # --- 1. Preset gallery ---
+    st.markdown("#### 1. Preset gallery")
+    st.caption(
+        "All built-in presets shown side-by-side. Every color value is a "
+        "`var(--st-...)` token — no raw hex — so presets adapt to light/dark "
+        "mode and custom `[theme]` configs automatically."
+    )
+    preset_items = list(PIVOT_STYLE_PRESETS.items())
+    for row_presets in [preset_items[:3], preset_items[3:]]:
+        preset_cols = st.columns(3)
+        for col, (preset_name, _) in zip(preset_cols, row_presets):
+            with col:
+                st.caption(f"**`{preset_name!r}`**")
+                st_pivot_table(
+                    _style_df,
+                    key=f"style_preset_{preset_name}",
+                    rows=["Region"],
+                    columns=["Category"],
+                    values=["Revenue"],
+                    aggregation={"Revenue": "sum"},
+                    number_format={"Revenue": "$,.0f"},
+                    show_totals=True,
+                    interactive=False,
+                    style=preset_name,
+                )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+# Pick any preset by name
+st_pivot_table(df, key="my_pivot", ..., style="striped")
+st_pivot_table(df, key="my_pivot2", ..., style="compact")
+st_pivot_table(df, key="my_pivot3", ..., style="minimal")
+""",
+            language="python",
+        )
+
+    # --- 2. Streamlit theme match ---
+    st.markdown("#### 2. Theme-aware custom colors")
+    st.caption(
+        "Use `var(--st-...)` tokens as color values so your customizations "
+        "track light/dark mode and custom `[theme]` configs automatically."
+    )
+    st_pivot_table(
+        _style_df,
+        key="style_theme_match",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        show_totals=True,
+        interactive=False,
+        style=PivotStyle(
+            background_color="var(--st-secondary-background-color)",
+            column_header=RegionStyle(
+                background_color="color-mix(in srgb, var(--st-primary-color) 80%, var(--st-background-color))",
+                text_color="var(--st-background-color)",
+                font_weight="bold",
+            ),
+            row_total=RegionStyle(
+                background_color="color-mix(in srgb, var(--st-primary-color) 15%, var(--st-background-color))",
+                font_weight="bold",
+            ),
+            column_total=RegionStyle(
+                background_color="color-mix(in srgb, var(--st-primary-color) 15%, var(--st-background-color))",
+                font_weight="bold",
+            ),
+        ),
+    )
+    with st.expander("View Code"):
+        st.code(
+            """
+from streamlit_pivot import PivotStyle, RegionStyle
+
+st_pivot_table(
+    df, key="theme_match",
+    rows=["Region"], columns=["Category"], values=["Revenue", "Profit"],
+    style=PivotStyle(
+        background_color="var(--st-secondary-background-color)",
+        column_header=RegionStyle(
+            background_color="color-mix(in srgb, var(--st-primary-color) 80%, var(--st-background-color))",
+            text_color="var(--st-background-color)",
+            font_weight="bold",
+        ),
+        row_total=RegionStyle(
+            background_color="color-mix(in srgb, var(--st-primary-color) 15%, var(--st-background-color))",
+            font_weight="bold",
+        ),
+        column_total=RegionStyle(
+            background_color="color-mix(in srgb, var(--st-primary-color) 15%, var(--st-background-color))",
+            font_weight="bold",
+        ),
+    ),
+)
+""",
+            language="python",
+        )
+
+    # --- 3. Financial / editorial (borders="rows") ---
+    st.markdown("#### 3. Financial / editorial style — horizontal rules only")
+    st.caption(
+        "Horizontal-rules-only border mode with no hover or stripes gives a "
+        "clean editorial look suited to financial reports."
+    )
+    st_pivot_table(
+        _style_df,
+        key="style_financial",
+        rows=["Region", "Product"],
+        columns=["Category"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        show_totals=True,
+        interactive=False,
+        style=PivotStyle(
+            borders="rows",
+            row_hover_color=None,
+            stripe_color=None,
+            border_color="color-mix(in srgb, var(--st-text-color) 15%, transparent)",
+        ),
+    )
+    with st.expander("View Code"):
+        st.code(
+            """
+st_pivot_table(
+    df, key="financial",
+    rows=["Region", "Product"], columns=["Category"],
+    values=["Revenue", "Profit"],
+    style=PivotStyle(
+        borders="rows",
+        row_hover_color=None,
+        stripe_color=None,
+        border_color="color-mix(in srgb, var(--st-text-color) 15%, transparent)",
+    ),
+)
+""",
+            language="python",
+        )
+
+    # --- 4. Per-measure styling ---
+    st.markdown("#### 4. Per-measure data cell styling")
+    st.caption(
+        "`data_cell_by_measure` applies background/text/weight overrides to non-total "
+        "data cells of a specific measure. Total cells use `row_total` / `column_total` "
+        "region overrides instead — this matches Power BI's Values-only scoping."
+    )
+    st_pivot_table(
+        _style_df,
+        key="style_per_measure",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue", "Profit"],
+        aggregation={"Revenue": "sum", "Profit": "sum"},
+        number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        show_totals=True,
+        interactive=False,
+        style=PivotStyle(
+            data_cell_by_measure={
+                "Revenue": RegionStyle(
+                    background_color="color-mix(in srgb, var(--st-primary-color) 8%, transparent)"
+                ),
+                "Profit": RegionStyle(
+                    text_color="color-mix(in srgb, var(--st-text-color) 65%, transparent)",
+                    font_weight="bold",
+                ),
+            }
+        ),
+    )
+    with st.expander("View Code"):
+        st.code(
+            """
+st_pivot_table(
+    df, key="per_measure",
+    rows=["Region"], columns=["Category"],
+    values=["Revenue", "Profit"],
+    style=PivotStyle(
+        data_cell_by_measure={
+            "Revenue": RegionStyle(
+                background_color="color-mix(in srgb, var(--st-primary-color) 8%, transparent)"
+            ),
+            "Profit": RegionStyle(
+                text_color="color-mix(in srgb, var(--st-text-color) 65%, transparent)",
+                font_weight="bold",
+            ),
+        }
+    ),
+)
+# Note: Revenue/Profit TOTAL cells are NOT affected — they use row_total / column_total styling instead.
+""",
+            language="python",
+        )
+
+    # --- 5. Composition ---
+    st.markdown("#### 5. Composition — list merging")
+    st.caption(
+        "Pass a **list** to compose presets and custom overrides. Items are merged "
+        "left-to-right; later values win. Region dicts are merged at the field level. "
+        "Note: the Grand Total / Total corner cell takes `column_total` styling — "
+        "set both `row_total` and `column_total` to keep that cell consistent."
+    )
+    _tint = (
+        "color-mix(in srgb, var(--st-primary-color) 15%, var(--st-background-color))"
+    )
+    st_pivot_table(
+        _style_df,
+        key="style_composition",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue"],
+        aggregation={"Revenue": "sum"},
+        number_format={"Revenue": "$,.0f"},
+        show_totals=True,
+        interactive=False,
+        style=[
+            "compact",
+            "contrast",
+            PivotStyle(
+                row_total=RegionStyle(background_color=_tint),
+                column_total=RegionStyle(background_color=_tint),
+            ),
+        ],
+    )
+    with st.expander("View Code"):
+        st.code(
+            """
+tint = "color-mix(in srgb, var(--st-primary-color) 15%, var(--st-background-color))"
+st_pivot_table(
+    df, key="composition",
+    rows=["Region"], columns=["Category"], values=["Revenue"],
+    style=[
+        "compact",          # tight padding
+        "contrast",         # bold headers + stripe
+        PivotStyle(         # per-table override: tint all total cells
+            row_total=RegionStyle(background_color=tint),
+            column_total=RegionStyle(background_color=tint),
+            # Note: the Grand Total / Total corner takes column_total styling,
+            # so set both to keep all total cells visually consistent.
+        ),
+    ],
+)
+""",
+            language="python",
+        )
+
+    # --- 6. Density ---
+    st.markdown("#### 6. Density")
+    st.caption(
+        "`density` controls cell padding (and virtualized row height). "
+        "Three values: `'compact'` (3px / 6px), `'default'` (6px / 10px), "
+        "and `'comfortable'` (10px / 14px)."
+    )
+    density_cols = st.columns(3)
+    for col, density_val in zip(density_cols, ["compact", "default", "comfortable"]):
+        with col:
+            st.caption(f"**`density='{density_val}'`**")
+            st_pivot_table(
+                _style_df,
+                key=f"style_density_{density_val}",
+                rows=["Region"],
+                columns=["Category"],
+                values=["Revenue"],
+                aggregation={"Revenue": "sum"},
+                number_format={"Revenue": "$,.0f"},
+                show_totals=True,
+                interactive=False,
+                style=PivotStyle(density=density_val),
+            )
+    with st.expander("View Code"):
+        st.code(
+            """
+# density controls padding (and row height in virtualized/large tables)
+st_pivot_table(df, key="tight",  ..., style=PivotStyle(density="compact"))
+st_pivot_table(df, key="normal", ..., style=PivotStyle(density="default"))
+st_pivot_table(df, key="airy",   ..., style=PivotStyle(density="comfortable"))
+
+# same as using the built-in presets:
+st_pivot_table(df, key="tight2", ..., style="compact")
+st_pivot_table(df, key="airy2",  ..., style="comfortable")
+""",
+            language="python",
+        )
+
+    # --- 7. CF precedence ---
+    st.markdown("#### 7. Conditional formatting wins over per-measure style")
+    st.caption(
+        "When both `data_cell_by_measure` and `conditional_formatting` apply to "
+        "the same cell, conditional formatting always wins."
+    )
+    st_pivot_table(
+        _style_df,
+        key="style_cf_precedence",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue"],
+        aggregation={"Revenue": "sum"},
+        number_format={"Revenue": "$,.0f"},
+        show_totals=True,
+        interactive=False,
+        conditional_formatting=[
+            {
+                "type": "color_scale",
+                "apply_to": ["Revenue"],
+                "min_color": "rgba(63,185,80,0.15)",
+                "max_color": "rgba(63,185,80,0.70)",
+            }
+        ],
+        style=PivotStyle(
+            data_cell_by_measure={
+                "Revenue": RegionStyle(background_color="rgba(255,0,0,0.25)")
+            }
+        ),
+    )
+    with st.expander("View Code"):
+        st.code(
+            """
+# CF color_scale wins over the red per-measure background
+st_pivot_table(
+    df, key="cf_wins",
+    conditional_formatting=[{
+        "type": "color_scale",
+        "apply_to": ["Revenue"],
+        "min_color": "rgba(63,185,80,0.15)",
+        "max_color": "rgba(63,185,80,0.70)",
+    }],
+    style=PivotStyle(
+        data_cell_by_measure={"Revenue": RegionStyle(background_color="rgba(255,0,0,0.25)")}
+    ),
+)
+""",
+            language="python",
+        )
+
+
+section_styling()
 
 # ---------------------------------------------------------------------------
 # Footer: Raw Data

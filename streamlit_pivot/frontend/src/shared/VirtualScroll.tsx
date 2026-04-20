@@ -46,6 +46,12 @@ export interface VirtualScrollProps {
   renderTotalsRow?: (visibleColRange: [number, number]) => ReactElement | null;
   headerHeight: number;
   theadRef?: Ref<HTMLTableSectionElement>;
+  /**
+   * Optional CSS class applied to all three internal <table> elements.
+   * Pass `tableStyles.pivotTable` so .pivotTable-scoped CSS rules (stripe,
+   * hover, hierarchy hover, last-row border) fire correctly in virtualized mode.
+   */
+  tableClassName?: string;
 }
 
 /**
@@ -79,6 +85,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   renderTotalsRow,
   headerHeight,
   theadRef,
+  tableClassName,
 }): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -197,6 +204,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
         <table
           data-testid="pivot-table"
           role="grid"
+          className={tableClassName}
           style={{
             position: "sticky",
             top: 0,
@@ -219,6 +227,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
         >
           <table
             role="grid"
+            className={tableClassName}
             style={{
               width: "100%",
               borderCollapse: "separate",
@@ -244,6 +253,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
           >
             <table
               role="grid"
+              className={tableClassName}
               style={{
                 width: "100%",
                 borderCollapse: "separate",

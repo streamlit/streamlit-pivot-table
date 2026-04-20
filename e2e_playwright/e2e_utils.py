@@ -45,6 +45,7 @@ INTERACTIONS_SCRIPT = Path(__file__).parent / "pivot_table_interactions_app.py"
 DATA_SCRIPT = Path(__file__).parent / "pivot_table_data_app.py"
 GOLDEN_SCRIPT = Path(__file__).parent / "pivot_table_golden_app.py"
 COLUMN_CONFIG_SCRIPT = Path(__file__).parent / "pivot_table_column_config_app.py"
+STYLING_SCRIPT = Path(__file__).parent / "pivot_table_styling_app.py"
 
 PIVOT_KEYS = [
     "test_pivot",
@@ -163,6 +164,23 @@ COLUMN_CONFIG_PIVOT_KEYS = [
     "test_pivot_cc_renderer_totals",
 ]
 
+# Must match the exact order of st_pivot_table(key=...) calls in
+# pivot_table_styling_app.py.
+STYLING_PIVOT_KEYS = [
+    "style_none",
+    "style_custom_bg",
+    "style_density_compact",
+    "style_borders_rows",
+    "style_stripes_off",
+    "style_hover_off",
+    "style_column_header_bg",
+    "style_row_total_mapping",
+    "style_column_total_mapping",
+    "style_per_measure",
+    "style_cf_precedence",
+    "style_composition",
+]
+
 APP_CONFIGS = {
     "default": {"script": SCRIPT, "pivot_keys": PIVOT_KEYS},
     "pivot_table_test.py": {"script": TOOLBAR_SCRIPT, "pivot_keys": TOOLBAR_PIVOT_KEYS},
@@ -178,6 +196,10 @@ APP_CONFIGS = {
     "pivot_table_column_config_test.py": {
         "script": COLUMN_CONFIG_SCRIPT,
         "pivot_keys": COLUMN_CONFIG_PIVOT_KEYS,
+    },
+    "pivot_table_styling_test.py": {
+        "script": STYLING_SCRIPT,
+        "pivot_keys": STYLING_PIVOT_KEYS,
     },
 }
 

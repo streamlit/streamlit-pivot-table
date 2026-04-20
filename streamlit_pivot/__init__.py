@@ -63,6 +63,284 @@ class SortConfig(TypedDict, total=False):
     dimension: str  # optional: scope sort to this dimension level and below
 
 
+class RegionStyle(TypedDict, total=False):
+    """Style properties for a single visual region of the pivot table.
+
+    All fields are optional; absent fields inherit from the table-wide cascade.
+    """
+
+    background_color: str
+    text_color: str
+    font_weight: str  # "normal" | "bold"
+
+
+class PivotStyle(TypedDict, total=False):
+    """Region-based visual styling for the pivot table.
+
+    API naming note — ``row_total`` vs ``column_total``:
+
+    - ``row_total`` = grand total *of* each row → rendered in the rightmost
+      column (``.totalsCol`` CSS class).
+    - ``column_total`` = grand total *of* each column → rendered in the bottom
+      row (``.totalsRow`` CSS class).
+
+    Precedence stack (highest to lowest):
+      conditional_formatting > data_cell_by_measure > region overrides
+      > table-wide cascade > Streamlit theme (``--st-*`` vars).
+    """
+
+    # Table-wide controls
+    density: str  # "compact" | "default" | "comfortable"
+    font_size: str  # e.g. "13px", "0.875rem"
+    background_color: str  # cascades to all regions
+    text_color: str  # cascades to all regions
+    stripe_color: str | None  # row banding; None = disable
+    row_hover_color: str | None  # hover highlight; None = disable
+    borders: str  # "all" | "outer" | "rows" | "columns" | "none"
+    border_color: str  # overrides --pivot-border-color
+    # Region overrides
+    column_header: RegionStyle  # column label cells (incl. multi-level)
+    row_header: RegionStyle  # row dimension cells ("the stub")
+    data_cell: RegionStyle  # measure value cells (applies to all, non-total)
+    row_total: RegionStyle  # grand total per row → .totalsCol cells
+    column_total: RegionStyle  # grand total per column → .totalsRow cells
+    subtotal: RegionStyle  # subtotal cells
+    # Per-measure overrides for non-total data cells
+    data_cell_by_measure: dict[str, RegionStyle]
+
+
+# ---------------------------------------------------------------------------
+# Built-in style presets (theme-aware — no raw hex)
+# ---------------------------------------------------------------------------
+
+#: Built-in presets available as preset-name strings in the ``style`` param.
+#: All color values reference ``var(--st-*)`` tokens via ``color-mix`` so
+#: presets automatically adapt to Streamlit light/dark themes and custom
+#: ``[theme]`` configs.
+PIVOT_STYLE_PRESETS: dict[str, PivotStyle] = {
+    # No overrides; tracks Streamlit theme defaults. Passing "default" is
+    # equivalent to style=None.
+    "default": PivotStyle(),
+    # Visible alternating-row banding using the secondary background color.
+    "striped": PivotStyle(
+        stripe_color="var(--st-secondary-background-color)",
+    ),
+    # Flat layout: no borders, no hover, no stripes. Good for static output.
+    "minimal": PivotStyle(
+        borders="none",
+        row_hover_color=None,
+        stripe_color=None,
+    ),
+    # Tight padding + reduced virtualized row height.
+    "compact": PivotStyle(
+        density="compact",
+    ),
+    # Generous padding — easier to scan on large monitors or in reports.
+    "comfortable": PivotStyle(
+        density="comfortable",
+    ),
+    # Power BI "Contrast"-style: emphasized header band, bold totals, stripe.
+    "contrast": PivotStyle(
+        column_header=RegionStyle(
+            background_color="color-mix(in srgb, var(--st-text-color) 20%, var(--st-background-color))",
+            font_weight="bold",
+        ),
+        row_header=RegionStyle(
+            background_color="color-mix(in srgb, var(--st-text-color) 12%, var(--st-background-color))",
+            font_weight="bold",
+        ),
+        row_total=RegionStyle(font_weight="bold"),
+        column_total=RegionStyle(font_weight="bold"),
+        stripe_color="color-mix(in srgb, var(--st-text-color) 6%, var(--st-background-color))",
+    ),
+}
+
+_VALID_DENSITIES = frozenset(("compact", "default", "comfortable"))
+_VALID_BORDERS = frozenset(("all", "outer", "rows", "columns", "none"))
+_VALID_FONT_WEIGHTS = frozenset(("normal", "bold"))
+_FONT_SIZE_RE = re.compile(
+    r"^\d+(\.\d+)?(px|rem|em|%|pt)$"  # simple unit values: 13px, 0.875rem …
+    r"|^(calc|clamp|min|max)\(.+\)$",  # CSS function calls: calc(1rem + 2px) …
+    re.DOTALL,
+)
+_REGION_KEYS = frozenset(
+    (
+        "column_header",
+        "row_header",
+        "data_cell",
+        "row_total",
+        "column_total",
+        "subtotal",
+    )
+)
+_TABLE_WIDE_KEYS = frozenset(
+    (
+        "density",
+        "font_size",
+        "background_color",
+        "text_color",
+        "stripe_color",
+        "row_hover_color",
+        "borders",
+        "border_color",
+        "data_cell_by_measure",
+    )
+)
+_ALL_PIVOT_STYLE_KEYS = _TABLE_WIDE_KEYS | _REGION_KEYS
+
+
+def _validate_color(value: Any, context: str) -> None:
+    """Permissive color validation: reject empty/whitespace; accept CSS strings."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context}: color must be a non-empty string, got {value!r}")
+
+
+def _validate_region_style(region: Any, context: str) -> None:
+    """Validate a RegionStyle dict."""
+    if not isinstance(region, dict):
+        raise TypeError(f"{context} must be a dict, got {type(region).__name__}")
+    for k, v in region.items():
+        if k in ("background_color", "text_color"):
+            _validate_color(v, f"{context}[{k!r}]")
+        elif k == "font_weight":
+            if v not in _VALID_FONT_WEIGHTS:
+                raise ValueError(
+                    f"{context}['font_weight'] must be one of "
+                    f"{sorted(_VALID_FONT_WEIGHTS)}, got {v!r}"
+                )
+        else:
+            warn_key = f"region_key:{context}:{k}"
+            if warn_key not in _warned_keys:
+                _warned_keys.add(warn_key)
+                warnings.warn(
+                    f"{context}: unknown key {k!r} will be ignored",
+                    stacklevel=5,
+                )
+
+
+def _merge_region_style(base: RegionStyle, override: RegionStyle) -> RegionStyle:
+    """Shallow-merge two RegionStyle dicts; override wins on conflict."""
+    merged = RegionStyle(**base)
+    merged.update(override)  # type: ignore[arg-type]
+    return merged
+
+
+def _merge_pivot_styles(base: PivotStyle, override: PivotStyle) -> PivotStyle:
+    """3-level merge: top-level shallow, region-level shallow, data_cell_by_measure field-level."""
+    merged = PivotStyle(**base)
+    for k, v in override.items():
+        if k in _REGION_KEYS:
+            existing = merged.get(k)  # type: ignore[literal-required]
+            if existing is None:
+                merged[k] = v  # type: ignore[literal-required]
+            else:
+                merged[k] = _merge_region_style(existing, v)  # type: ignore[literal-required]
+        elif k == "data_cell_by_measure":
+            existing_by_measure = merged.get("data_cell_by_measure") or {}
+            incoming = v or {}
+            result: dict[str, RegionStyle] = dict(existing_by_measure)
+            for field, region in incoming.items():
+                if field in result:
+                    result[field] = _merge_region_style(result[field], region)
+                else:
+                    result[field] = region
+            merged["data_cell_by_measure"] = result
+        else:
+            merged[k] = v  # type: ignore[literal-required]
+    return merged
+
+
+def _resolve_style(
+    style: str | PivotStyle | list[str | PivotStyle] | None,
+) -> PivotStyle | None:
+    """Resolve the raw ``style`` argument to a validated PivotStyle dict.
+
+    Handles preset lookup, list composition (3-level merge), and structural
+    validation.  Returns None when style=None or an empty resolved dict.
+    Data-cell-by-measure measure-name warnings are emitted separately in
+    st_pivot_table after values are resolved.
+    """
+    if style is None:
+        return None
+
+    items: list[str | PivotStyle]
+    if isinstance(style, (str, dict)):
+        items = [style]
+    elif isinstance(style, list):
+        items = style
+    else:
+        raise TypeError(
+            f"style must be str, dict, list, or None, got {type(style).__name__}"
+        )
+
+    resolved = PivotStyle()
+    for item in items:
+        if isinstance(item, str):
+            if item not in PIVOT_STYLE_PRESETS:
+                raise ValueError(
+                    f"style: unknown preset {item!r}. "
+                    f"Valid presets: {sorted(PIVOT_STYLE_PRESETS)}"
+                )
+            piece = PIVOT_STYLE_PRESETS[item]
+        elif isinstance(item, dict):
+            piece = item  # type: ignore[assignment]
+        else:
+            raise TypeError(
+                f"style list items must be str or dict, got {type(item).__name__}"
+            )
+        resolved = _merge_pivot_styles(resolved, piece)
+
+    # Validate the fully merged dict
+    for k in list(resolved.keys()):
+        if k not in _ALL_PIVOT_STYLE_KEYS:
+            warn_key = f"pivot_style_top:{k}"
+            if warn_key not in _warned_keys:
+                _warned_keys.add(warn_key)
+                warnings.warn(
+                    f"style: unknown key {k!r} will be ignored",
+                    stacklevel=4,
+                )
+
+    if "density" in resolved and resolved["density"] not in _VALID_DENSITIES:
+        raise ValueError(
+            f"style['density'] must be one of {sorted(_VALID_DENSITIES)}, "
+            f"got {resolved['density']!r}"
+        )
+    if "borders" in resolved and resolved["borders"] not in _VALID_BORDERS:
+        raise ValueError(
+            f"style['borders'] must be one of {sorted(_VALID_BORDERS)}, "
+            f"got {resolved['borders']!r}"
+        )
+    if "font_size" in resolved:
+        fs = resolved["font_size"]
+        if not isinstance(fs, str) or not _FONT_SIZE_RE.match(fs):
+            raise ValueError(
+                f"style['font_size'] must be a CSS size value "
+                f"(e.g. '13px', '0.875rem', 'calc(1rem + 2px)'), "
+                f"got {fs!r}"
+            )
+    for color_key in ("background_color", "text_color", "border_color"):
+        if color_key in resolved:
+            _validate_color(resolved[color_key], f"style['{color_key}']")  # type: ignore[literal-required]
+    # stripe_color and row_hover_color may be None (disable sentinel) or a string
+    for color_key in ("stripe_color", "row_hover_color"):
+        val = resolved.get(color_key)  # type: ignore[literal-required]
+        if val is not None:
+            _validate_color(val, f"style['{color_key}']")
+    for region_key in _REGION_KEYS:
+        region = resolved.get(region_key)  # type: ignore[literal-required]
+        if region is not None:
+            _validate_region_style(region, f"style['{region_key}']")
+    if "data_cell_by_measure" in resolved:
+        dcbm = resolved["data_cell_by_measure"]
+        if not isinstance(dcbm, dict):
+            raise TypeError("style['data_cell_by_measure'] must be a dict")
+        for field, region in dcbm.items():
+            _validate_region_style(region, f"style['data_cell_by_measure'][{field!r}]")
+
+    return resolved if resolved else None
+
+
 class PivotConfig(TypedDict, total=False):
     """Versioned configuration schema for the pivot table (v1).
 
@@ -103,6 +381,7 @@ class PivotConfig(TypedDict, total=False):
     field_help: dict[str, str]
     field_widths: dict[str, int | str]
     field_renderers: dict[str, dict[str, Any]]
+    style: PivotStyle
 
 
 VALID_AGGREGATIONS = frozenset(
@@ -2242,6 +2521,7 @@ def _default_config(
     field_help: dict[str, str] | None = None,
     field_widths: dict[str, int | str] | None = None,
     field_renderers: dict[str, dict[str, Any]] | None = None,
+    style: PivotStyle | None = None,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -2326,6 +2606,8 @@ def _default_config(
         cfg["field_widths"] = field_widths
     if field_renderers:
         cfg["field_renderers"] = field_renderers
+    if style is not None:
+        cfg["style"] = style
     return cfg
 
 
@@ -2476,6 +2758,8 @@ def st_pivot_table(
     # Format hints from Streamlit column_config / dimension_format
     column_config: dict[str, Any] | None = None,
     dimension_format: str | dict[str, str] | None = None,
+    # Phase 5: region-based styling
+    style: str | PivotStyle | list[str | PivotStyle] | None = None,
 ) -> PivotTableResult:
     """Create a pivot table component.
 
@@ -2632,6 +2916,15 @@ def st_pivot_table(
     column_alignment : dict[str, str] or None
         Per-field text alignment override. Maps value field names
         to ``"left"``, ``"center"``, or ``"right"``.
+    style : str, PivotStyle dict, list, or None
+        Region-based visual styling. Pass a preset name (``"default"``,
+        ``"striped"``, ``"minimal"``, ``"compact"``, ``"comfortable"``,
+        ``"contrast"``), a ``PivotStyle`` dict, or a list that composes
+        presets and overrides
+        (merged left-to-right). Controls density, font size, colors, borders,
+        striping, hover, and per-region / per-measure overrides. See the
+        Styling section in the README for full documentation. Defaults to
+        None (tracks Streamlit theme automatically).
     enable_drilldown : bool
         If True (default), clicking a data cell opens an inline
         drill-down panel below the pivot table showing the
@@ -3192,6 +3485,22 @@ def st_pivot_table(
     if isinstance(number_format, str):
         number_format = {"__all__": number_format}
 
+    # --- Style validation and resolution ---
+    resolved_style = _resolve_style(style)
+    # Warn about data_cell_by_measure keys that don't match any resolved value field
+    if resolved_style and "data_cell_by_measure" in resolved_style:
+        known_values = set(resolved_values or [])
+        for measure_key in resolved_style["data_cell_by_measure"]:
+            if measure_key not in known_values:
+                warn_key = f"dcbm_field:{measure_key}"
+                if warn_key not in _warned_keys:
+                    _warned_keys.add(warn_key)
+                    warnings.warn(
+                        f"style['data_cell_by_measure']: key {measure_key!r} does not match "
+                        f"any value field. Known value fields: {sorted(known_values)}",
+                        stacklevel=2,
+                    )
+
     original_column_types = _build_original_column_types(filtered_data)
     adaptive_date_grains = _compute_adaptive_date_grains(
         filtered_data, original_column_types
@@ -3236,6 +3545,7 @@ def st_pivot_table(
         field_help=cc_field_help,
         field_widths=cc_field_widths,
         field_renderers=cc_field_renderers,
+        style=resolved_style,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal

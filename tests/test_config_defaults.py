@@ -15,6 +15,8 @@
 
 """Python-side defaulting and auto-detection tests."""
 
+import json
+
 import pandas as pd
 
 
@@ -90,3 +92,86 @@ def test_scalar_aggregation_normalizes_for_multiple_values(
     )
 
     assert result["config"]["aggregation"] == {"Revenue": "avg", "Profit": "avg"}
+
+
+# ---------------------------------------------------------------------------
+# style= serialization and default-wiring tests
+# ---------------------------------------------------------------------------
+
+
+def test_style_none_not_in_config(sample_df, pivot_module, mount_recorder):
+    mount_recorder()
+    result = pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        values=["Revenue"],
+        style=None,
+    )
+    assert "style" not in result["config"]
+
+
+def test_style_preset_lookup(sample_df, pivot_module, mount_recorder):
+    mount_recorder()
+    result = pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        values=["Revenue"],
+        style="striped",
+    )
+    assert "style" in result["config"]
+    assert "stripe_color" in result["config"]["style"]
+
+
+def test_style_roundtrips_through_json(pivot_module):
+    full_style = pivot_module.PivotStyle(
+        density="compact",
+        font_size="13px",
+        background_color="var(--st-background-color)",
+        text_color="var(--st-text-color)",
+        stripe_color="color-mix(in srgb, var(--st-text-color) 4%, transparent)",
+        row_hover_color=None,
+        borders="rows",
+        border_color="red",
+        column_header=pivot_module.RegionStyle(
+            background_color="blue",
+            text_color="white",
+            font_weight="bold",
+        ),
+        data_cell_by_measure={
+            "Revenue": pivot_module.RegionStyle(background_color="green")
+        },
+    )
+    roundtripped = json.loads(json.dumps(full_style))
+    assert roundtripped["density"] == "compact"
+    assert roundtripped["borders"] == "rows"
+    assert roundtripped["row_hover_color"] is None
+    assert roundtripped["column_header"]["font_weight"] == "bold"
+    assert (
+        roundtripped["data_cell_by_measure"]["Revenue"]["background_color"] == "green"
+    )
+
+
+def test_style_default_preset_equals_none_in_config(
+    sample_df, pivot_module, mount_recorder
+):
+    """style='default' resolves to an empty dict which becomes None — same as style=None."""
+    mount_recorder()
+    result = pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        values=["Revenue"],
+        style="default",
+    )
+    assert "style" not in result["config"]
+
+
+def test_style_none_disables_stripe_and_hover_serialized_as_null(pivot_module):
+    """stripe_color=None and row_hover_color=None must serialize as JSON null."""
+    style = pivot_module.PivotStyle(stripe_color=None, row_hover_color=None)
+    serialized = json.dumps(style)
+    parsed = json.loads(serialized)
+    assert parsed["stripe_color"] is None
+    assert parsed["row_hover_color"] is None

@@ -65,6 +65,14 @@ import {
 import { useHeaderMenu } from "./useHeaderMenu";
 import tableStyles from "./TableRenderer.module.css";
 import { resolveEffectiveWidth, resolveFieldWidth } from "./fieldWidthResolver";
+import {
+  styleToCSS,
+  densityClass,
+  bordersClass,
+  stripesOffClass,
+  hoverOffClass,
+  DENSITY_ROW_HEIGHT,
+} from "./styleHelpers";
 
 export interface VirtualizedTableRendererProps {
   pivotData: PivotData;
@@ -97,7 +105,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   onCellClick,
   maxColumns,
   containerHeight,
-  rowHeight = DEFAULT_ROW_HEIGHT,
+  rowHeight, // no default — keep undefined so density can take effect
   columnWidth = DEFAULT_COL_WIDTH,
   headerHeight = DEFAULT_HEADER_HEIGHT,
   onSortChange,
@@ -109,6 +117,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   menuLimit,
   scrollable,
 }): ReactElement => {
+  const effectiveRowHeight =
+    rowHeight ??
+    DENSITY_ROW_HEIGHT[config.style?.density ?? "default"] ??
+    DEFAULT_ROW_HEIGHT;
+
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [measuredHeight, setMeasuredHeight] = useState(containerHeight);
 
@@ -826,7 +839,17 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       )}
       <div
         ref={wrapperRef}
+        className={[
+          tableStyles.tableWrapper,
+          densityClass(config.style, tableStyles),
+          bordersClass(config.style, tableStyles),
+          stripesOffClass(config.style, tableStyles),
+          hoverOffClass(config.style, tableStyles),
+        ]
+          .filter(Boolean)
+          .join(" ")}
         style={{
+          ...styleToCSS(config.style),
           ...(scrollable ? { flex: "1 1 0", minHeight: 0 } : undefined),
           ...(isResizing ? { userSelect: "none" } : undefined),
         }}
@@ -834,8 +857,9 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         <VirtualScroll
           totalRows={totalVirtualRows}
           totalColumns={totalDataColumns}
-          rowHeight={rowHeight}
+          rowHeight={effectiveRowHeight}
           columnWidth={dataColWidth}
+          tableClassName={tableStyles.pivotTable}
           columnWidths={variableColumnWidths}
           containerHeight={measuredHeight}
           renderRow={renderRow}
