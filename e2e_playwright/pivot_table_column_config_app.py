@@ -27,12 +27,16 @@ from pivot_table_app_support import init_page, load_data, noop
 def render_app(data):
     df = data["df"]
 
+    # No col dims here so the single-value measure header (`pivot-header-cell`)
+    # renders and can be inspected by the measure label/help assertions. The
+    # col-dim + single-value layout does not surface a dedicated measure header
+    # (values fold into the grid cells), which would render the measure-level
+    # label/help assertions unreachable.
     st.subheader("column_config.label")
     st_pivot_table(
         df,
         key="test_pivot_cc_label",
         rows=["Region"],
-        columns=["Year"],
         values=["Revenue"],
         aggregation="sum",
         column_config={
@@ -48,7 +52,6 @@ def render_app(data):
         df,
         key="test_pivot_cc_help",
         rows=["Region"],
-        columns=["Year"],
         values=["Revenue"],
         aggregation="sum",
         column_config={
