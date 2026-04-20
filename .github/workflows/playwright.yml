@@ -76,6 +76,14 @@ jobs:
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r e2e_playwright/test-requirements.txt
+          # The venv is cached by a key that only changes daily, so a prior
+          # run's streamlit-pivot wheel is often already installed at the
+          # same version as the freshly-built wheel in dist/. When that
+          # happens, pip silently skips reinstalling ("Requirement already
+          # satisfied") and the test run exercises stale package code
+          # instead of the current checkout. Force-reinstall the local
+          # wheel (without deps) so the venv always reflects HEAD.
+          pip install --force-reinstall --no-deps dist/streamlit_pivot-*.whl
           python -m playwright install --with-deps
       - name: Run playwright tests
         run: |
