@@ -17,11 +17,45 @@
 
 from __future__ import annotations
 
+import pandas as pd  # type: ignore[import-untyped]
 import streamlit as st
 
 from streamlit_pivot import st_pivot_table
 
 from pivot_table_app_support import init_page, load_data, noop
+
+
+def _renderer_fixture() -> pd.DataFrame:
+    """Small fixture exercising Tier 2 cell renderers.
+
+    Each row has a URL-like, image-like, boolean, and long-text dim value,
+    plus a numeric measure so measure cells render through the normal path.
+    """
+    return pd.DataFrame(
+        {
+            "Region": ["North", "North", "South", "South"],
+            "Website": [
+                "https://example.com/n1",
+                "https://example.com/n2",
+                "https://example.com/s1",
+                "https://example.com/s2",
+            ],
+            "Logo": [
+                "https://placehold.co/40x40?text=N1",
+                "https://placehold.co/40x40?text=N2",
+                "https://placehold.co/40x40?text=S1",
+                "https://placehold.co/40x40?text=S2",
+            ],
+            "Active": [True, False, True, False],
+            "Note": [
+                "This is a long note that should be truncated with ellipsis.",
+                "Another long piece of text that exceeds the configured max.",
+                "Short",
+                "Medium length note here.",
+            ],
+            "Revenue": [100.0, 150.0, 200.0, 250.0],
+        }
+    )
 
 
 def render_app(data):
@@ -104,6 +138,90 @@ def render_app(data):
         aggregation="sum",
         column_config={
             "Region": {"pinned": True},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    # ------------------------------------------------------------------
+    # Tier 2 cell renderers (LinkColumn / ImageColumn / CheckboxColumn /
+    # TextColumn.max_chars). Each pivot uses a dedicated fixture so the
+    # dim field being exercised is a first-class row dimension.
+    # ------------------------------------------------------------------
+    renderer_df = _renderer_fixture()
+
+    st.subheader("column_config.type=link")
+    st_pivot_table(
+        renderer_df,
+        key="test_pivot_cc_link",
+        rows=["Website"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        column_config={
+            "Website": {"type": "link", "display_text": "Visit {}"},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("column_config.type=image")
+    st_pivot_table(
+        renderer_df,
+        key="test_pivot_cc_image",
+        rows=["Logo"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        column_config={
+            "Logo": {"type": "image"},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("column_config.type=checkbox")
+    st_pivot_table(
+        renderer_df,
+        key="test_pivot_cc_checkbox",
+        rows=["Active"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        column_config={
+            "Active": {"type": "checkbox"},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("column_config.type=text max_chars")
+    st_pivot_table(
+        renderer_df,
+        key="test_pivot_cc_text_max",
+        rows=["Note"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        column_config={
+            "Note": {"type": "text", "max_chars": 12},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("column_config renderers + Subtotal/Total safety")
+    st_pivot_table(
+        renderer_df,
+        key="test_pivot_cc_renderer_totals",
+        rows=["Region", "Website"],
+        columns=[],
+        values=["Revenue"],
+        aggregation="sum",
+        show_subtotals=True,
+        show_totals=True,
+        column_config={
+            "Website": {"type": "link", "display_text": "Open"},
         },
         interactive=True,
         on_config_change=noop,

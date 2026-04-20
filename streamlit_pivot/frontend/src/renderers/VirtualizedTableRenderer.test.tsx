@@ -584,3 +584,209 @@ describe("VirtualizedTableRenderer - column_config.field_widths", () => {
     expect(revCells.length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier 2 column_config cell renderers through the virtualized body.
+// ---------------------------------------------------------------------------
+
+function makeRendererRecords(): DataRecord[] {
+  return [
+    {
+      region: "US",
+      website: "https://us.example.com",
+      logo: "/assets/us.png",
+      active: true,
+      note: "North America sales team",
+      year: "2024",
+      revenue: 100,
+    },
+    {
+      region: "EU",
+      website: "https://eu.example.com",
+      logo: "/assets/eu.png",
+      active: false,
+      note: "European sales team",
+      year: "2024",
+      revenue: 200,
+    },
+  ];
+}
+
+describe("VirtualizedTableRenderer - column_config cell renderers", () => {
+  it("renders link cells in virtualized body rows (table layout)", () => {
+    const records = makeRendererRecords();
+    const config = makeConfig({
+      rows: ["website"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: {
+        website: { type: "link", display_text: "Visit {}" },
+      },
+    });
+    const pivotData = new PivotData(records, config);
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+    const anchors = screen.getAllByTestId("pivot-link-cell");
+    expect(anchors.length).toBe(2);
+  });
+
+  it("renders image cells in virtualized body rows", () => {
+    const records = makeRendererRecords();
+    const config = makeConfig({
+      rows: ["logo"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { logo: { type: "image" } },
+    });
+    const pivotData = new PivotData(records, config);
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+    const imgs = screen.getAllByTestId("pivot-image-cell");
+    expect(imgs.length).toBe(2);
+  });
+
+  it("renders checkbox cells in virtualized body rows", () => {
+    const records = makeRendererRecords();
+    const config = makeConfig({
+      rows: ["active"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { active: { type: "checkbox" } },
+    });
+    const pivotData = new PivotData(records, config);
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+    const boxes = screen.getAllByTestId("pivot-checkbox-cell");
+    expect(boxes.length).toBe(2);
+  });
+
+  it("truncates long dim values with TextColumn.max_chars", () => {
+    const records = makeRendererRecords();
+    const config = makeConfig({
+      rows: ["note"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { note: { type: "text", max_chars: 8 } },
+    });
+    const pivotData = new PivotData(records, config);
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+    const truncs = screen.getAllByTestId("pivot-text-cell-truncated");
+    expect(truncs.length).toBe(2);
+    for (const span of truncs) {
+      expect(span.textContent?.endsWith("\u2026")).toBe(true);
+    }
+  });
+
+  it("renders link cells in hierarchy row_layout", () => {
+    const records = makeRendererRecords();
+    const config = makeConfig({
+      rows: ["region", "website"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      field_renderers: { website: { type: "link" } },
+    });
+    const pivotData = new PivotData(records, config);
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+    const anchors = screen.queryAllByTestId("pivot-link-cell");
+    expect(anchors.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to plain text on Total/Subtotal rows (virtualized)", () => {
+    const records = makeRendererRecords();
+    const config = makeConfig({
+      rows: ["region", "website"],
+      columns: [],
+      values: ["revenue"],
+      show_subtotals: true,
+      show_totals: true,
+      field_renderers: { website: { type: "link" } },
+    });
+    const pivotData = new PivotData(records, config);
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+    const anchors = screen.getAllByTestId("pivot-link-cell");
+    // One anchor per data row; subtotal and total rows must not produce
+    // additional anchors (they receive isTotal=true from the dispatcher).
+    expect(anchors.length).toBe(records.length);
+  });
+
+  // Integration-level safety assertion mirroring TableRenderer: a hostile URL
+  // scheme in the dataset must not produce a live anchor through the
+  // virtualized body-row path either.
+  it("falls back to plain text for unsafe URL schemes (virtualized)", () => {
+    const hostile: DataRecord[] = [
+      {
+        region: "US",
+        website: "javascript:alert('xss-us')",
+        logo: "/assets/us.png",
+        active: true,
+        note: "n",
+        year: "2024",
+        revenue: 100,
+      },
+      {
+        region: "EU",
+        website: "data:text/html,<script>alert('xss-eu')</script>",
+        logo: "/assets/eu.png",
+        active: false,
+        note: "n",
+        year: "2024",
+        revenue: 200,
+      },
+    ];
+    const config = makeConfig({
+      rows: ["website"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { website: { type: "link" } },
+    });
+    const pivotData = new PivotData(hostile, config);
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+    expect(screen.queryAllByTestId("pivot-link-cell")).toHaveLength(0);
+    for (const a of container.querySelectorAll("a")) {
+      const href = (a.getAttribute("href") ?? "").toLowerCase();
+      expect(href.startsWith("javascript:")).toBe(false);
+      expect(href.startsWith("data:")).toBe(false);
+    }
+    expect(container.textContent).toContain("javascript:alert('xss-us')");
+  });
+});

@@ -3073,3 +3073,288 @@ describe("TableRenderer - column_config.width", () => {
     ).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier 2 column_config cell renderers (LinkColumn / ImageColumn /
+// CheckboxColumn / TextColumn.max_chars).
+// ---------------------------------------------------------------------------
+
+const RENDERER_DATA: DataRecord[] = [
+  {
+    region: "US",
+    website: "https://us.example.com",
+    logo: "/assets/us.png",
+    active: true,
+    note: "North America sales team",
+    year: "2024",
+    revenue: 100,
+  },
+  {
+    region: "EU",
+    website: "https://eu.example.com",
+    logo: "/assets/eu.png",
+    active: false,
+    note: "European sales team",
+    year: "2024",
+    revenue: 200,
+  },
+];
+
+describe("TableRenderer - column_config.link renderer", () => {
+  it("renders dimension cells as anchors when field_renderers[field]=link", () => {
+    const config = makeConfig({
+      rows: ["website"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: {
+        website: { type: "link", display_text: "Visit {}" },
+      },
+    });
+    const pd = new PivotData(RENDERER_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+    const anchors = screen.getAllByTestId("pivot-link-cell");
+    expect(anchors.length).toBe(2);
+    const hrefs = anchors.map((a) => a.getAttribute("href")).sort();
+    expect(hrefs).toEqual(["https://eu.example.com", "https://us.example.com"]);
+    const texts = anchors.map((a) => a.textContent).sort();
+    expect(texts[0]).toBe("Visit https://eu.example.com");
+  });
+
+  it("does NOT render anchors on subtotal/total rows (plain text fallback)", () => {
+    const config = makeConfig({
+      rows: ["region", "website"],
+      columns: [],
+      values: ["revenue"],
+      show_subtotals: true,
+      show_totals: true,
+      field_renderers: { website: { type: "link" } },
+    });
+    const pd = new PivotData(RENDERER_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+    // Total row cell reads "Total" as its sole dim value — not a link.
+    const anchors = screen.queryAllByTestId("pivot-link-cell");
+    // Data rows render anchors, but the single total row has none.
+    expect(anchors.length).toBe(RENDERER_DATA.length);
+  });
+
+  // Integration-level safety assertion: an unsafe URL scheme coming from the
+  // dataset must never reach the DOM as a live anchor. Guards against future
+  // regressions where a new render site bypasses renderCellContent or a
+  // refactor loosens toHref scheme validation.
+  it("falls back to plain text for unsafe URL schemes (javascript:, data:)", () => {
+    const hostileData: DataRecord[] = [
+      {
+        region: "US",
+        website: "javascript:alert('xss-us')",
+        logo: "/assets/us.png",
+        active: true,
+        note: "n",
+        year: "2024",
+        revenue: 100,
+      },
+      {
+        region: "EU",
+        website: "data:text/html,<script>alert('xss-eu')</script>",
+        logo: "/assets/eu.png",
+        active: false,
+        note: "n",
+        year: "2024",
+        revenue: 200,
+      },
+    ];
+    const config = makeConfig({
+      rows: ["website"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { website: { type: "link" } },
+    });
+    const pd = new PivotData(hostileData, config);
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    expect(screen.queryAllByTestId("pivot-link-cell")).toHaveLength(0);
+    // And no anchor anywhere in the rendered tree carries a hostile href.
+    for (const a of container.querySelectorAll("a")) {
+      const href = (a.getAttribute("href") ?? "").toLowerCase();
+      expect(href.startsWith("javascript:")).toBe(false);
+      expect(href.startsWith("data:")).toBe(false);
+    }
+    // The raw value is still surfaced as plain text so the caller can see
+    // what's in the cell (just not as a live link).
+    expect(container.textContent).toContain("javascript:alert('xss-us')");
+  });
+});
+
+describe("TableRenderer - column_config.image renderer", () => {
+  it("renders dimension cells as <img> when field_renderers[field]=image", () => {
+    const config = makeConfig({
+      rows: ["logo"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { logo: { type: "image" } },
+    });
+    const pd = new PivotData(RENDERER_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+    const imgs = screen.getAllByTestId("pivot-image-cell");
+    expect(imgs.length).toBe(2);
+    const srcs = imgs.map((i) => i.getAttribute("src")).sort();
+    expect(srcs).toEqual(["/assets/eu.png", "/assets/us.png"]);
+  });
+
+  it("uses breadcrumb variant in hierarchy row_layout", () => {
+    const config = makeConfig({
+      rows: ["region", "logo"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      field_renderers: { logo: { type: "image" } },
+    });
+    const pd = new PivotData(RENDERER_DATA, config);
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    const imgs = container.querySelectorAll("[data-testid='pivot-image-cell']");
+    expect(imgs.length).toBeGreaterThan(0);
+  });
+
+  // Integration-level safety assertion: hostile image src values must not
+  // reach the DOM as a live <img>. Complements the cellRenderer unit tests
+  // by exercising the full TableRenderer wiring.
+  it("falls back to plain text for unsafe image schemes (javascript:, file:, non-image data:)", () => {
+    const hostileData: DataRecord[] = [
+      {
+        region: "US",
+        website: "https://us.example.com",
+        logo: "javascript:alert('xss-us')",
+        active: true,
+        note: "n",
+        year: "2024",
+        revenue: 100,
+      },
+      {
+        region: "EU",
+        website: "https://eu.example.com",
+        logo: "data:text/html,<script>alert('xss-eu')</script>",
+        active: false,
+        note: "n",
+        year: "2024",
+        revenue: 200,
+      },
+    ];
+    const config = makeConfig({
+      rows: ["logo"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { logo: { type: "image" } },
+    });
+    const pd = new PivotData(hostileData, config);
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    expect(screen.queryAllByTestId("pivot-image-cell")).toHaveLength(0);
+    for (const img of container.querySelectorAll("img")) {
+      const src = (img.getAttribute("src") ?? "").toLowerCase();
+      expect(src.startsWith("javascript:")).toBe(false);
+      expect(src.startsWith("data:text")).toBe(false);
+    }
+    expect(container.textContent).toContain("javascript:alert('xss-us')");
+  });
+});
+
+describe("TableRenderer - column_config.checkbox renderer", () => {
+  it("renders booleans as ☑ / ☐ glyphs", () => {
+    const config = makeConfig({
+      rows: ["active"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { active: { type: "checkbox" } },
+    });
+    const pd = new PivotData(RENDERER_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+    const boxes = screen.getAllByTestId("pivot-checkbox-cell");
+    expect(boxes.length).toBe(2);
+    const checkedStates = boxes
+      .map((b) => b.getAttribute("data-checked"))
+      .sort();
+    expect(checkedStates).toEqual(["false", "true"]);
+  });
+});
+
+describe("TableRenderer - column_config.text max_chars", () => {
+  it("truncates dim-cell text to max_chars with ellipsis", () => {
+    const config = makeConfig({
+      rows: ["note"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { note: { type: "text", max_chars: 8 } },
+    });
+    const pd = new PivotData(RENDERER_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+    const truncs = screen.getAllByTestId("pivot-text-cell-truncated");
+    expect(truncs.length).toBe(2);
+    for (const span of truncs) {
+      expect(span.textContent?.endsWith("\u2026")).toBe(true);
+      // Full text available via title attribute for hover inspection.
+      const full = span.getAttribute("title") ?? "";
+      expect(full.length).toBeGreaterThan(8);
+    }
+  });
+
+  it("leaves short dim-cell text unwrapped", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue"],
+      field_renderers: { region: { type: "text", max_chars: 20 } },
+    });
+    const pd = new PivotData(RENDERER_DATA, config);
+    render(<TableRenderer pivotData={pd} config={config} />);
+    expect(screen.queryAllByTestId("pivot-text-cell-truncated")).toHaveLength(
+      0,
+    );
+    expect(screen.getByText("US")).toBeInTheDocument();
+  });
+
+  // Regression guard for the projected-hierarchy render path. Temporal row
+  // projection in ``row_layout="hierarchy"`` funnels synthetic parent-row
+  // labels through ``renderProjectedRowHeaderCells``'s hierarchy branch —
+  // a path that previously bypassed renderCellContent entirely, silently
+  // dropping column_config renderers on those rows. This test fails closed
+  // if that wiring ever regresses.
+  it("applies renderers on projected hierarchy rows (temporal row projection)", () => {
+    const data: DataRecord[] = [
+      { order_date: "2024-01-03", region: "US", revenue: 100 },
+      { order_date: "2024-02-10", region: "US", revenue: 150 },
+    ];
+    const config = makeConfig({
+      rows: ["order_date"],
+      columns: ["region"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      field_renderers: { order_date: { type: "text", max_chars: 3 } },
+    });
+    const pd = new PivotData(data, config, {
+      columnTypes: new Map([["order_date", "date"]]),
+    });
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    // The synthetic temporal parent row is the projected-hierarchy path.
+    expect(
+      screen.getAllByTestId("pivot-temporal-parent-row").length,
+    ).toBeGreaterThan(0);
+    // "2024" (the year parent label) truncates to "20…" under max_chars=3.
+    const truncs = container.querySelectorAll(
+      "[data-testid='pivot-text-cell-truncated']",
+    );
+    expect(truncs.length).toBeGreaterThan(0);
+    let foundYearTruncation = false;
+    for (const span of truncs) {
+      if (span.getAttribute("title")?.startsWith("2024")) {
+        expect(span.textContent).toBe("20\u2026");
+        foundYearTruncation = true;
+      }
+    }
+    expect(foundYearTruncation).toBe(true);
+  });
+});

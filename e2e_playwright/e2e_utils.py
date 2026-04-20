@@ -156,6 +156,11 @@ COLUMN_CONFIG_PIVOT_KEYS = [
     "test_pivot_cc_width_px",
     "test_pivot_cc_width_preset",
     "test_pivot_cc_pinned",
+    "test_pivot_cc_link",
+    "test_pivot_cc_image",
+    "test_pivot_cc_checkbox",
+    "test_pivot_cc_text_max",
+    "test_pivot_cc_renderer_totals",
 ]
 
 APP_CONFIGS = {

@@ -18,6 +18,7 @@
 import {
   FC,
   ReactElement,
+  ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -55,6 +56,7 @@ import {
   type ShowValuesAs,
   type SortConfig,
 } from "../engine/types";
+import { renderCellContent } from "./cellRenderer";
 import { computeCellStyle } from "./ConditionalFormat";
 import HeaderMenu from "./HeaderMenu";
 import { useHeaderMenu } from "./useHeaderMenu";
@@ -1853,7 +1855,7 @@ function getDeepestActiveHeaderIndex(
 
 function renderHierarchyRowHeaderCell(
   key: string,
-  label: string,
+  label: ReactNode,
   depth: number,
   classes: string,
   opts?: {
@@ -1996,10 +1998,24 @@ function renderProjectedRowHeaderCells(
       .filter(Boolean)
       .join(" ");
 
+    // Apply column_config cell renderers on projected hierarchy rows too. This
+    // path is used by e.g. temporal row projection under row_layout="hierarchy"
+    // — without this dispatch, link / image / checkbox / text.max_chars would
+    // silently be bypassed on those rows.
+    const isTotalCell = !!isSubtotalRow || !!projected.headerIsTotal[colIdx];
+    const renderedContent: ReactNode = renderCellContent({
+      rawValue: value,
+      displayText: text,
+      field: mapping.field,
+      config,
+      isTotal: isTotalCell,
+      variant: "breadcrumb",
+    });
+
     return [
       renderHierarchyRowHeaderCell(
         `row-header-hierarchy-${colIdx}`,
-        text,
+        renderedContent,
         colIdx,
         dimClasses,
         {
@@ -2067,9 +2083,20 @@ function renderProjectedRowHeaderCells(
           ? formatTemporalParentLabel(value, mapping.grain, temporalPattern)
           : pivotData.formatDimLabel(mapping.field, value)
         : "(empty)";
-    const text = projected.headerIsTotal[colIdx]
-      ? `${formatted} Total`
-      : formatted;
+    const isTotalCell = projected.headerIsTotal[colIdx];
+    const text = isTotalCell ? `${formatted} Total` : formatted;
+    // On subtotal rows the dim value is real (e.g. "North America" becoming
+    // "North America Total") but the " Total" suffix makes a link / image /
+    // checkbox rendering visually incoherent, so treat subtotal rows the
+    // same as Total sentinel rows for renderer dispatch.
+    const renderedContent: ReactNode = renderCellContent({
+      rawValue: value,
+      displayText: text,
+      field: mapping.field,
+      config,
+      isTotal: isTotalCell,
+      variant: "cell",
+    });
 
     const isGroupingDim =
       subtotalsOn && mapping.dimIndex < leafDimIdx && mapping.isLeaf;
@@ -2194,7 +2221,7 @@ function renderProjectedRowHeaderCells(
           {!showTemporalToggle && showGroupToggle && (
             <GroupToggleIcon isCollapsed={isCollapsed} />
           )}
-          <span>{text}</span>
+          <span>{renderedContent}</span>
         </span>
       </th>,
     );
@@ -2271,13 +2298,18 @@ export function renderDataRow(
               const activeDimIdx =
                 activeHeaderIdx >= 0 ? activeHeaderIdx : rowKey.length - 1;
               const part = rowKey[activeDimIdx] ?? "";
+              const activeDimField = config.rows[activeDimIdx] ?? "";
               const text =
-                (part
-                  ? pivotData.formatDimLabel(
-                      config.rows[activeDimIdx] ?? "",
-                      part,
-                    )
-                  : "") || "(empty)";
+                (part ? pivotData.formatDimLabel(activeDimField, part) : "") ||
+                "(empty)";
+              const renderedLabel: ReactNode = renderCellContent({
+                rawValue: part,
+                displayText: text,
+                field: activeDimField,
+                config,
+                isTotal: false,
+                variant: "cell",
+              });
               const dimClasses = [
                 styles.rowHeaderCell,
                 styles.rowHeaderCellPinned,
@@ -2286,7 +2318,7 @@ export function renderDataRow(
                 .join(" ");
               return renderHierarchyRowHeaderCell(
                 `row-header-hierarchy-${activeDimIdx}`,
-                text,
+                renderedLabel,
                 activeDimIdx,
                 dimClasses,
                 {
@@ -2361,12 +2393,20 @@ export function renderDataRow(
                       <GroupToggleIcon isCollapsed={isCollapsed} />
                     )}
                     <span>
-                      {(part
-                        ? pivotData.formatDimLabel(
-                            config.rows[dimIdx] ?? "",
-                            part,
-                          )
-                        : "") || "(empty)"}
+                      {renderCellContent({
+                        rawValue: part,
+                        displayText:
+                          (part
+                            ? pivotData.formatDimLabel(
+                                config.rows[dimIdx] ?? "",
+                                part,
+                              )
+                            : "") || "(empty)",
+                        field: config.rows[dimIdx] ?? "",
+                        config,
+                        isTotal: false,
+                        variant: "cell",
+                      })}
                     </span>
                   </span>
                 </th>
@@ -2697,16 +2737,32 @@ export function renderSubtotalRow(
           )
         : isHierarchyLayout(config)
           ? (() => {
+              const subtotalField = config.rows[level] ?? "";
+              const subtotalRawValue = parentKey[level];
               const formatted =
-                parentKey[level] !== undefined
+                subtotalRawValue !== undefined
                   ? pivotData.formatDimLabel(
-                      config.rows[level] ?? "",
-                      parentKey[level] ?? "",
+                      subtotalField,
+                      subtotalRawValue ?? "",
                     )
                   : "";
+              const subtotalDisplayText = formatted || "(empty)";
+              // Hierarchy breadcrumb context: use the tighter image variant
+              // for consistency with the other hierarchy-branch call sites.
+              // Today this is a no-op (isTotal=true suppresses ImageCell
+              // entirely) but keeps the variant coherent if the subtotal-row
+              // safety rule is ever relaxed for a subset of renderers.
+              const subtotalContent: ReactNode = renderCellContent({
+                rawValue: subtotalRawValue,
+                displayText: subtotalDisplayText,
+                field: subtotalField,
+                config,
+                isTotal: true,
+                variant: "breadcrumb",
+              });
               return renderHierarchyRowHeaderCell(
                 `sub-hdr-hierarchy-${level}`,
-                formatted || "(empty)",
+                subtotalContent,
                 level,
                 `${styles.rowHeaderCell} ${styles.rowHeaderPrimary} ${styles.rowHeaderCellPinned} ${styles.subtotalHeaderCell}`,
                 {
@@ -2728,7 +2784,9 @@ export function renderSubtotalRow(
               if (span === 0) return null;
 
               if (dimIdx < level) {
-                // Parent dimension cell — show value from parentKey
+                const parentField = config.rows[dimIdx] ?? "";
+                const parentRaw = parentKey[dimIdx];
+                const parentDisplay = parentRaw || "(empty)";
                 return (
                   <th
                     key={`sub-hdr-${dimIdx}`}
@@ -2737,7 +2795,14 @@ export function renderSubtotalRow(
                     rowSpan={span > 1 ? span : undefined}
                     data-dim-index={dimIdx}
                   >
-                    {parentKey[dimIdx] || "(empty)"}
+                    {renderCellContent({
+                      rawValue: parentRaw,
+                      displayText: parentDisplay,
+                      field: parentField,
+                      config,
+                      isTotal: true,
+                      variant: "cell",
+                    })}
                   </th>
                 );
               }

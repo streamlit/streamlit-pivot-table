@@ -1,0 +1,68 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Shared styles for Tier 2 column_config cell renderers:
+ *   LinkCell, ImageCell, CheckboxCell, TextCell.
+ */
+
+.link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--st-primary-color, #ff4b4b);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.image {
+  max-height: 2em;
+  max-width: 100%;
+  object-fit: contain;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+/* Tighter variant used inside the hierarchy breadcrumb. The breadcrumb label
+ * is inline-flex at 12px/1.2 line-height; capping to 1em keeps the breadcrumb
+ * height stable regardless of image natural size. */
+.imageBreadcrumb {
+  max-height: 1em;
+  max-width: 100%;
+  object-fit: contain;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.checkbox {
+  font-family:
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji",
+    sans-serif;
+  font-size: 1em;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+}

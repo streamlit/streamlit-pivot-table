@@ -201,7 +201,7 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `column_alignment` | `dict[str, str] \| None` | `None` | `"left"` / `"center"` / `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Color scales, data bars, thresholds. |
-| `column_config` | `dict[str, Any] \| None` | `None` | Streamlit-style per-column display config. Keys: `format`, `type`, `label`, `help`, `width` (`"small"`/`"medium"`/`"large"`/int px ∈ [20, 2000]), `pinned` (config-UI lock only, not sticky), `alignment` (`"left"`/`"center"`/`"right"`; unions with `column_alignment` kwarg, explicit kwarg wins). Both dict literals and `st.column_config.*` objects are accepted. |
+| `column_config` | `dict[str, Any] \| None` | `None` | Streamlit-style per-column display config. Keys: `format`, `type`, `label`, `help`, `width` (`"small"`/`"medium"`/`"large"`/int px ∈ [20, 2000]), `pinned` (config-UI lock only, not sticky), `alignment` (`"left"`/`"center"`/`"right"`; unions with `column_alignment` kwarg, explicit kwarg wins). Row-dim cell renderers via `type`: `"link"` (+ optional `display_text`), `"image"`, `"checkbox"`, `"text"` with `max_chars`. Both dict literals and `st.column_config.*` objects are accepted. |
 | `empty_cell_value` | `str` | `"-"` | String for empty cells. |
 
 #### Layout
@@ -400,6 +400,28 @@ st_pivot_table(
 - `pinned=True` (or `"left"`) locks the field in the **config UI** — no drag, no remove. It does **not** create a visually sticky column. `"right"` warns and is ignored.
 - `alignment` accepts `"left"`, `"center"`, or `"right"`. It **unions** with the `column_alignment` kwarg; if both set a value for the same field, the explicit `column_alignment` kwarg wins. Invalid values warn once per field and are skipped (unlike the `column_alignment` kwarg, which still raises on invalid input).
 - Unknown keys in dict literals warn once per `(field, key)`; internal defaults on `st.column_config.*` objects (`disabled`, `required`, `default`) are silently ignored; recognized-but-unsupported column types (e.g. `line_chart`, `selectbox`) warn once per `(field, type)`.
+
+**Row-dim cell renderers (Tier 2).** A small set of `type` values change how row-dim cell values render. These apply only to row-dim cells; measure cells are numeric aggregates and ignore them. On Total / Subtotal rows, `link` / `image` / `checkbox` fall back to plain text (cell value is a label, not data); `text` with `max_chars` still truncates.
+
+```python
+st_pivot_table(
+    df,
+    key="column_config_renderers",
+    rows=["Homepage", "Poster", "Active", "Description"],
+    values=["Revenue"],
+    column_config={
+        "Homepage":    st.column_config.LinkColumn("Homepage", display_text="Visit {}"),
+        "Poster":      st.column_config.ImageColumn("Poster"),
+        "Active":      st.column_config.CheckboxColumn("Active"),
+        "Description": st.column_config.TextColumn("Description", max_chars=40),
+    },
+)
+```
+
+- `type="link"` — `href = <raw value>`. `display_text` can be a plain string or a `{}` template (substituted with the cell value, matching Streamlit's `LinkColumn`). Empty / null values fall back to plain text. **Scheme allowlist:** only `http:`, `https:`, `mailto:`, `tel:`, and schemeless (relative / protocol-relative) URLs render as anchors; `javascript:`, `data:`, `file:`, `vbscript:`, etc. fall back to plain text.
+- `type="image"` — `src = <raw value>`. Uses `loading="lazy"` and a `max-height` guard so images don't blow out row height. In `row_layout="hierarchy"`, the breadcrumb variant applies a tighter 1em cap. **Src allowlist:** `http:` / `https:` / schemeless URLs plus raster `data:image/<mime>` (png, jpeg, gif, webp, avif, bmp, ico); everything else — notably `data:image/svg+xml` and non-image `data:` — falls back to plain text.
+- `type="checkbox"` — truthy → ☑, falsy → ☐. Accepts booleans, `"true"/"false"/"yes"/"no"/"1"/"0"` (case-insensitive), and the numbers `0` / `1`. Unrecognized values fall back to plain text.
+- `type="text"` + `max_chars` — truncates to `max_chars` UTF-16 code units (matches JS `String.length` / Streamlit's `TextColumn`) with an ellipsis; full text is preserved in the cell's `title` attribute. Truncation applies on every row, including Totals. Invalid `max_chars` (non-positive, non-integer, bool) warns once and is skipped.
 
 ### Conditional Formatting
 

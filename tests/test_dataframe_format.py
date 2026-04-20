@@ -658,6 +658,211 @@ class TestAlignmentReconciliation:
 
 
 # ---------------------------------------------------------------------------
+# Tier 2 column_config cell renderers
+# ---------------------------------------------------------------------------
+
+
+class TestCellRenderers:
+    """column_config types that produce per-field cell renderers
+    (LinkColumn / ImageColumn / CheckboxColumn / TextColumn.max_chars).
+
+    Emitted as ``field_renderers[field]`` with a tagged shape consumed by the
+    frontend dispatcher at ``renderers/cellRenderer.tsx``.
+    """
+
+    def test_link_dict_literal_flat(self, pivot_module):
+        config = {
+            "Website": {"type": "link", "display_text": "Visit {}"},
+        }
+        df = pd.DataFrame({"Website": ["https://example.com"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_renderers"] == {
+            "Website": {"type": "link", "display_text": "Visit {}"},
+        }
+
+    def test_link_dict_literal_nested_type_config(self, pivot_module):
+        """Users may nest renderer options under type_config in dict literals."""
+        config = {
+            "Website": {
+                "type": "link",
+                "type_config": {"display_text": "Click"},
+            },
+        }
+        df = pd.DataFrame({"Website": ["https://example.com"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_renderers"] == {
+            "Website": {"type": "link", "display_text": "Click"},
+        }
+
+    def test_link_without_display_text(self, pivot_module):
+        config = {"Website": {"type": "link"}}
+        df = pd.DataFrame({"Website": ["https://example.com"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_renderers"] == {"Website": {"type": "link"}}
+
+    def test_link_object_style(self, pivot_module):
+        """st.column_config.LinkColumn(display_text=...) flows through."""
+        import streamlit as st
+
+        spec = dict(st.column_config.LinkColumn(display_text="Visit {}"))
+        df = pd.DataFrame({"Website": ["https://example.com"]})
+        result = pivot_module._translate_column_config({"Website": spec}, df)
+        assert result["field_renderers"]["Website"]["type"] == "link"
+        assert result["field_renderers"]["Website"]["display_text"] == "Visit {}"
+
+    def test_image_renderer(self, pivot_module):
+        config = {"Logo": {"type": "image"}}
+        df = pd.DataFrame({"Logo": ["/tmp/a.png"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_renderers"] == {"Logo": {"type": "image"}}
+
+    def test_checkbox_renderer(self, pivot_module):
+        config = {"Active": {"type": "checkbox"}}
+        df = pd.DataFrame({"Active": [True, False]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_renderers"] == {"Active": {"type": "checkbox"}}
+
+    def test_text_max_chars_emits_renderer(self, pivot_module):
+        config = {"Notes": {"type": "text", "max_chars": 40}}
+        df = pd.DataFrame({"Notes": ["long text"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_renderers"] == {
+            "Notes": {"type": "text", "max_chars": 40},
+        }
+
+    def test_text_without_max_chars_no_renderer(self, pivot_module):
+        """TextColumn without max_chars is equivalent to default text
+        rendering, so no renderer entry is emitted."""
+        config = {"Notes": {"type": "text"}}
+        df = pd.DataFrame({"Notes": ["abc"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "field_renderers" not in result
+
+    def test_text_invalid_max_chars_warns_and_skips(self, pivot_module, recwarn):
+        config = {"Notes": {"type": "text", "max_chars": 0}}
+        df = pd.DataFrame({"Notes": ["abc"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "field_renderers" not in result
+        assert any("max_chars" in str(w.message).lower() for w in recwarn), [
+            str(w.message) for w in recwarn
+        ]
+
+    def test_text_negative_max_chars_warns_and_skips(self, pivot_module, recwarn):
+        config = {"Notes": {"type": "text", "max_chars": -5}}
+        df = pd.DataFrame({"Notes": ["abc"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "field_renderers" not in result
+        assert any("max_chars" in str(w.message).lower() for w in recwarn)
+
+    def test_text_bool_max_chars_rejected(self, pivot_module, recwarn):
+        """bool is a subclass of int in Python; explicit exclusion."""
+        config = {"Notes": {"type": "text", "max_chars": True}}
+        df = pd.DataFrame({"Notes": ["abc"]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "field_renderers" not in result
+        assert any("max_chars" in str(w.message).lower() for w in recwarn)
+
+    def test_allowlist_accepts_renderer_specific_keys(self, pivot_module, recwarn):
+        """display_text / max_chars / min_value / max_value must not trigger
+        unknown-key warnings on dict-literal specs."""
+        config = {
+            "Website": {"type": "link", "display_text": "x"},
+            "Notes": {"type": "text", "max_chars": 10},
+            "Pct": {
+                "type": "progress",
+                "min_value": 0,
+                "max_value": 100,
+            },
+        }
+        df = pd.DataFrame(
+            {
+                "Website": ["https://x"],
+                "Notes": ["x"],
+                "Pct": [50],
+            }
+        )
+        pivot_module._translate_column_config(config, df)
+        unknown = [w for w in recwarn if "unrecognized" in str(w.message).lower()]
+        assert unknown == [], [str(w.message) for w in unknown]
+
+    def test_multiple_renderer_types_emitted_together(self, pivot_module):
+        config = {
+            "URL": {"type": "link"},
+            "IMG": {"type": "image"},
+            "OK": {"type": "checkbox"},
+            "Notes": {"type": "text", "max_chars": 25},
+        }
+        df = pd.DataFrame(
+            {
+                "URL": ["https://x"],
+                "IMG": ["/tmp/a.png"],
+                "OK": [True],
+                "Notes": ["x"],
+            }
+        )
+        result = pivot_module._translate_column_config(config, df)
+        assert result["field_renderers"] == {
+            "URL": {"type": "link"},
+            "IMG": {"type": "image"},
+            "OK": {"type": "checkbox"},
+            "Notes": {"type": "text", "max_chars": 25},
+        }
+
+    def test_unsupported_renderer_type_does_not_emit(self, pivot_module):
+        """Tier 3 column types (line_chart etc.) must not leak into
+        field_renderers — they emit an unsupported-type warning but produce
+        no renderer entry."""
+        config = {"X": {"type": "line_chart"}}
+        df = pd.DataFrame({"X": [1]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "field_renderers" not in result
+
+    def test_progress_type_warns_until_wired(self, pivot_module, recwarn):
+        """``ProgressColumn`` is planned for a later Tier 2 increment but is
+        not yet implemented. Users who configure it today should see an
+        unsupported-type warning rather than silent no-op, even though
+        ``min_value`` / ``max_value`` are allowlisted as known keys."""
+        config = {
+            "Pct": {
+                "type": "progress",
+                "min_value": 0,
+                "max_value": 100,
+            },
+        }
+        df = pd.DataFrame({"Pct": [50]})
+        result = pivot_module._translate_column_config(config, df)
+        assert "field_renderers" not in result
+        unsupported = [
+            w
+            for w in recwarn
+            if "not supported" in str(w.message).lower()
+            and "progress" in str(w.message).lower()
+        ]
+        assert len(unsupported) == 1, [str(w.message) for w in recwarn]
+        unknown = [w for w in recwarn if "unrecognized" in str(w.message).lower()]
+        assert unknown == [], [str(w.message) for w in unknown]
+
+    def test_renderer_reaches_mounted_config(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        calls = mount_recorder()
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot_renderer_mount",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            column_config={
+                "Region": {"type": "text", "max_chars": 10},
+            },
+        )
+        config = calls[0]["default"]["config"]
+        assert config["field_renderers"] == {
+            "Region": {"type": "text", "max_chars": 10},
+        }
+
+
+# ---------------------------------------------------------------------------
 # _extract_styler_formats and _guess_format_pattern
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,75 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import type { ReactNode } from "react";
+
+import styles from "./CellRenderers.module.css";
+
+export interface CheckboxCellProps {
+  rawValue: unknown;
+  /** Fallback text when the raw value isn't a recognizable boolean. */
+  displayText: string;
+}
+
+const CHECKED = "\u2611"; // ☑
+const UNCHECKED = "\u2610"; // ☐
+
+/**
+ * Renders a dimension cell as a checkbox glyph. Values that don't parse as a
+ * boolean fall back to plain text (e.g. empty strings, "(empty)" placeholder,
+ * free-form strings on heterogeneous columns).
+ */
+export function CheckboxCell({
+  rawValue,
+  displayText,
+}: CheckboxCellProps): ReactNode {
+  const parsed = parseBool(rawValue);
+  if (parsed === null) {
+    return displayText;
+  }
+  return (
+    <span
+      className={styles.checkbox}
+      role="img"
+      aria-label={parsed ? "checked" : "unchecked"}
+      data-testid="pivot-checkbox-cell"
+      data-checked={parsed ? "true" : "false"}
+    >
+      {parsed ? CHECKED : UNCHECKED}
+    </span>
+  );
+}
+
+function parseBool(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+  if (typeof value === "string") {
+    const s = value.trim().toLowerCase();
+    if (s === "true" || s === "yes" || s === "y" || s === "1" || s === "t") {
+      return true;
+    }
+    if (s === "false" || s === "no" || s === "n" || s === "0" || s === "f") {
+      return false;
+    }
+    return null;
+  }
+  return null;
+}

@@ -2130,6 +2130,117 @@ st_pivot_table(
 section_column_config()
 
 # ---------------------------------------------------------------------------
+# Section 21: column_config (Tier 2: link, image, checkbox, text max_chars)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("21. Column Config — Cell Renderers (link, image, checkbox, text)")
+
+
+@st.fragment
+def section_column_config_renderers():
+    st.markdown(
+        """
+A small set of ``type`` values in ``column_config`` produce **row-dimension
+cell renderers**. Measure cells are numeric aggregates and ignore these
+types. On Total / Subtotal rows, ``link`` / ``image`` / ``checkbox`` fall back
+to plain text because the cell value is a label rather than data; ``text``
+with ``max_chars`` still truncates.
+
+- ``type="link"`` — renders the cell value as an ``<a>`` (``href`` = raw
+  value). ``display_text`` can be a plain string or a ``{}`` template
+  (substituted with the cell value, mirroring Streamlit's ``LinkColumn``).
+- ``type="image"`` — renders the cell value as an ``<img>`` (``src`` = raw
+  value) with ``loading="lazy"`` and a ``max-height`` guard.
+- ``type="checkbox"`` — truthy → ☑, falsy → ☐. Accepts ``True`` / ``False``,
+  the strings ``"true"`` / ``"false"`` / ``"yes"`` / ``"no"`` / ``"1"`` /
+  ``"0"`` (case-insensitive), and the numbers ``0`` / ``1``.
+- ``type="text"`` with ``max_chars`` — truncates with ellipsis; full text is
+  preserved in the cell's ``title`` attribute.
+"""
+    )
+
+    renderer_df = pd.DataFrame(
+        {
+            "Product": [
+                "Widget",
+                "Gadget",
+                "Gizmo",
+                "Sprocket",
+            ],
+            "Homepage": [
+                "https://example.com/widget",
+                "https://example.com/gadget",
+                "https://example.com/gizmo",
+                "https://example.com/sprocket",
+            ],
+            "Poster": [
+                "https://streamlit.io/images/brand/streamlit-mark-color.png",
+                "https://streamlit.io/images/brand/streamlit-mark-color.png",
+                "https://streamlit.io/images/brand/streamlit-mark-color.png",
+                "https://streamlit.io/images/brand/streamlit-mark-color.png",
+            ],
+            "Active": [True, False, True, True],
+            "Description": [
+                "A small but mighty widget with a very long description "
+                "that should definitely be truncated for readability.",
+                "Gadget with a medium-length description that may or may not fit.",
+                "Gizmo — short.",
+                "Sprocket description that keeps going and going and going.",
+            ],
+            "Revenue": [1200.0, 850.5, 430.25, 2100.75],
+        }
+    )
+
+    st_pivot_table(
+        renderer_df,
+        key="column_config_renderers_demo",
+        rows=["Product", "Homepage", "Poster", "Active", "Description"],
+        values=["Revenue"],
+        aggregation={"Revenue": "sum"},
+        number_format={"Revenue": "$,.2f"},
+        column_config={
+            "Homepage": st.column_config.LinkColumn(
+                "Homepage",
+                display_text="Visit {}",
+            ),
+            "Poster": st.column_config.ImageColumn("Poster", width="small"),
+            "Active": st.column_config.CheckboxColumn("Active"),
+            "Description": st.column_config.TextColumn(
+                "Description",
+                max_chars=40,
+            ),
+        },
+        show_totals=True,
+        interactive=True,
+    )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+st_pivot_table(
+    renderer_df,
+    key="column_config_renderers_demo",
+    rows=["Product", "Homepage", "Poster", "Active", "Description"],
+    values=["Revenue"],
+    aggregation={"Revenue": "sum"},
+    number_format={"Revenue": "$,.2f"},
+    column_config={
+        "Homepage":    st.column_config.LinkColumn("Homepage", display_text="Visit {}"),
+        "Poster":      st.column_config.ImageColumn("Poster", width="small"),
+        "Active":      st.column_config.CheckboxColumn("Active"),
+        "Description": st.column_config.TextColumn("Description", max_chars=40),
+    },
+    show_totals=True,
+    interactive=True,
+)
+""",
+            language="python",
+        )
+
+
+section_column_config_renderers()
+
+# ---------------------------------------------------------------------------
 # Footer: Raw Data
 # ---------------------------------------------------------------------------
 st.divider()

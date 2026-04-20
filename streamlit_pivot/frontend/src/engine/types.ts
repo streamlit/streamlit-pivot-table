@@ -117,6 +117,54 @@ export interface PivotConfigV1 {
    * int in the range [20, 2000] (frontend clamps as defense-in-depth).
    */
   field_widths?: Record<string, number | "small" | "medium" | "large">;
+  /**
+   * Per-field cell renderer override. Populated from column_config.type
+   * (LinkColumn / ImageColumn / CheckboxColumn / TextColumn.max_chars in
+   * Tier 2 PR-T2A; ProgressColumn lands in Tier 2 PR-T2B).
+   *
+   * Renderers apply to **dimension cells only** (row-axis). Measure cells
+   * are always numeric aggregates and render through the number_format /
+   * styler pipeline. On Total / Subtotal sentinel rows the dim cell value
+   * is a label rather than data; Link/Image/Checkbox fall back to plain
+   * text there, while TextColumn.max_chars still truncates.
+   */
+  field_renderers?: Record<string, CellRendererSpec>;
+}
+
+/**
+ * Tagged union describing a per-field cell renderer. Populated from
+ * Streamlit's column_config (translated on the Python side) and consumed by
+ * `renderers/cellRenderer.ts`.
+ */
+export type CellRendererSpec =
+  | LinkRendererSpec
+  | ImageRendererSpec
+  | CheckboxRendererSpec
+  | TextRendererSpec;
+
+export interface LinkRendererSpec {
+  type: "link";
+  /**
+   * Optional display label. If omitted, the cell value is used as the
+   * anchor text. Accepts a plain string or a template containing a single
+   * `{}` placeholder (Streamlit's convention), which is substituted with
+   * the cell value at render time.
+   */
+  display_text?: string;
+}
+
+export interface ImageRendererSpec {
+  type: "image";
+}
+
+export interface CheckboxRendererSpec {
+  type: "checkbox";
+}
+
+export interface TextRendererSpec {
+  type: "text";
+  /** Positive int; cells longer than this are truncated with an ellipsis. */
+  max_chars: number;
 }
 
 export type SyntheticOperation = "sum_over_sum" | "difference" | "formula";
@@ -1252,6 +1300,55 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       string,
       number | "small" | "medium" | "large"
     >;
+  }
+  if (
+    o.field_renderers !== undefined &&
+    typeof o.field_renderers === "object" &&
+    !Array.isArray(o.field_renderers) &&
+    o.field_renderers !== null
+  ) {
+    const fr = o.field_renderers as Record<string, unknown>;
+    const validated: Record<string, CellRendererSpec> = {};
+    for (const [k, raw] of Object.entries(fr)) {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new Error(`'field_renderers["${k}"]' must be an object`);
+      }
+      const spec = raw as Record<string, unknown>;
+      const type = spec.type;
+      if (type === "link") {
+        const entry: LinkRendererSpec = { type: "link" };
+        if (spec.display_text !== undefined) {
+          if (typeof spec.display_text !== "string") {
+            throw new Error(
+              `'field_renderers["${k}"].display_text' must be a string`,
+            );
+          }
+          entry.display_text = spec.display_text;
+        }
+        validated[k] = entry;
+      } else if (type === "image") {
+        validated[k] = { type: "image" };
+      } else if (type === "checkbox") {
+        validated[k] = { type: "checkbox" };
+      } else if (type === "text") {
+        if (
+          typeof spec.max_chars !== "number" ||
+          !Number.isFinite(spec.max_chars) ||
+          !Number.isInteger(spec.max_chars) ||
+          spec.max_chars <= 0
+        ) {
+          throw new Error(
+            `'field_renderers["${k}"].max_chars' must be a positive integer`,
+          );
+        }
+        validated[k] = { type: "text", max_chars: spec.max_chars };
+      } else {
+        throw new Error(
+          `'field_renderers["${k}"].type' must be one of: link, image, checkbox, text`,
+        );
+      }
+    }
+    result.field_renderers = validated;
   }
   return result;
 }

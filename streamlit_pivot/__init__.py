@@ -102,6 +102,7 @@ class PivotConfig(TypedDict, total=False):
     field_labels: dict[str, str]
     field_help: dict[str, str]
     field_widths: dict[str, int | str]
+    field_renderers: dict[str, dict[str, Any]]
 
 
 VALID_AGGREGATIONS = frozenset(
@@ -789,6 +790,15 @@ _COLUMN_CONFIG_READ_KEYS = frozenset(
         "pinned",
         "width",
         "alignment",
+        # Tier 2 renderer keys (LinkColumn / ImageColumn / CheckboxColumn /
+        # TextColumn.max_chars). min_value / max_value are reserved for
+        # ProgressColumn (Tier 2 PR-T2B); accepted silently here so that a
+        # st.column_config.ProgressColumn spec doesn't trip unknown-key
+        # warnings on the intermediate release.
+        "display_text",
+        "max_chars",
+        "min_value",
+        "max_value",
     )
 )
 
@@ -810,12 +820,23 @@ _COLUMN_CONFIG_UNSUPPORTED_TYPES = frozenset(
         "selectbox",
         "list",
         "json",
+        # ProgressColumn is planned for a later Tier 2 increment but is not
+        # yet wired. We still accept `min_value` / `max_value` as known keys
+        # (see ``_COLUMN_CONFIG_READ_KEYS``) so users don't see stray
+        # ``unrecognized key`` warnings, but we explicitly warn on the type
+        # itself so it doesn't silently drop on the current release.
+        "progress",
     )
 )
 
 _VALID_WIDTH_PRESETS = frozenset(("small", "medium", "large"))
 _WIDTH_PX_MIN = 20
 _WIDTH_PX_MAX = 2000
+
+# Streamlit column_config `type` strings that map to a Tier 2 cell renderer.
+# `text` only produces a renderer entry when `max_chars` is set (otherwise it's
+# equivalent to default text rendering).
+_COLUMN_CONFIG_RENDERER_TYPES = frozenset(("link", "image", "checkbox", "text"))
 
 
 class _ColumnConfigTranslation(TypedDict, total=False):
@@ -828,6 +849,7 @@ class _ColumnConfigTranslation(TypedDict, total=False):
     field_widths: dict[str, int | str]
     pinned_fields: list[str]
     column_alignment: dict[str, str]
+    field_renderers: dict[str, dict[str, Any]]
 
 
 def _translate_column_config(
@@ -838,7 +860,7 @@ def _translate_column_config(
 
     Returns a dict with optional keys:
         number_format, dimension_format, field_labels, field_help,
-        field_widths, pinned_fields, column_alignment.
+        field_widths, pinned_fields, column_alignment, field_renderers.
 
     Keys absent from the column_config entry are absent from the result;
     callers merge these into the broader config with explicit-override
@@ -849,6 +871,15 @@ def _translate_column_config(
     (recognized by the presence of the Streamlit-defaults keys) are silently
     ignored. Recognized but unsupported column types (e.g. LineChartColumn)
     emit a one-shot warning per (field, type).
+
+    Tier 2 cell renderers (LinkColumn / ImageColumn / CheckboxColumn /
+    TextColumn.max_chars) are emitted as ``field_renderers[field]`` entries
+    with a tagged shape: ``{"type": "link", "display_text"?: str}``,
+    ``{"type": "image"}``, ``{"type": "checkbox"}``,
+    ``{"type": "text", "max_chars": int}``. ``TextColumn`` without a valid
+    ``max_chars`` produces no renderer entry (default text rendering
+    applies). Invalid ``max_chars`` values warn-and-skip, consistent with
+    the ``width`` / ``alignment`` policies.
     """
     number_additions: dict[str, str] = {}
     dimension_additions: dict[str, str] = {}
@@ -857,6 +888,7 @@ def _translate_column_config(
     width_additions: dict[str, int | str] = {}
     pinned_fields: list[str] = []
     alignment_additions: dict[str, str] = {}
+    renderer_additions: dict[str, dict[str, Any]] = {}
 
     # Per-call dedupe for warn-and-skip messages. Keyed by (field, key/topic)
     # so the same invalid spec surfacing on multiple reruns/fields warns only
@@ -994,6 +1026,50 @@ def _translate_column_config(
                     f"alignment.",
                 )
 
+        # ---------------- Tier 2 cell renderer types
+        # link / image / checkbox always produce a renderer spec; text only
+        # does so when a valid positive max_chars is provided (otherwise it's
+        # indistinguishable from default text rendering). All renderer-specific
+        # sub-keys accept both top-level (dict-literal friendly) and
+        # type_config-nested (st.column_config.* object friendly) locations.
+        if col_type in _COLUMN_CONFIG_RENDERER_TYPES:
+            if col_type == "link":
+                display_text = col_spec.get("display_text")
+                if not (isinstance(display_text, str) and display_text):
+                    nested = type_config.get("display_text")
+                    display_text = (
+                        nested if isinstance(nested, str) and nested else None
+                    )
+                spec: dict[str, Any] = {"type": "link"}
+                if display_text is not None:
+                    spec["display_text"] = display_text
+                renderer_additions[col_name] = spec
+            elif col_type == "image":
+                renderer_additions[col_name] = {"type": "image"}
+            elif col_type == "checkbox":
+                renderer_additions[col_name] = {"type": "checkbox"}
+            elif col_type == "text":
+                max_chars = col_spec.get("max_chars")
+                if max_chars is None:
+                    max_chars = type_config.get("max_chars")
+                if (
+                    isinstance(max_chars, int)
+                    and not isinstance(max_chars, bool)
+                    and max_chars > 0
+                ):
+                    renderer_additions[col_name] = {
+                        "type": "text",
+                        "max_chars": max_chars,
+                    }
+                elif max_chars is not None:
+                    _warn_once(
+                        col_name,
+                        "max_chars_invalid",
+                        f"column_config[{col_name!r}]: invalid max_chars "
+                        f"{max_chars!r}; expected a positive int. Leaving "
+                        f"column at default text rendering.",
+                    )
+
     result: _ColumnConfigTranslation = {}
     if number_additions:
         result["number_format"] = number_additions
@@ -1009,6 +1085,8 @@ def _translate_column_config(
         result["pinned_fields"] = pinned_fields
     if alignment_additions:
         result["column_alignment"] = alignment_additions
+    if renderer_additions:
+        result["field_renderers"] = renderer_additions
     return result
 
 
@@ -2163,6 +2241,7 @@ def _default_config(
     field_labels: dict[str, str] | None = None,
     field_help: dict[str, str] | None = None,
     field_widths: dict[str, int | str] | None = None,
+    field_renderers: dict[str, dict[str, Any]] | None = None,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -2245,6 +2324,8 @@ def _default_config(
         cfg["field_help"] = field_help
     if field_widths:
         cfg["field_widths"] = field_widths
+    if field_renderers:
+        cfg["field_renderers"] = field_renderers
     return cfg
 
 
@@ -3068,6 +3149,7 @@ def st_pivot_table(
     cc_field_labels: dict[str, str] | None = None
     cc_field_help: dict[str, str] | None = None
     cc_field_widths: dict[str, int | str] | None = None
+    cc_field_renderers: dict[str, dict[str, Any]] | None = None
     cc_pinned_fields: list[str] = []
     if column_config is not None:
         translated = _translate_column_config(column_config, filtered_data)
@@ -3103,6 +3185,7 @@ def st_pivot_table(
         cc_field_labels = translated.get("field_labels") or None
         cc_field_help = translated.get("field_help") or None
         cc_field_widths = translated.get("field_widths") or None
+        cc_field_renderers = translated.get("field_renderers") or None
         cc_pinned_fields = translated.get("pinned_fields") or []
 
     # Normalize number_format: str -> {"__all__": str}
@@ -3152,6 +3235,7 @@ def st_pivot_table(
         field_labels=cc_field_labels,
         field_help=cc_field_help,
         field_widths=cc_field_widths,
+        field_renderers=cc_field_renderers,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal

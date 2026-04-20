@@ -99,3 +99,95 @@ def test_column_config_pinned_locks_in_config_ui(page_at_app: Page):
     expect(chip).to_be_visible(timeout=5000)
     remove_btn = container.get_by_test_id("toolbar-rows-remove-Region")
     expect(remove_btn).to_have_count(0)
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 cell renderers: LinkColumn / ImageColumn / CheckboxColumn /
+# TextColumn.max_chars.
+# ---------------------------------------------------------------------------
+
+
+def test_column_config_link_renderer(page_at_app: Page):
+    """column_config={"type": "link"} renders row-dim values as <a> tags
+    with href=<raw value> and text substituted from display_text='Visit {}'."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_link")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    anchors = container.get_by_test_id("pivot-link-cell")
+    expect(anchors.first).to_be_visible(timeout=10000)
+    # One anchor per distinct Website value in the fixture.
+    expect(anchors).to_have_count(4)
+    first = anchors.first
+    expect(first).to_have_attribute("target", "_blank")
+    expect(first).to_contain_text("Visit https://example.com/")
+
+
+def test_column_config_image_renderer(page_at_app: Page):
+    """column_config={"type": "image"} renders row-dim values as <img> tags."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_image")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    imgs = container.get_by_test_id("pivot-image-cell")
+    expect(imgs.first).to_be_visible(timeout=10000)
+    expect(imgs).to_have_count(4)
+    expect(imgs.first).to_have_attribute("loading", "lazy")
+
+
+def test_column_config_checkbox_renderer(page_at_app: Page):
+    """column_config={"type": "checkbox"} renders boolean row-dim values as
+    ☑ / ☐ glyphs with data-checked attributes."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_checkbox")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    boxes = container.get_by_test_id("pivot-checkbox-cell")
+    expect(boxes.first).to_be_visible(timeout=10000)
+    # Two distinct boolean values (True / False) after aggregation.
+    expect(boxes).to_have_count(2)
+    checked = container.locator(
+        '[data-testid="pivot-checkbox-cell"][data-checked="true"]'
+    )
+    unchecked = container.locator(
+        '[data-testid="pivot-checkbox-cell"][data-checked="false"]'
+    )
+    expect(checked).to_have_count(1)
+    expect(unchecked).to_have_count(1)
+
+
+def test_column_config_text_max_chars(page_at_app: Page):
+    """column_config={"type": "text", "max_chars": N} truncates long dim-cell
+    values with an ellipsis; the full text remains available in the title attr."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_text_max")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    truncs = container.get_by_test_id("pivot-text-cell-truncated")
+    expect(truncs.first).to_be_visible(timeout=10000)
+    # Two rows have long values (>12 chars); one is "Short"; one is
+    # "Medium length note here." (24 chars, also long).
+    expect(truncs).to_have_count(3)
+    first = truncs.first
+    text = first.inner_text()
+    assert text.endswith("\u2026"), f"expected ellipsis suffix, got {text!r}"
+    assert len(text) <= 12, f"expected len<=12, got {len(text)} ({text!r})"
+    title = first.get_attribute("title") or ""
+    assert len(title) > 12, f"expected full text in title, got {title!r}"
+
+
+def test_column_config_link_renderer_subtotal_fallback(page_at_app: Page):
+    """Subtotal / Total rows render plain text (no anchor) even when the field
+    has a link renderer configured."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_renderer_totals")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # Subtotal rows have class containing "subtotalHeaderCell"; no link in those.
+    subtotal_links = container.locator(
+        'tr:has([class*="subtotalHeaderCell"]) [data-testid="pivot-link-cell"]'
+    )
+    expect(subtotal_links).to_have_count(0)
+    # Data rows should still render anchors (one per distinct Website).
+    data_anchors = container.get_by_test_id("pivot-link-cell")
+    expect(data_anchors.first).to_be_visible(timeout=10000)

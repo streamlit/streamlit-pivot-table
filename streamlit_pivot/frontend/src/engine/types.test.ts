@@ -531,6 +531,88 @@ describe("validatePivotConfigV1 — column_config display metadata", () => {
     ).toThrow("field_widths");
   });
 
+  it("accepts field_renderers with all four Tier 2 types", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_renderers: {
+        Website: { type: "link", display_text: "Visit {}" },
+        Logo: { type: "image" },
+        Active: { type: "checkbox" },
+        Notes: { type: "text", max_chars: 40 },
+      },
+    });
+    expect(result.field_renderers).toEqual({
+      Website: { type: "link", display_text: "Visit {}" },
+      Logo: { type: "image" },
+      Active: { type: "checkbox" },
+      Notes: { type: "text", max_chars: 40 },
+    });
+  });
+
+  it("accepts link renderer without display_text", () => {
+    const result = validatePivotConfigV1({
+      ...DEFAULT_CONFIG,
+      field_renderers: { Website: { type: "link" } },
+    });
+    expect(result.field_renderers).toEqual({
+      Website: { type: "link" },
+    });
+  });
+
+  it("rejects unknown field_renderers type", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_renderers: { A: { type: "wizardry" } },
+      }),
+    ).toThrow("field_renderers");
+  });
+
+  it("rejects non-string display_text on link renderer", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_renderers: { Website: { type: "link", display_text: 42 } },
+      }),
+    ).toThrow("display_text");
+  });
+
+  it("rejects invalid max_chars on text renderer", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_renderers: { Notes: { type: "text", max_chars: 0 } },
+      }),
+    ).toThrow("max_chars");
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_renderers: { Notes: { type: "text", max_chars: -5 } },
+      }),
+    ).toThrow("max_chars");
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_renderers: { Notes: { type: "text", max_chars: 3.5 } },
+      }),
+    ).toThrow("max_chars");
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_renderers: { Notes: { type: "text" } },
+      }),
+    ).toThrow("max_chars");
+  });
+
+  it("rejects non-object field_renderers entry", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        field_renderers: { A: "link" },
+      }),
+    ).toThrow("field_renderers");
+  });
+
   it("backward compat: omits new fields when absent", () => {
     const result = validatePivotConfigV1({ ...DEFAULT_CONFIG });
     expect(result.field_labels).toBeUndefined();

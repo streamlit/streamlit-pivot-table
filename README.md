@@ -89,7 +89,7 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `column_alignment` | `dict[str, str] \| None` | `None` | Per-field text alignment: `"left"`, `"center"`, or `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Visual formatting rules. See [Conditional Formatting](#conditional-formatting). |
-| `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column display configuration, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Supported keys: `format`, `type`, `label`, `help`, `width` (`"small"` / `"medium"` / `"large"` / integer px), `pinned` (locks the field in the config UI; does not create a sticky column), and `alignment` (`"left"` / `"center"` / `"right"`, unions with the `column_alignment` kwarg; explicit kwarg wins). Explicit `number_format` / `dimension_format` / `column_alignment` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
+| `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column display configuration, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Supported keys: `format`, `type`, `label`, `help`, `width` (`"small"` / `"medium"` / `"large"` / integer px), `pinned` (locks the field in the config UI; does not create a sticky column), `alignment` (`"left"` / `"center"` / `"right"`, unions with the `column_alignment` kwarg; explicit kwarg wins), and row-dim cell renderers via `type`: `"link"` (with optional `display_text`), `"image"`, `"checkbox"`, and `"text"` with `max_chars`. Explicit `number_format` / `dimension_format` / `column_alignment` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
 | `empty_cell_value` | `str` | `"-"` | Display string for cells with no data. |
 
 #### Layout
@@ -489,6 +489,11 @@ st_pivot_table(
 - `width` — either a preset (`"small"`=100px, `"medium"`=120px, `"large"`=200px) or an integer pixel value in the range `[20, 2000]`. Applies to row-dimension columns and measure columns (for the `col-single` header in single-value mode, and per-measure value-label cells in multi-value mode). Out-of-range / unparseable widths warn once per field and are skipped. **Interactive resize drags override the configured width at runtime but are not persisted to config**, so the width returns to the configured value after rerun/remount.
 - `pinned` — when `True` or `"left"`, locks the field in the **config UI** (equivalent to adding it to `frozen_columns`): the field cannot be removed from its zone or reordered via drag-and-drop. This does **not** create a visually sticky column. `"right"` is currently warned and ignored.
 - `alignment` — one of `"left"`, `"center"`, `"right"`. Unions with the `column_alignment` kwarg; when both set a value for the same field, the explicit `column_alignment` kwarg wins. Invalid values warn once per field and are skipped (unlike the `column_alignment` kwarg, which still raises on invalid values).
+- `type` — in addition to the date/time / number role it plays for `format` resolution, a small set of `type` values produce **dimension cell renderers** that apply only to row-dimension cells. Measure cells are always numeric aggregates and ignore these types. On Total / Subtotal rows, `link`, `image`, and `checkbox` fall back to plain text because the cell value is a label rather than data; `text` with `max_chars` still truncates:
+  - `"link"` — renders the row-dim value as an anchor (`href = <raw value>`). Accepts a `display_text` option (plain string, or a template containing `{}` which is substituted with the cell value, mirroring Streamlit's `LinkColumn` convention). Empty / null values, and values whose scheme isn't on the allowlist (`http:`, `https:`, `mailto:`, `tel:`, plus schemeless relative / protocol-relative URLs), fall back to plain text — hostile `javascript:` / `data:` / `file:` values never reach the DOM.
+  - `"image"` — renders the row-dim value as an `<img>` (`src = <raw value>`) with `loading="lazy"` and a `max-height` guard so images don't blow out row height. Works in both `row_layout="table"` and `row_layout="hierarchy"` (the hierarchy breadcrumb applies a tighter 1em cap). Only `http:` / `https:` / schemeless URLs and `data:image/<raster-mime>` (png, jpeg, gif, webp, avif, bmp, ico) pass through; everything else — including `data:image/svg+xml` and non-image `data:` MIME types — falls back to plain text.
+  - `"checkbox"` — renders truthy row-dim values as ☑ and falsy values as ☐. Accepts booleans (`True` / `False`), strings (`"true"` / `"false"` / `"yes"` / `"no"` / `"1"` / `"0"`, case-insensitive), and the numbers `0` / `1`. Unrecognized values fall back to plain text.
+  - `"text"` with `max_chars` — truncates row-dim cell text to `max_chars` UTF-16 code units (matches JavaScript's native `String.length` / `slice`, which is also what Streamlit's `TextColumn(max_chars=...)` uses) with a trailing ellipsis. The full text is preserved in the cell's `title` attribute for hover inspection. Truncation applies on every row, including Total / Subtotal rows. Invalid `max_chars` values (non-positive, non-integer, or booleans) warn once per field and are skipped.
 
 Unknown keys in dict literals warn once per `(field, key)` pair. Streamlit's internal defaults from typed `st.column_config.*` objects (`disabled`, `required`, `default`) are silently ignored. Recognized but unsupported column types (e.g. `line_chart`, `selectbox`) warn once per `(field, type)`.
 
@@ -504,6 +509,24 @@ st_pivot_table(
         "Revenue": {"format": "$,.0f", "label": "Rev", "width": 180, "alignment": "right"},
         "Units": {"format": ",.0f", "alignment": "center"},
         "Order Date": {"format": "YYYY-MM-DD", "type": "date"},
+    },
+)
+```
+
+```python
+st_pivot_table(
+    df,
+    key="column_config_renderers_example",
+    rows=["Homepage", "Poster", "Active", "Description"],
+    values=["Revenue"],
+    column_config={
+        "Homepage": st.column_config.LinkColumn(
+            "Homepage",
+            display_text="Visit {}",
+        ),
+        "Poster": st.column_config.ImageColumn("Poster"),
+        "Active": st.column_config.CheckboxColumn("Active"),
+        "Description": st.column_config.TextColumn("Description", max_chars=40),
     },
 )
 ```
