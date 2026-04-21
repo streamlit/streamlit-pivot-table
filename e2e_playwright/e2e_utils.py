@@ -162,6 +162,9 @@ COLUMN_CONFIG_PIVOT_KEYS = [
     "test_pivot_cc_checkbox",
     "test_pivot_cc_text_max",
     "test_pivot_cc_renderer_totals",
+    "test_pivot_cc_help_col_dim_single",
+    "test_pivot_cc_help_col_dim_label",
+    "test_pivot_cc_help_temporal",
 ]
 
 # Must match the exact order of st_pivot_table(key=...) calls in

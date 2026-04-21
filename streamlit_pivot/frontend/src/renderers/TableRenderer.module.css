@@ -817,6 +817,7 @@
   align-items: center;
   gap: 0;
   flex: 0 0 auto;
+  position: relative;
 }
 
 .hierarchyBreadcrumbSeparator {
@@ -986,3 +987,25 @@
    in the stylesheet so CSS modules generates exported names for them. */
 .stripesOff {}
 .hoverOff {}
+
+/* --- Field-help portal tooltip ---
+ * Rendered via React portal into document.body so it escapes overflow:auto.
+ * Position (left/top) is set as inline style from the hovered element's rect.
+ * The 400ms show delay is handled in JS (setTimeout), so no CSS animation
+ * is needed — the element simply appears when React mounts it.
+ * Mirrors the Toolbar tooltipWrap pattern for visual consistency. */
+.fieldHelpPortal {
+  position: fixed;
+  transform: translateX(-50%);
+  margin-top: 2px;
+  padding: 4px 8px;
+  border-radius: var(--st-base-radius);
+  background: var(--st-text-color);
+  color: var(--st-background-color);
+  font-family: var(--st-font);
+  font-size: 0.72em;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+}

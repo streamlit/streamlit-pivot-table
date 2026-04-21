@@ -191,3 +191,59 @@ def test_column_config_link_renderer_subtotal_fallback(page_at_app: Page):
     # Data rows should still render anchors (one per distinct Website).
     data_anchors = container.get_by_test_id("pivot-link-cell")
     expect(data_anchors.first).to_be_visible(timeout=10000)
+
+
+# ---------------------------------------------------------------------------
+# column_config.help propagation: column-dimension header cells
+# ---------------------------------------------------------------------------
+
+
+def test_column_config_help_single_col_dim_slot_headers(page_at_app: Page):
+    """column_config.help flows through as a title attribute on the slot-based
+    column-dimension value headers when there is a single column dimension.
+    With one col dim there is no col-dim-label; the only attach-point is the
+    individual value cells (e.g. "2023", "2024")."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_help_col_dim_single")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # At least one slot header cell for the "Year" dim should carry the title.
+    slot_with_title = container.locator(
+        '[data-testid="pivot-header-cell"][title="Fiscal year"]'
+    ).first
+    expect(slot_with_title).to_be_visible()
+
+
+def test_column_config_help_col_dim_label(page_at_app: Page):
+    """column_config.help flows through as a title attribute on the col-dim-label
+    corner cell that shows the outer column dimension name when there are 2+
+    column dimensions."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_help_col_dim_label")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # With 2+ col dims and interactive=True the outer dimension always renders
+    # as a dim-toggle corner cell.  slugify("Year") → "year".  The selector
+    # requires BOTH the correct testid AND the expected title so the assertion
+    # actually exercises the col-dim-label code path rather than falling back
+    # to any other cell that happens to carry the same title text.
+    col_dim_label = container.locator(
+        '[data-testid="pivot-dim-toggle-col-0-year"][title="Fiscal year"]'
+    )
+    expect(col_dim_label).to_be_visible()
+
+
+def test_column_config_help_temporal_parent_headers(page_at_app: Page):
+    """column_config.help flows through as a title attribute on temporal parent
+    column headers (year-level buckets) when auto_date_hierarchy=True is used
+    with a real date-typed column."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_cc_help_temporal")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # Temporal parent headers carry testid pivot-temporal-header-orderdate-<year>
+    # (slugify lowercases the field name: "OrderDate" → "orderdate")
+    temporal_with_title = container.locator(
+        '[data-testid^="pivot-temporal-header-orderdate-"][title="Date of order"]'
+    ).first
+    expect(temporal_with_title).to_be_visible()

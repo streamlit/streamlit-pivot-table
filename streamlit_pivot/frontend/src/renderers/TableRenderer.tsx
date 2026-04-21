@@ -626,13 +626,13 @@ export function renderColumnHeaders(
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void,
   onConfigChange?: (config: PivotConfigV1) => void,
   onResizeMouseDown?: (
-    colSlotIndex: number,
+    colSlotIndex: number | string,
     e: React.MouseEvent<HTMLDivElement>,
   ) => void,
   columnWidthMap?: Map<number, number>,
   headerRowOffsets?: number[],
   onResizeDoubleClick?: (
-    colSlotIndex: number,
+    colSlotIndex: number | string,
     e: React.MouseEvent<HTMLDivElement>,
   ) => void,
   adaptiveDateGrains?: Record<string, DateGrain>,
@@ -642,6 +642,7 @@ export function renderColumnHeaders(
   columnTypes?: ColumnTypeMap,
   rowHeaderLevels?: RowHeaderLevelMapping[],
   rowTemporalInfos?: TemporalRowInfo[],
+  valFieldWidthMap?: Map<string, number>,
 ): ReactElement[] {
   const renderedValueFields = getRenderedValueFields(config);
   const formulaErrors = pivotData?.getFormulaErrors();
@@ -864,6 +865,7 @@ export function renderColumnHeaders(
 
       if (!isTemporalParentCorner) {
         const colDimName = config.columns[effectiveDimIndex];
+        const colDimHelp = config.field_help?.[colDimName];
         const cornerRowSpan =
           hasTemporalHierarchy && hlMapping?.isTemporal
             ? (temporalInfos?.find((t) => t.field === hlMapping.field)
@@ -886,6 +888,8 @@ export function renderColumnHeaders(
               colSpan={numRowDims}
               rowSpan={cornerRowSpan > 1 ? cornerRowSpan : undefined}
               style={stickyTop}
+              title={colDimHelp || undefined}
+              data-tooltip={colDimHelp || undefined}
               onClick={() => handleDimToggle("col", effectiveDimIndex)}
               role="button"
               tabIndex={0}
@@ -914,6 +918,8 @@ export function renderColumnHeaders(
               colSpan={numRowDims}
               rowSpan={cornerRowSpan > 1 ? cornerRowSpan : undefined}
               style={stickyTop}
+              title={colDimHelp || undefined}
+              data-tooltip={colDimHelp || undefined}
             >
               <div
                 className={styles.headerCellInner}
@@ -991,6 +997,7 @@ export function renderColumnHeaders(
                         key={`hierarchy-breadcrumb-${rowHeaderIdx}`}
                         className={styles.hierarchyBreadcrumb}
                         title={breadcrumbHelp || undefined}
+                        data-tooltip={breadcrumbHelp || undefined}
                       >
                         {rowHeaderIdx > 0 && (
                           <span
@@ -1135,6 +1142,7 @@ export function renderColumnHeaders(
                 rowSpan={cornerFullRowSpan}
                 style={rowDimCellStyle}
                 title={rowDimHelp || undefined}
+                data-tooltip={rowDimHelp || undefined}
                 data-testid={
                   canToggleThisDim
                     ? `pivot-dim-toggle-row-${rowHeaderIdx}-${slugify(dim)}`
@@ -1258,6 +1266,7 @@ export function renderColumnHeaders(
             const rowSpanVal = group.isCollapsed
               ? remainingLevels + (hasMultipleValues ? 1 : 0)
               : undefined;
+            const temporalParentHelp = config.field_help?.[dimName];
 
             cells.push(
               <th
@@ -1267,6 +1276,8 @@ export function renderColumnHeaders(
                 colSpan={colSpanVal > 1 ? colSpanVal : undefined}
                 rowSpan={rowSpanVal}
                 style={stickyTop}
+                title={temporalParentHelp || undefined}
+                data-tooltip={temporalParentHelp || undefined}
                 data-testid={`pivot-temporal-header-${slugify(hlMapping.field)}-${group.parentBucket}`}
                 aria-expanded={!group.isCollapsed}
               >
@@ -1419,6 +1430,7 @@ export function renderColumnHeaders(
                 }
               : stickyTop;
 
+          const colSlotHelp = config.field_help?.[dimName];
           cells.push(
             <th
               key={`col-${level}-${i}`}
@@ -1427,6 +1439,8 @@ export function renderColumnHeaders(
               colSpan={colSpanVal > 1 ? colSpanVal : undefined}
               rowSpan={rowSpanVal}
               style={cellStyle}
+              title={colSlotHelp || undefined}
+              data-tooltip={colSlotHelp || undefined}
               data-testid={
                 canToggle && onToggleColGroup
                   ? `pivot-col-group-toggle-${groupKeyStr}`
@@ -1505,7 +1519,11 @@ export function renderColumnHeaders(
                 )}
               </div>
               {onResizeMouseDown &&
-                (level === numColLevels - 1 || isCollapseLevel) && (
+                (level === numColLevels - 1 || isCollapseLevel) &&
+                // In multi-value mode, per-field handles on the value-label row
+                // are the resize targets. Only show a slot-level handle for
+                // collapsed slots (whose value-label cells are suppressed).
+                (!hasMultipleValues || isCollapseLevel) && (
                   <div
                     className={styles.resizeHandle}
                     data-testid={`resize-handle-${slotIdx}`}
@@ -1557,17 +1575,20 @@ export function renderColumnHeaders(
           colSpan={colSpanVal}
           style={singleHeaderStyle}
           title={singleFieldHelp || undefined}
+          data-tooltip={singleFieldHelp || undefined}
           data-testid="pivot-header-cell"
         >
-          {headerLabel}
-          {formulaErrors?.has(singleField) && (
-            <span
-              className={styles.formulaWarningIcon}
-              title={`Formula error: ${formulaErrors.get(singleField)}`}
-            >
-              ⚠
-            </span>
-          )}
+          <div className={styles.headerCellInner}>
+            {headerLabel}
+            {formulaErrors?.has(singleField) && (
+              <span
+                className={styles.formulaWarningIcon}
+                title={`Formula error: ${formulaErrors.get(singleField)}`}
+              >
+                ⚠
+              </span>
+            )}
+          </div>
         </th>,
       );
     }
@@ -1623,13 +1644,17 @@ export function renderColumnHeaders(
         const valField = renderedValueFields[vfi];
         const valFieldHelp = config.field_help?.[valField];
         const valFieldConfigWidth = resolveFieldWidth(config, valField);
+        // String key keeps each measure's width independent of slot keys.
+        const valFieldKey = `${slotOffset + si}-${vfi}`;
+        const runtimeFieldWidth = valFieldWidthMap?.get(valFieldKey);
+        const effectiveWidth = runtimeFieldWidth ?? valFieldConfigWidth;
         const valCellStyle: React.CSSProperties =
-          valFieldConfigWidth != null
+          effectiveWidth != null
             ? {
                 top: valueLabelTop,
-                width: valFieldConfigWidth,
-                minWidth: valFieldConfigWidth,
-                maxWidth: valFieldConfigWidth,
+                width: effectiveWidth,
+                minWidth: effectiveWidth,
+                maxWidth: effectiveWidth,
               }
             : { top: valueLabelTop };
         valueCells.push(
@@ -1638,6 +1663,7 @@ export function renderColumnHeaders(
             className={styles.valueLabel}
             style={valCellStyle}
             title={valFieldHelp || undefined}
+            data-tooltip={valFieldHelp || undefined}
             data-testid="pivot-value-label"
           >
             <div className={styles.headerCellInner}>
@@ -1667,11 +1693,11 @@ export function renderColumnHeaders(
                 data-testid={`resize-handle-val-${slotOffset + si}-${vfi}`}
                 onMouseDown={(e) => {
                   e.stopPropagation();
-                  onResizeMouseDown(slotOffset + si, e);
+                  onResizeMouseDown(`${slotOffset + si}-${vfi}`, e);
                 }}
                 onDoubleClick={
                   onResizeDoubleClick
-                    ? (e) => onResizeDoubleClick(slotOffset + si, e)
+                    ? (e) => onResizeDoubleClick(`${slotOffset + si}-${vfi}`, e)
                     : undefined
                 }
                 onMouseEnter={elevateCell}
@@ -1701,6 +1727,7 @@ export function renderColumnHeaders(
             className={`${styles.valueLabel} ${styles.totalsCol}`}
             style={valTotalCellStyle}
             title={valFieldHelp || undefined}
+            data-tooltip={valFieldHelp || undefined}
             data-testid="pivot-value-label"
           >
             <div className={styles.headerCellInner}>
@@ -3448,15 +3475,161 @@ const TableRenderer: FC<TableRendererProps> = ({
   const [columnWidthMap, setColumnWidthMap] = useState<Map<number, number>>(
     () => new Map(),
   );
+  // Per-measure value-label widths, keyed as "${slotIndex}-${vfi}" to keep
+  // them entirely separate from the integer-keyed slot/row-dim columnWidthMap.
+  const [valFieldWidthMap, setValFieldWidthMap] = useState<Map<string, number>>(
+    () => new Map(),
+  );
   const [isResizing, setIsResizing] = useState(false);
+
+  const [helpTooltip, setHelpTooltip] = useState<{
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const helpShowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const helpHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeTooltipEl = useRef<HTMLElement | null>(null);
+  // Stores the title attribute value removed from the hovered element while
+  // the styled tooltip is visible, so it can be restored on hide. Without this
+  // the browser native tooltip would appear on top of the styled one after
+  // its own delay (~700 ms).
+  const suppressedTitle = useRef<{ el: HTMLElement; value: string } | null>(
+    null,
+  );
+
+  // Use native DOM listeners (not React synthetic events) so that React's
+  // event-delegation root never gets in the way inside the component iframe.
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    const restoreTitle = () => {
+      if (suppressedTitle.current) {
+        const { el, value } = suppressedTitle.current;
+        if (value) {
+          el.setAttribute("title", value);
+        }
+        suppressedTitle.current = null;
+      }
+    };
+
+    const cancelTimers = () => {
+      if (helpShowTimer.current) {
+        clearTimeout(helpShowTimer.current);
+        helpShowTimer.current = null;
+      }
+      if (helpHideTimer.current) {
+        clearTimeout(helpHideTimer.current);
+        helpHideTimer.current = null;
+      }
+    };
+
+    const onMouseOver = (e: Event) => {
+      const target = e.target as HTMLElement;
+      const el = target.closest<HTMLElement>("[data-tooltip]");
+      const text = el?.getAttribute("data-tooltip") ?? null;
+
+      if (!text) {
+        // Debounce hide so crossing sibling elements (resize handle, sort
+        // icon) doesn't flash the tooltip away.
+        if (!helpHideTimer.current) {
+          helpHideTimer.current = setTimeout(() => {
+            helpHideTimer.current = null;
+            restoreTitle();
+            activeTooltipEl.current = null;
+            setHelpTooltip(null);
+          }, 80);
+        }
+        if (helpShowTimer.current) {
+          clearTimeout(helpShowTimer.current);
+          helpShowTimer.current = null;
+        }
+        return;
+      }
+
+      // Cancel any pending hide — mouse is back over a tooltip element.
+      if (helpHideTimer.current) {
+        clearTimeout(helpHideTimer.current);
+        helpHideTimer.current = null;
+      }
+
+      // Already pending or showing for this same element — do nothing.
+      if (activeTooltipEl.current === el) return;
+
+      // Moving to a different element: restore the previous title first.
+      restoreTitle();
+
+      activeTooltipEl.current = el;
+
+      // Different element: cancel previous show, clear current tooltip.
+      if (helpShowTimer.current) {
+        clearTimeout(helpShowTimer.current);
+        helpShowTimer.current = null;
+      }
+      setHelpTooltip(null);
+
+      const capturedEl = el as HTMLElement;
+      helpShowTimer.current = setTimeout(() => {
+        helpShowTimer.current = null;
+        // Suppress the native browser title tooltip so it doesn't appear on
+        // top of the styled tooltip after its own delay (~700 ms).
+        const nativeTitle = capturedEl.getAttribute("title") ?? "";
+        if (nativeTitle) {
+          capturedEl.removeAttribute("title");
+          suppressedTitle.current = { el: capturedEl, value: nativeTitle };
+        }
+        const rect = capturedEl.getBoundingClientRect();
+        setHelpTooltip({
+          text,
+          x: rect.left + rect.width / 2,
+          y: rect.bottom,
+        });
+      }, 400);
+    };
+
+    const onMouseLeave = () => {
+      cancelTimers();
+      restoreTitle();
+      activeTooltipEl.current = null;
+      setHelpTooltip(null);
+    };
+
+    // When the table scrolls, recompute the tooltip position from the live
+    // bounding rect so it tracks the sticky header exactly — same behaviour
+    // as the CSS ::after toolbar tooltips which are always anchored to their
+    // element.
+    const onScroll = () => {
+      const el = activeTooltipEl.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setHelpTooltip((prev) =>
+        prev
+          ? { ...prev, x: rect.left + rect.width / 2, y: rect.bottom }
+          : null,
+      );
+    };
+
+    wrapper.addEventListener("mouseover", onMouseOver);
+    wrapper.addEventListener("mouseleave", onMouseLeave);
+    wrapper.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      wrapper.removeEventListener("mouseover", onMouseOver);
+      wrapper.removeEventListener("mouseleave", onMouseLeave);
+      wrapper.removeEventListener("scroll", onScroll);
+      cancelTimers();
+      restoreTitle();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const resizeDragRef = useRef<{
-    slotIndex: number;
+    key: number | string;
     startX: number;
     startWidth: number;
   } | null>(null);
 
   const handleResizeDoubleClick = useCallback(
-    (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+    (slotIndex: number | string, e: React.MouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
 
@@ -3535,47 +3708,40 @@ const TableRenderer: FC<TableRendererProps> = ({
         }
       }
 
-      setColumnWidthMap((prev) => {
-        const next = new Map(prev);
-        next.set(slotIndex, maxWidth);
-        return next;
-      });
+      if (typeof slotIndex === "string") {
+        setValFieldWidthMap((prev) => {
+          const next = new Map(prev);
+          next.set(slotIndex, maxWidth);
+          return next;
+        });
+      } else {
+        setColumnWidthMap((prev) => {
+          const next = new Map(prev);
+          next.set(slotIndex, maxWidth);
+          return next;
+        });
+      }
     },
     [],
   );
 
   const handleResizeMouseDown = useCallback(
-    (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+    (slotIndex: number | string, e: React.MouseEvent<HTMLDivElement>) => {
       if (e.detail >= 2) return;
       e.preventDefault();
       e.stopPropagation();
       const el = (e.target as HTMLElement).closest("th");
       let startWidth = el ? el.offsetWidth : MIN_COL_WIDTH;
-      // When resizing from a value-row cell (single sub-column), the stored
-      // width applies to the full column group.  Use the group width so that
-      // dragging feels 1:1 instead of requiring extra movement to overcome
-      // the width gap between one sub-column and the full group.
-      if (el && el.colSpan <= 1 && slotIndex >= 0) {
-        const existingWidth = columnWidthMap.get(slotIndex);
-        if (existingWidth != null) {
-          startWidth = existingWidth;
-        } else {
-          const tr = el.parentElement;
-          if (tr) {
-            const siblings = tr.querySelectorAll<HTMLTableCellElement>(
-              `th:has([data-testid^="resize-handle-val-${slotIndex}-"])`,
-            );
-            if (siblings.length > 1) {
-              let total = 0;
-              siblings.forEach((th) => {
-                total += th.offsetWidth;
-              });
-              startWidth = total;
-            }
-          }
-        }
+      // If this slot/field has been dragged before, start from the stored
+      // width so the drag feels 1:1 (no gap to overcome from a previous resize).
+      const existingWidth =
+        typeof slotIndex === "string"
+          ? valFieldWidthMap.get(slotIndex)
+          : columnWidthMap.get(slotIndex);
+      if (existingWidth != null) {
+        startWidth = existingWidth;
       }
-      resizeDragRef.current = { slotIndex, startX: e.clientX, startWidth };
+      resizeDragRef.current = { key: slotIndex, startX: e.clientX, startWidth };
       setIsResizing(true);
 
       const onMouseMove = (ev: globalThis.MouseEvent) => {
@@ -3584,12 +3750,19 @@ const TableRenderer: FC<TableRendererProps> = ({
         ev.preventDefault();
         const delta = ev.clientX - drag.startX;
         const newWidth = Math.max(MIN_COL_WIDTH, drag.startWidth + delta);
-        const idx = drag.slotIndex;
-        setColumnWidthMap((prev) => {
-          const next = new Map(prev);
-          next.set(idx, newWidth);
-          return next;
-        });
+        if (typeof drag.key === "string") {
+          setValFieldWidthMap((prev) => {
+            const next = new Map(prev);
+            next.set(drag.key as string, newWidth);
+            return next;
+          });
+        } else {
+          setColumnWidthMap((prev) => {
+            const next = new Map(prev);
+            next.set(drag.key as number, newWidth);
+            return next;
+          });
+        }
       };
 
       const cleanup = () => {
@@ -3604,7 +3777,7 @@ const TableRenderer: FC<TableRendererProps> = ({
       window.addEventListener("mouseup", cleanup);
       window.addEventListener("mouseleave", cleanup);
     },
-    [columnWidthMap],
+    [columnWidthMap, valFieldWidthMap],
   );
 
   const allRowKeys = pivotData.getRowKeys();
@@ -4115,6 +4288,7 @@ const TableRenderer: FC<TableRendererProps> = ({
               columnTypes,
               rowTemporalInfos.length > 0 ? rowHeaderLevels : undefined,
               rowTemporalInfos.length > 0 ? rowTemporalInfos : undefined,
+              valFieldWidthMap,
             )}
           </thead>
           <tbody>
@@ -4184,6 +4358,14 @@ const TableRenderer: FC<TableRendererProps> = ({
             supportsPeriodComparison={menuSupportsPeriodComparison}
             onClose={handleCloseMenu}
           />
+        </div>
+      )}
+      {helpTooltip && (
+        <div
+          className={styles.fieldHelpPortal}
+          style={{ left: helpTooltip.x, top: helpTooltip.y }}
+        >
+          {helpTooltip.text}
         </div>
       )}
     </>

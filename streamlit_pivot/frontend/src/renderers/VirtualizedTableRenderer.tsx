@@ -128,15 +128,18 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   const [columnWidthMap, setColumnWidthMap] = useState<Map<number, number>>(
     () => new Map(),
   );
+  const [valFieldWidthMap, setValFieldWidthMap] = useState<Map<string, number>>(
+    () => new Map(),
+  );
   const [isResizing, setIsResizing] = useState(false);
   const resizeDragRef = useRef<{
-    slotIndex: number;
+    key: number | string;
     startX: number;
     startWidth: number;
   } | null>(null);
 
   const handleResizeDoubleClick = useCallback(
-    (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+    (slotIndex: number | string, e: React.MouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
 
@@ -215,23 +218,38 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         }
       }
 
-      setColumnWidthMap((prev) => {
-        const next = new Map(prev);
-        next.set(slotIndex, maxWidth);
-        return next;
-      });
+      if (typeof slotIndex === "string") {
+        setValFieldWidthMap((prev) => {
+          const next = new Map(prev);
+          next.set(slotIndex, maxWidth);
+          return next;
+        });
+      } else {
+        setColumnWidthMap((prev) => {
+          const next = new Map(prev);
+          next.set(slotIndex, maxWidth);
+          return next;
+        });
+      }
     },
     [],
   );
 
   const handleResizeMouseDown = useCallback(
-    (slotIndex: number, e: React.MouseEvent<HTMLDivElement>) => {
+    (slotIndex: number | string, e: React.MouseEvent<HTMLDivElement>) => {
       if (e.detail >= 2) return;
       e.preventDefault();
       e.stopPropagation();
       const el = (e.target as HTMLElement).closest("th");
-      const startWidth = el ? el.offsetWidth : columnWidth;
-      resizeDragRef.current = { slotIndex, startX: e.clientX, startWidth };
+      let startWidth = el ? el.offsetWidth : columnWidth;
+      const existingWidth =
+        typeof slotIndex === "string"
+          ? valFieldWidthMap.get(slotIndex)
+          : columnWidthMap.get(slotIndex);
+      if (existingWidth != null) {
+        startWidth = existingWidth;
+      }
+      resizeDragRef.current = { key: slotIndex, startX: e.clientX, startWidth };
       setIsResizing(true);
 
       const onMouseMove = (ev: globalThis.MouseEvent) => {
@@ -240,12 +258,19 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         ev.preventDefault();
         const delta = ev.clientX - drag.startX;
         const newWidth = Math.max(MIN_COL_WIDTH, drag.startWidth + delta);
-        const idx = drag.slotIndex;
-        setColumnWidthMap((prev) => {
-          const next = new Map(prev);
-          next.set(idx, newWidth);
-          return next;
-        });
+        if (typeof drag.key === "string") {
+          setValFieldWidthMap((prev) => {
+            const next = new Map(prev);
+            next.set(drag.key as string, newWidth);
+            return next;
+          });
+        } else {
+          setColumnWidthMap((prev) => {
+            const next = new Map(prev);
+            next.set(drag.key as number, newWidth);
+            return next;
+          });
+        }
       };
 
       const cleanup = () => {
@@ -260,7 +285,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       window.addEventListener("mouseup", cleanup);
       window.addEventListener("mouseleave", cleanup);
     },
-    [columnWidth],
+    [columnWidth, columnWidthMap, valFieldWidthMap],
   );
 
   useEffect(() => {
@@ -726,6 +751,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         columnTypes,
         rowTemporalInfos.length > 0 ? rowHeaderLevels : undefined,
         rowTemporalInfos.length > 0 ? rowTemporalInfos : undefined,
+        valFieldWidthMap,
       );
     },
     [
@@ -750,6 +776,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       columnTypes,
       rowTemporalInfos,
       rowHeaderLevels,
+      valFieldWidthMap,
     ],
   );
 
@@ -806,22 +833,60 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     return resolveFieldWidth(config, singleField);
   }, [config, hasMultipleValues, renderedValueFields, columnWidth]);
 
-  // Merge runtime resize (per-slot user drag) with configured widths.
-  // Precedence per slot: runtime `columnWidthMap` > `field_widths` >
-  // uniform `dataColWidth` fallback. The array is only materialized when
-  // *either* source contributes at least one non-default width; otherwise
-  // we return `undefined` so `VirtualScroll` uses the uniform fast path.
+  // Merge runtime resize with configured widths.
+  // Precedence per slot:
+  //   1. Per-field `valFieldWidthMap` sum (dragging a value-label handle in
+  //      multi-value mode — keeps body columns aligned with headers).
+  //   2. Slot-level `columnWidthMap` (dragging a column-slot header handle).
+  //   3. Static `configuredSlotWidth` from `column_config.field_widths`.
+  //   4. Uniform `dataColWidth` fallback.
+  // The array is only materialized when at least one non-default width exists;
+  // otherwise `undefined` lets `VirtualScroll` use the uniform fast path.
   const variableColumnWidths = useMemo(() => {
-    if (columnWidthMap.size === 0 && configuredSlotWidth == null) {
+    const hasValFieldWidths = valFieldWidthMap.size > 0;
+    if (
+      columnWidthMap.size === 0 &&
+      !hasValFieldWidths &&
+      configuredSlotWidth == null
+    ) {
       return undefined;
     }
-    return Array.from(
-      { length: totalDataColumns },
-      (_, i) =>
+    return Array.from({ length: totalDataColumns }, (_, i) => {
+      // In multi-value mode, if any per-field drag has occurred for this slot,
+      // sum the individual field widths so the body stays in sync with the
+      // value-label header cells.
+      if (hasMultipleValues && hasValFieldWidths) {
+        let total = 0;
+        let anyDragged = false;
+        for (let vfi = 0; vfi < renderedValueFields.length; vfi++) {
+          const perFieldWidth = valFieldWidthMap.get(`${i}-${vfi}`);
+          if (perFieldWidth != null) {
+            anyDragged = true;
+            total += perFieldWidth;
+          } else {
+            total +=
+              resolveFieldWidth(config, renderedValueFields[vfi]) ??
+              columnWidth;
+          }
+        }
+        if (anyDragged) return total;
+      }
+      return (
         resolveEffectiveWidth(columnWidthMap.get(i), configuredSlotWidth) ??
-        dataColWidth,
-    );
-  }, [columnWidthMap, totalDataColumns, dataColWidth, configuredSlotWidth]);
+        dataColWidth
+      );
+    });
+  }, [
+    columnWidthMap,
+    valFieldWidthMap,
+    totalDataColumns,
+    dataColWidth,
+    configuredSlotWidth,
+    hasMultipleValues,
+    renderedValueFields,
+    config,
+    columnWidth,
+  ]);
 
   return (
     <>

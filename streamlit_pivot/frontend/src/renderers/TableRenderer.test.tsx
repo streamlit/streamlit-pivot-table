@@ -2853,6 +2853,84 @@ describe("TableRenderer - column_config.help tooltips", () => {
     const rowDimTh = screen.getByTestId("pivot-row-dim-label-region");
     expect(rowDimTh.getAttribute("title")).toBeNull();
   });
+
+  it("sets title on slot column-dim value headers from field_help (single col dim)", () => {
+    const pd = createPivotData();
+    // Default config: columns=["year"]. The "year" values ("2023", "2024")
+    // are the only column headers; there is no col-dim-label in this layout.
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={makeConfig({
+          field_help: { year: "Fiscal year" },
+        })}
+      />,
+    );
+    // pivot-header-cell covers the slot value headers (e.g. "2023", "2024")
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    const withTitle = headerCells.filter(
+      (el) => el.getAttribute("title") === "Fiscal year",
+    );
+    expect(withTitle.length).toBeGreaterThan(0);
+  });
+
+  it("sets title on col-dim-label corner cell from field_help (2+ col dims)", () => {
+    const data: DataRecord[] = [
+      { region: "US", year: "2023", category: "A", revenue: 100 },
+      { region: "EU", year: "2024", category: "B", revenue: 200 },
+    ];
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year", "category"],
+      values: ["revenue"],
+      field_help: { year: "Fiscal year", category: "Product category" },
+    });
+    const pd = new PivotData(data, config);
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    // The outer col dim label ("year") should carry the help title
+    const colDimLabels = container.querySelectorAll("[class*='colDimLabel']");
+    expect(colDimLabels.length).toBeGreaterThan(0);
+    const yearLabel = Array.from(colDimLabels).find(
+      (el) => el.getAttribute("title") === "Fiscal year",
+    );
+    expect(yearLabel).toBeDefined();
+  });
+
+  it("sets title on temporal parent column headers from field_help", () => {
+    const data: DataRecord[] = [
+      { region: "US", order_date: "2023-03-15", revenue: 100 },
+      { region: "US", order_date: "2024-07-20", revenue: 150 },
+      { region: "EU", order_date: "2023-11-01", revenue: 200 },
+    ];
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["order_date"],
+      values: ["revenue"],
+      date_grains: { order_date: "month" },
+      auto_date_hierarchy: true,
+      field_help: { order_date: "Date of order" },
+    });
+    const columnTypes = new Map<string, import("../engine/types").ColumnType>([
+      ["order_date", "date"],
+      ["region", "string"],
+      ["revenue", "float"],
+    ]);
+    const pd = new PivotData(data, config, { columnTypes });
+    const { container } = render(
+      <TableRenderer pivotData={pd} config={config} />,
+    );
+    // Temporal parent headers have testid pivot-temporal-header-order-date-<bucket>
+    const temporalHeaders = container.querySelectorAll(
+      "[data-testid^='pivot-temporal-header-order-date-']",
+    );
+    expect(temporalHeaders.length).toBeGreaterThan(0);
+    const withTitle = Array.from(temporalHeaders).filter(
+      (el) => el.getAttribute("title") === "Date of order",
+    );
+    expect(withTitle.length).toBeGreaterThan(0);
+  });
 });
 
 describe("TableRenderer - column_config.width", () => {

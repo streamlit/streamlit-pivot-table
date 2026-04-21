@@ -2916,6 +2916,39 @@ def st_pivot_table(
     column_alignment : dict[str, str] or None
         Per-field text alignment override. Maps value field names
         to ``"left"``, ``"center"``, or ``"right"``.
+    column_config : dict[str, dict] or None
+        Per-field display overrides keyed by column name. Supported keys:
+
+        * ``"label"`` (str) — display name shown in header cells. Does not
+          rename the underlying field id used in ``rows``, ``columns``, or
+          ``values``.
+        * ``"help"`` (str) — tooltip text shown when hovering the column
+          header. Applied as a native ``title`` attribute on every header
+          cell that represents the field: the row-dim corner, individual
+          column-value cells (single col dim), the col-dim-label corner
+          (2+ col dims), temporal parent bucket cells (date hierarchies),
+          and measure header cells.
+        * ``"width"`` (int or str) — column width in pixels (20–2000) or a
+          preset string: ``"small"`` (100 px), ``"medium"`` (120 px),
+          ``"large"`` (200 px).
+        * ``"pinned"`` (bool or ``"left"``) — lock the field in its toolbar
+          zone so it cannot be removed or reordered. ``"right"`` is not
+          supported and emits a warning.
+        * ``"alignment"`` (str) — ``"left"``, ``"center"``, or ``"right"``;
+          same effect as ``column_alignment`` but scoped to this field.
+        * ``"type"`` (str) and type-specific keys — cell renderer for
+          dimension fields:
+
+          - ``{"type": "link", "display_text": "Visit {}"}`` — renders the
+            value as an ``<a>`` tag. ``{}`` in ``display_text`` is
+            substituted with the cell value.
+          - ``{"type": "image"}`` — renders the value as an ``<img>`` tag.
+          - ``{"type": "checkbox"}`` — renders boolean values as ☑/☐.
+          - ``{"type": "text", "max_chars": N}`` — truncates long values
+            with an ellipsis; full text remains available on hover.
+
+        Dict-literal specs warn on unrecognized keys. Streamlit
+        ``st.column_config.*`` object specs are also accepted.
     style : str, PivotStyle dict, list, or None
         Region-based visual styling. Pass a preset name (``"default"``,
         ``"striped"``, ``"minimal"``, ``"compact"``, ``"comfortable"``,

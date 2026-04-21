@@ -227,6 +227,74 @@ def render_app(data):
         on_config_change=noop,
     )
 
+    # ------------------------------------------------------------------
+    # column_config.help propagation: column-dimension header cells
+    # ------------------------------------------------------------------
+    sparse_df = data["sparse_df"]
+
+    st.subheader("column_config.help – single col dim (slot headers)")
+    st_pivot_table(
+        sparse_df,
+        key="test_pivot_cc_help_col_dim_single",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        column_config={
+            "Year": {"help": "Fiscal year"},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("column_config.help – 2-col-dim col-dim-label")
+    _two_col_df = pd.DataFrame(
+        {
+            "Region": ["North", "North", "South", "South"],
+            "Year": [2023, 2023, 2024, 2024],
+            "Quarter": ["Q1", "Q2", "Q1", "Q2"],
+            "Revenue": [100.0, 150.0, 200.0, 250.0],
+        }
+    )
+    st_pivot_table(
+        _two_col_df,
+        key="test_pivot_cc_help_col_dim_label",
+        rows=["Region"],
+        columns=["Year", "Quarter"],
+        values=["Revenue"],
+        aggregation="sum",
+        column_config={
+            "Year": {"help": "Fiscal year"},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("column_config.help – temporal parent headers")
+    _temporal_df = pd.DataFrame(
+        {
+            "Region": ["North", "North", "South", "South"],
+            "OrderDate": pd.to_datetime(
+                ["2023-03-10", "2023-09-20", "2024-02-14", "2024-11-05"]
+            ),
+            "Revenue": [100.0, 150.0, 200.0, 250.0],
+        }
+    )
+    st_pivot_table(
+        _temporal_df,
+        key="test_pivot_cc_help_temporal",
+        rows=["Region"],
+        columns=["OrderDate"],
+        values=["Revenue"],
+        aggregation="sum",
+        auto_date_hierarchy=True,
+        column_config={
+            "OrderDate": {"help": "Date of order"},
+        },
+        interactive=True,
+        on_config_change=noop,
+    )
+
 
 def main():
     init_page()
