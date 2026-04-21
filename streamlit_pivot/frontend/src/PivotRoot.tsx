@@ -89,9 +89,13 @@ export type PivotRootProps = Pick<
   FrontendRendererArgs<PivotRootState, PivotTableData>,
   "setStateValue" | "setTriggerValue"
 > &
-  PivotTableData;
+  PivotTableData & {
+    /** Stable per-instance key from the component framework; used for localStorage namespacing. */
+    instanceKey?: string;
+  };
 
 const PivotRoot: FC<PivotRootProps> = ({
+  instanceKey,
   config: configProp,
   dataframe,
   height,
@@ -831,6 +835,7 @@ const PivotRoot: FC<PivotRootProps> = ({
 
         {currentConfig.interactive && (
           <Toolbar
+            instanceKey={instanceKey}
             config={currentConfig}
             allColumns={allColumns}
             numericColumns={numericColumns}

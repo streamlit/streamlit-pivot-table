@@ -85,6 +85,8 @@ import SettingsPanel, {
 import styles from "./Toolbar.module.css";
 
 export interface ToolbarProps {
+  /** Stable per-instance key from the component framework; forwarded to SettingsPanel for localStorage namespacing. */
+  instanceKey?: string;
   config: PivotConfigV1;
   allColumns: string[];
   numericColumns: string[];
@@ -314,6 +316,7 @@ export function applyDragMove({
 }
 
 const Toolbar: FC<ToolbarProps> = ({
+  instanceKey,
   config,
   allColumns,
   numericColumns,
@@ -912,6 +915,7 @@ const Toolbar: FC<ToolbarProps> = ({
             </button>
           </span>
           <SettingsPanel
+            instanceKey={instanceKey}
             config={config}
             allColumns={allColumns}
             numericColumns={numericColumns}

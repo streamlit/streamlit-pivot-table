@@ -1014,9 +1014,8 @@ def test_row_dim_toggle_collapses_groups(page_at_app: Page):
     expect(toggle).to_have_attribute("aria-expanded", "true")
 
     toggle.click()
-    page.wait_for_timeout(1500)
 
-    expect(toggle).to_have_attribute("aria-expanded", "false")
+    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
 
 
 def test_col_dim_toggle_collapses_groups(page_at_app: Page):
@@ -1029,9 +1028,8 @@ def test_col_dim_toggle_collapses_groups(page_at_app: Page):
     expect(toggle).to_have_attribute("aria-expanded", "true")
 
     toggle.click()
-    page.wait_for_timeout(1500)
 
-    expect(toggle).to_have_attribute("aria-expanded", "false")
+    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
 
 
 def test_dim_toggle_hidden_single_row(page_at_app: Page):
@@ -1210,11 +1208,10 @@ def test_child_toggle_reflects_parent_collapsed_state(page_at_app: Page):
     expect(category_toggle).to_have_attribute("aria-expanded", "true")
 
     region_toggle.click()
-    page.wait_for_timeout(1500)
-    expect(region_toggle).to_have_attribute("aria-expanded", "false")
 
+    expect(region_toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
     expect(category_toggle).to_have_attribute("role", "button", timeout=5000)
-    expect(category_toggle).to_have_attribute("aria-expanded", "false")
+    expect(category_toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
 
 
 # ---------------------------------------------------------------------------
@@ -1251,9 +1248,8 @@ def test_hierarchy_layout_breadcrumb_collapse(page_at_app: Page):
     region_toggle = container.get_by_test_id("pivot-dim-toggle-row-0-region")
     expect(region_toggle).to_have_attribute("aria-expanded", "true")
     region_toggle.click()
-    page.wait_for_timeout(1500)
 
-    expect(region_toggle).to_have_attribute("aria-expanded", "false")
+    expect(region_toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
     data_rows_after = container.get_by_test_id("pivot-data-row").count()
     assert data_rows_after < data_rows_before
 
@@ -2145,6 +2141,8 @@ def test_formula_measure_create_cancel_discards(page_at_app: Page):
 
     # Cancel the panel (discard staged changes)
     panel.get_by_test_id("settings-cancel").click()
+    # Wait for the panel to fully close before reading labels
+    expect(panel).not_to_be_visible(timeout=5000)
 
     # Verify the table headers are unchanged
     labels_after = container.locator(

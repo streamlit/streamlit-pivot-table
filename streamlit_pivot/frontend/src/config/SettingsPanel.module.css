@@ -126,8 +126,10 @@
   border: 1px solid color-mix(in srgb, var(--st-text-color) 12%, transparent);
   border-radius: var(--st-base-radius);
   box-sizing: border-box;
-  max-height: 70px;
+  min-height: 40px;
+  height: 100px; /* initial cap; JS shrinks to content on mount, ResizeObserver persists user changes */
   overflow-y: auto;
+  resize: vertical;
   flex-shrink: 0;
 }
 

@@ -328,6 +328,8 @@ export function cleanupConfigAfterFieldChanges(
 // ---------------------------------------------------------------------------
 
 export interface SettingsPanelProps {
+  /** Stable per-instance key forwarded from the component framework; used to namespace the localStorage entry for the available-fields container height. */
+  instanceKey?: string;
   config: PivotConfigV1;
   allColumns: string[];
   numericColumns: string[];
@@ -1300,6 +1302,7 @@ const initialSyntheticState: SyntheticBuilderState = {
 // ---------------------------------------------------------------------------
 
 const SettingsPanel: FC<SettingsPanelProps> = ({
+  instanceKey,
   config,
   allColumns,
   numericColumns,
@@ -2174,15 +2177,63 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     onClose,
   ]);
 
-  // -- Available fields container: lock height after first render --
-  const availChipsRef = useRef<HTMLDivElement>(null);
-  const [availChipsHeight, setAvailChipsHeight] = useState<number | null>(null);
-  useEffect(() => {
-    if (availChipsRef.current && availChipsHeight === null) {
-      const el = availChipsRef.current;
-      setAvailChipsHeight(el.offsetHeight);
-    }
-  }, [availChipsHeight]);
+  // -- Available fields container: auto-size on mount, resize freely, persist to localStorage --
+  // CSS sets height:AVAIL_CHIPS_DEFAULT_HEIGHT with no max-height so the resize handle
+  // is never blocked by a CSS cap.
+  //
+  // A callback ref is used instead of useRef + useEffect because the component returns null
+  // when !visible, meaning a regular ref is null when effects fire on the open→visible
+  // state transition. The callback ref fires exactly when the element enters/leaves the DOM.
+  //
+  // • On element mount: restore a saved height if present, otherwise shrink to content
+  //   (capped at AVAIL_CHIPS_DEFAULT_HEIGHT so a full container scrolls rather than grows).
+  // • On resize: a ResizeObserver detects the new inline height and persists it to
+  //   localStorage keyed per pivot instance so the preference survives page reloads.
+  const AVAIL_CHIPS_DEFAULT_HEIGHT = 100;
+  const lsKey = `pivot-avail-fields-height-${instanceKey ?? "default"}`;
+  const availChipsObserverRef = useRef<ResizeObserver | null>(null);
+
+  const availChipsRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      // Always disconnect any previous observer first (handles unmount + lsKey change)
+      availChipsObserverRef.current?.disconnect();
+      availChipsObserverRef.current = null;
+
+      if (!el) return;
+
+      // Restore saved height, or auto-shrink to content
+      try {
+        const saved = localStorage.getItem(lsKey);
+        if (saved) {
+          el.style.height = saved;
+        } else {
+          requestAnimationFrame(() => {
+            const natural = Math.min(
+              el.scrollHeight + 2, // +2 for top/bottom border
+              AVAIL_CHIPS_DEFAULT_HEIGHT,
+            );
+            if (natural < AVAIL_CHIPS_DEFAULT_HEIGHT)
+              el.style.height = `${natural}px`;
+          });
+        }
+      } catch {
+        // localStorage unavailable (private browsing, sandboxed iframe) — proceed without it
+      }
+
+      // Persist height whenever it changes (user drag or programmatic resize)
+      const observer = new ResizeObserver(() => {
+        if (!el.style.height) return;
+        try {
+          localStorage.setItem(lsKey, el.style.height);
+        } catch {
+          // localStorage unavailable — silently skip
+        }
+      });
+      observer.observe(el);
+      availChipsObserverRef.current = observer;
+    },
+    [lsKey], // stable: only recreates if instanceKey changes
+  );
 
   // -- Dirty check: disable Apply when nothing changed --
   const hasChanges = useMemo(() => {
@@ -2351,13 +2402,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
               />
             </div>
           )}
-          <div
-            ref={availChipsRef}
-            className={styles.availableFieldsChips}
-            style={
-              availChipsHeight ? { minHeight: availChipsHeight } : undefined
-            }
-          >
+          <div ref={availChipsRef} className={styles.availableFieldsChips}>
             {filteredAvailable.length === 0 ? (
               <span className={styles.noFields}>
                 {searchQuery ? "No matching fields" : "No fields available"}

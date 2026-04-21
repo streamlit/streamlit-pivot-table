@@ -31,7 +31,7 @@ const reactRoots: WeakMap<FrontendRendererArgs["parentElement"], Root> =
 const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
   args,
 ) => {
-  const { data, parentElement, setStateValue, setTriggerValue } = args;
+  const { data, key, parentElement, setStateValue, setTriggerValue } = args;
 
   const rootElement = parentElement.querySelector(".react-root");
 
@@ -48,6 +48,7 @@ const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
   reactRoot.render(
     <StrictMode>
       <PivotRoot
+        instanceKey={key}
         config={data?.config ?? DEFAULT_CONFIG}
         dataframe={data?.dataframe ?? null}
         height={data?.height ?? null}
