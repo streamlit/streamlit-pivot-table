@@ -3587,6 +3587,10 @@ def st_pivot_table(
         "server_mode_reason": threshold_reason,
         "original_column_types": original_column_types,
         "adaptive_date_grains": adaptive_date_grains,
+        # Forwarded so the frontend can namespace localStorage entries per pivot
+        # instance using the user-supplied key rather than the auto-generated
+        # frontend key (which can change if no key= is passed in Python).
+        "instance_key": key,
     }
 
     if use_threshold_hybrid:

@@ -1708,6 +1708,14 @@ export interface PivotTableData {
   original_column_types?: Record<string, ColumnType>;
   /** Per-field adaptive date grain computed from the source-filtered DataFrame's date range. */
   adaptive_date_grains?: Record<string, DateGrain>;
+  /**
+   * The Python-side `key=` value forwarded through data_payload so the
+   * frontend can use it as a stable localStorage namespace. Unlike `args.key`
+   * (the auto-generated frontend key), this value is exactly what the developer
+   * wrote in Python and stays constant across reruns even when other arguments
+   * change.
+   */
+  instance_key?: string;
 }
 
 // ---------------------------------------------------------------------------

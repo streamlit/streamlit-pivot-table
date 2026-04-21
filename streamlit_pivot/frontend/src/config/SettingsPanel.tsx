@@ -2185,52 +2185,84 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   // when !visible, meaning a regular ref is null when effects fire on the open→visible
   // state transition. The callback ref fires exactly when the element enters/leaves the DOM.
   //
-  // • On element mount: restore a saved height if present, otherwise shrink to content
-  //   (capped at AVAIL_CHIPS_DEFAULT_HEIGHT so a full container scrolls rather than grows).
-  // • On resize: a ResizeObserver detects the new inline height and persists it to
-  //   localStorage keyed per pivot instance so the preference survives page reloads.
+  // Auto-size (no saved height):
+  //   A one-shot ResizeObserver measures scrollHeight after the browser has fully laid out
+  //   the flex chips (requestAnimationFrame fires too early; scrollHeight can be 0 or stale
+  //   at that point). The observer disconnects immediately after the first callback so it
+  //   never saves the programmatic resize to localStorage.
+  //
+  // Persist (user-driven resize):
+  //   pointerup on document fires when the user releases the CSS resize handle. This never
+  //   fires for programmatic height changes, preventing the auto-sized value from polluting
+  //   the saved state and ensuring every open re-measures fresh when no user pref exists.
   const AVAIL_CHIPS_DEFAULT_HEIGHT = 100;
+  const AVAIL_CHIPS_MIN_HEIGHT = 40; // matches CSS min-height
   const lsKey = `pivot-avail-fields-height-${instanceKey ?? "default"}`;
-  const availChipsObserverRef = useRef<ResizeObserver | null>(null);
+  const availChipsPointerUpRef = useRef<(() => void) | null>(null);
+  const availChipsInitObserverRef = useRef<ResizeObserver | null>(null);
 
   const availChipsRef = useCallback(
     (el: HTMLDivElement | null) => {
-      // Always disconnect any previous observer first (handles unmount + lsKey change)
-      availChipsObserverRef.current?.disconnect();
-      availChipsObserverRef.current = null;
+      // Cleanup previous listeners/observers (handles unmount + lsKey change)
+      availChipsInitObserverRef.current?.disconnect();
+      availChipsInitObserverRef.current = null;
+      if (availChipsPointerUpRef.current) {
+        document.removeEventListener(
+          "pointerup",
+          availChipsPointerUpRef.current,
+        );
+        availChipsPointerUpRef.current = null;
+      }
 
       if (!el) return;
 
-      // Restore saved height, or auto-shrink to content
+      // Restore a user-saved height, or auto-size to content on first open
+      let restored = false;
       try {
         const saved = localStorage.getItem(lsKey);
         if (saved) {
           el.style.height = saved;
-        } else {
-          requestAnimationFrame(() => {
-            const natural = Math.min(
-              el.scrollHeight + 2, // +2 for top/bottom border
-              AVAIL_CHIPS_DEFAULT_HEIGHT,
-            );
-            if (natural < AVAIL_CHIPS_DEFAULT_HEIGHT)
-              el.style.height = `${natural}px`;
-          });
+          restored = true;
         }
       } catch {
         // localStorage unavailable (private browsing, sandboxed iframe) — proceed without it
       }
 
-      // Persist height whenever it changes (user drag or programmatic resize)
-      const observer = new ResizeObserver(() => {
-        if (!el.style.height) return;
+      if (!restored) {
+        // One-shot ResizeObserver: fires after the browser has fully laid out the flex chips.
+        // We cannot read scrollHeight while height:100px is applied because when content is
+        // shorter than the container, scrollHeight equals the container height (no overflow),
+        // not the content height — so the shrink condition never fires. Instead we temporarily
+        // set height:"auto" to collapse the container to its natural content size, measure,
+        // then apply the capped value. Both mutations happen synchronously inside the callback
+        // before the next paint, so there is no visible flash.
+        const initObserver = new ResizeObserver(() => {
+          initObserver.disconnect();
+          availChipsInitObserverRef.current = null;
+          el.style.height = "auto"; // collapse to natural content height
+          const natural = Math.min(
+            el.scrollHeight + 2, // +2 for top/bottom border (box-sizing: border-box)
+            AVAIL_CHIPS_DEFAULT_HEIGHT,
+          );
+          el.style.height = `${natural}px`;
+        });
+        initObserver.observe(el);
+        availChipsInitObserverRef.current = initObserver;
+      }
+
+      // Persist only user-driven resizes: pointerup fires when the CSS resize handle is
+      // released but does not fire for programmatic height changes.
+      const handlePointerUp = () => {
+        const h = el.style.height;
+        if (!h || parseFloat(h) < AVAIL_CHIPS_MIN_HEIGHT) return;
         try {
-          localStorage.setItem(lsKey, el.style.height);
+          localStorage.setItem(lsKey, h);
         } catch {
           // localStorage unavailable — silently skip
         }
-      });
-      observer.observe(el);
-      availChipsObserverRef.current = observer;
+      };
+      document.addEventListener("pointerup", handlePointerUp);
+      availChipsPointerUpRef.current = handlePointerUp;
     },
     [lsKey], // stable: only recreates if instanceKey changes
   );

@@ -32,6 +32,9 @@ const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
   args,
 ) => {
   const { data, key, parentElement, setStateValue, setTriggerValue } = args;
+  // Prefer the Python-side key (stable across reruns) over the auto-generated
+  // frontend key (which can shift when no Python key= is provided).
+  const instanceKey = data?.instance_key ?? key;
 
   const rootElement = parentElement.querySelector(".react-root");
 
@@ -48,7 +51,7 @@ const PivotTableRoot: FrontendRenderer<PivotRootState, PivotTableData> = (
   reactRoot.render(
     <StrictMode>
       <PivotRoot
-        instanceKey={key}
+        instanceKey={instanceKey}
         config={data?.config ?? DEFAULT_CONFIG}
         dataframe={data?.dataframe ?? null}
         height={data?.height ?? null}
