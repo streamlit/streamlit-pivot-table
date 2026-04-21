@@ -365,10 +365,7 @@ describe("renderCellContent - ImageColumn", () => {
 });
 
 describe("renderCellContent - CheckboxColumn", () => {
-  const CHECKED = "\u2611";
-  const UNCHECKED = "\u2610";
-
-  it("renders ☑ for true-like values", () => {
+  it("renders an SVG checkbox with data-checked=true for true-like values", () => {
     const config = cfgWith({ active: { type: "checkbox" } });
     for (const raw of [true, 1, "true", "TRUE", "yes", "y", "1", "t"]) {
       const container = wrap(
@@ -385,11 +382,11 @@ describe("renderCellContent - CheckboxColumn", () => {
       );
       expect(node).not.toBeNull();
       expect(node?.getAttribute("data-checked")).toBe("true");
-      expect(node?.textContent).toBe(CHECKED);
+      expect(node?.querySelector("svg")).not.toBeNull();
     }
   });
 
-  it("renders ☐ for false-like values", () => {
+  it("renders an SVG checkbox with data-checked=false for false-like values", () => {
     const config = cfgWith({ active: { type: "checkbox" } });
     for (const raw of [false, 0, "false", "FALSE", "no", "n", "0", "f"]) {
       const container = wrap(
@@ -406,7 +403,7 @@ describe("renderCellContent - CheckboxColumn", () => {
       );
       expect(node).not.toBeNull();
       expect(node?.getAttribute("data-checked")).toBe("false");
-      expect(node?.textContent).toBe(UNCHECKED);
+      expect(node?.querySelector("svg")).not.toBeNull();
     }
   });
 

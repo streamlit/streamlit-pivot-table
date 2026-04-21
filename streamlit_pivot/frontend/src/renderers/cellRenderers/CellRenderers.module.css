@@ -57,12 +57,36 @@
   border-radius: 2px;
 }
 
-.checkbox {
-  font-family:
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji",
-    sans-serif;
-  font-size: 1em;
+.checkboxWrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
-  display: inline-block;
   vertical-align: middle;
+}
+
+.checkboxSvg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: block;
+}
+
+/* Checked: medium-gray fill matching st.dataframe's muted appearance.
+   Using currentColor at 0.55 opacity keeps it neutral on both light and
+   dark themes (dark mode: semi-transparent white; light mode: semi-transparent
+   near-black), matching Streamlit's glide-data-grid canvas checkbox. */
+.checkboxCheckedRect {
+  fill: currentColor;
+  stroke: currentColor;
+  opacity: 0.55;
+}
+
+/* Unchecked: transparent fill, visible border at ~38% opacity — consistent
+   with st.dataframe's subdued unchecked appearance. */
+.checkboxUncheckedRect {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  opacity: 0.38;
 }

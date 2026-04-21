@@ -25,13 +25,9 @@ export interface CheckboxCellProps {
   displayText: string;
 }
 
-const CHECKED = "\u2611"; // ☑
-const UNCHECKED = "\u2610"; // ☐
-
 /**
- * Renders a dimension cell as a checkbox glyph. Values that don't parse as a
- * boolean fall back to plain text (e.g. empty strings, "(empty)" placeholder,
- * free-form strings on heterogeneous columns).
+ * Renders a dimension cell as an SVG checkbox matching st.dataframe's visual
+ * style. Values that don't parse as a boolean fall back to plain text.
  */
 export function CheckboxCell({
   rawValue,
@@ -43,14 +39,63 @@ export function CheckboxCell({
   }
   return (
     <span
-      className={styles.checkbox}
+      className={styles.checkboxWrapper}
       role="img"
       aria-label={parsed ? "checked" : "unchecked"}
       data-testid="pivot-checkbox-cell"
       data-checked={parsed ? "true" : "false"}
     >
-      {parsed ? CHECKED : UNCHECKED}
+      {parsed ? <CheckedIcon /> : <UncheckedIcon />}
     </span>
+  );
+}
+
+function CheckedIcon() {
+  return (
+    <svg
+      className={styles.checkboxSvg}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <rect
+        x="0.75"
+        y="0.75"
+        width="14.5"
+        height="14.5"
+        rx="3"
+        className={styles.checkboxCheckedRect}
+      />
+      <path
+        d="M4 8L6.5 10.75L12 5.25"
+        stroke="white"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function UncheckedIcon() {
+  return (
+    <svg
+      className={styles.checkboxSvg}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <rect
+        x="0.75"
+        y="0.75"
+        width="14.5"
+        height="14.5"
+        rx="3"
+        className={styles.checkboxUncheckedRect}
+      />
+    </svg>
   );
 }
 

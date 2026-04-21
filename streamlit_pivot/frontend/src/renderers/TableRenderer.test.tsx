@@ -3340,7 +3340,7 @@ describe("TableRenderer - column_config.image renderer", () => {
 });
 
 describe("TableRenderer - column_config.checkbox renderer", () => {
-  it("renders booleans as ☑ / ☐ glyphs", () => {
+  it("renders booleans as SVG checkboxes", () => {
     const config = makeConfig({
       rows: ["active"],
       columns: ["year"],

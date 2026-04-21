@@ -104,6 +104,15 @@
   white-space: nowrap;
 }
 
+/* Auto-center cells whose content is a checkbox or image renderer, matching
+ * st.dataframe's default alignment for those column types. An explicit
+ * column_config.alignment override wins because inline style always beats a
+ * class-based rule. */
+.rowHeaderCell:has([data-testid="pivot-checkbox-cell"]),
+.rowHeaderCell:has([data-testid="pivot-image-cell"]) {
+  text-align: center;
+}
+
 .rowHeaderPrimary {
   font-weight: var(--pivot-row-header-font-weight, 600);
   background-color: var(
