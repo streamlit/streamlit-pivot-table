@@ -106,17 +106,24 @@ def open_header_menu(page: Page, trigger_locator, menu_test_id: str):
     opening the menu.  The trigger button is hidden at rest (opacity: 0) so we
     check it is attached rather than visible, and click via JS to bypass
     Playwright's visibility check.
+
+    Scroll and click are intentionally separated by a short wait.  Even with
+    ``behavior:'instant'``, browsers dispatch scroll events asynchronously — in
+    Firefox and Chromium they can fire 200 ms+ after the scrollIntoView call.
+    Our React scroll-to-close listener has a 150 ms grace period after the menu
+    opens, but if the scroll event arrives later than that it closes the menu
+    immediately.  By scrolling first, waiting for those events to drain, and
+    only then clicking to open the menu, we ensure no scroll events are
+    in-flight when the listener registers.
     """
     expect(trigger_locator).to_be_attached(timeout=5000)
     menu = page.get_by_test_id(menu_test_id)
     for attempt in range(2):
         trigger_locator.evaluate(
-            # behavior:'instant' ensures the scroll completes synchronously before
-            # click() fires. Without it, smooth-scroll animation events can arrive
-            # after the menu opens and trigger our capture-phase scroll-to-close
-            # listener, closing the menu immediately after it appears.
-            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); el.click(); }"
+            "el => el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })"
         )
+        page.wait_for_timeout(300)  # let scroll events drain before opening menu
+        trigger_locator.evaluate("el => el.click()")
         try:
             expect(menu).to_be_visible(timeout=5000)
             return menu
@@ -806,12 +813,12 @@ def test_locked_mode_header_sort_and_filter_still_work(page_at_app: Page):
     container = get_pivot(page, "test_pivot_locked")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    trigger = container.get_by_test_id("header-menu-trigger-Region")
-    expect(trigger).to_be_attached()
-
-    trigger.evaluate("el => el.click()")
-    menu = page.get_by_test_id("header-menu-Region")
-    expect(menu).to_be_visible(timeout=5000)
+    # Region is a single (non-toggle) row-dim in the locked pivot, so the whole
+    # header cell opens the menu — use open_header_menu_by_cell, not the trigger
+    # button, to avoid Firefox's implicit scroll-on-click race with our
+    # scroll-to-close listener.
+    region_cell = container.get_by_test_id("pivot-row-dim-label-Region")
+    menu = open_header_menu_by_cell(page, region_cell, "header-menu-Region")
 
     sort_section = menu.get_by_test_id("header-menu-sort")
     expect(sort_section).to_be_visible()
@@ -820,8 +827,7 @@ def test_locked_mode_header_sort_and_filter_still_work(page_at_app: Page):
     checkboxes = filter_section.locator("input[type=checkbox]")
     assert checkboxes.count() > 0
 
-    sort_desc = menu.get_by_test_id("header-sort-key-desc")
-    sort_desc.evaluate("el => el.click()")
+    click_menu_item(menu.get_by_test_id("header-sort-key-desc"))
     expect(container.get_by_test_id("pivot-row-header").first).to_have_text(
         "West", timeout=10000
     )
@@ -838,13 +844,15 @@ def test_locked_mode_show_values_as_still_works(page_at_app: Page):
     container = get_pivot(page, "test_pivot_locked")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    trigger = container.get_by_test_id("header-menu-trigger-Revenue").first
-    expect(trigger).to_be_attached(timeout=5000)
-    trigger.evaluate("el => el.click()")
+    # Revenue is a non-toggle value header — click the cell directly.
+    revenue_cell = (
+        container.get_by_test_id("pivot-value-label").filter(has_text="Revenue").first
+    )
+    menu = open_header_menu_by_cell(page, revenue_cell, "header-menu-Revenue")
 
-    display_group = page.get_by_test_id("header-menu-display")
+    display_group = menu.get_by_test_id("header-menu-display")
     expect(display_group).to_be_visible(timeout=5000)
-    page.get_by_test_id("header-display-pct_of_total").evaluate("el => el.click()")
+    click_menu_item(menu.get_by_test_id("header-display-pct_of_total"))
 
     expect(container.get_by_test_id("pivot-data-cell").first).to_contain_text(
         "%", timeout=10000
