@@ -374,7 +374,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
     >
       {/* Dimension title */}
       <div className={styles.menuTitle} data-testid="header-menu-title">
-        {title ?? dimension}
+        {((s) => s.charAt(0).toUpperCase() + s.slice(1))(title ?? dimension)}
       </div>
 
       {/* Sort section (hidden when locked / no onSortChange) */}
@@ -496,7 +496,6 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
       {/* Subtotals section (row dimension headers only) */}
       {onSubtotalToggle && (
         <>
-          {!showSort && <div className={styles.divider} />}
           <div
             className={styles.sortSection}
             data-testid="header-menu-subtotals"
@@ -618,12 +617,41 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
         </>
       )}
 
+      {/* Display section (value headers only) — shown before Totals */}
+      {onShowValuesAsChange && (
+        <>
+          <div
+            className={styles.displaySection}
+            data-testid="header-menu-display"
+            role="group"
+            aria-label={`Display mode for ${dimension}`}
+          >
+            <span className={styles.menuSectionLabel}>Display</span>
+            {displayOptions.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={showValuesAs === opt.value}
+                tabIndex={-1}
+                data-menu-nav
+                className={`${styles.menuItem} ${showValuesAs === opt.value ? styles.menuItemActive : ""}`}
+                onClick={() => onShowValuesAsChange(opt.value)}
+                data-testid={`header-display-${opt.value}`}
+              >
+                <DisplayIcon mode={opt.value} />
+                <span className={styles.menuItemLabel}>{opt.label}</span>
+                {showValuesAs === opt.value && <CheckIcon />}
+              </button>
+            ))}
+          </div>
+          {onTotalToggle && config && <div className={styles.divider} />}
+        </>
+      )}
+
       {/* Totals section (value headers only) */}
       {onTotalToggle && config && (
         <>
-          {!showSort && !onSubtotalToggle && !onDateGrainChange && (
-            <div className={styles.divider} />
-          )}
           <div
             className={styles.sortSection}
             data-testid="header-menu-totals"
@@ -685,37 +713,10 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
         </>
       )}
 
-      {/* Display section (value headers only) */}
-      {onShowValuesAsChange && (
-        <div
-          className={styles.displaySection}
-          data-testid="header-menu-display"
-          role="group"
-          aria-label={`Display mode for ${dimension}`}
-        >
-          {displayOptions.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={showValuesAs === opt.value}
-              tabIndex={-1}
-              data-menu-nav
-              className={`${styles.menuItem} ${showValuesAs === opt.value ? styles.menuItemActive : ""}`}
-              onClick={() => onShowValuesAsChange(opt.value)}
-              data-testid={`header-display-${opt.value}`}
-            >
-              <DisplayIcon mode={opt.value} />
-              <span className={styles.menuItemLabel}>{opt.label}</span>
-              {showValuesAs === opt.value && <CheckIcon />}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Filter section */}
       {showFilter && (
         <div className={styles.filterSection} data-testid="header-menu-filter">
+          <span className={styles.menuSectionLabel}>Values</span>
           <input
             type="text"
             className={styles.searchInput}

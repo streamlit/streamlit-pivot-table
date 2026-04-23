@@ -542,6 +542,7 @@ function MenuTriggerButton({
   variant = "default",
   testId,
   ariaLabel,
+  tabIndex,
 }: {
   dimension: string;
   axis: MenuAxis;
@@ -555,6 +556,9 @@ function MenuTriggerButton({
   variant?: "default" | "inline";
   testId?: string;
   ariaLabel?: string;
+  /** When the parent <th> is the keyboard tab stop, pass -1 to remove the
+   *  button from tab order (one action = one tab stop). */
+  tabIndex?: number;
 }) {
   const handleClick = useCallback(
     (e: MouseEvent<HTMLButtonElement>) => {
@@ -582,6 +586,7 @@ function MenuTriggerButton({
       aria-label={ariaLabel ?? `${dimension} options`}
       aria-expanded={isOpen}
       data-testid={testId ?? `header-menu-trigger-${dimension}`}
+      tabIndex={tabIndex}
     >
       {variant === "inline" ? (
         <svg
@@ -1179,7 +1184,58 @@ export function renderColumnHeaders(
                       "aria-expanded": !visualRowDimCollapsed,
                       "aria-label": `${visualRowDimCollapsed ? "Expand" : "Collapse"} all ${getDimensionLabel(config, dim, pivotData?.getColumnType(dim), adaptiveDateGrains?.[dim])} groups`,
                     }
-                  : {})}
+                  : hasMenu && rowLevel.isLeaf
+                    ? {
+                        tabIndex: 0,
+                        "aria-haspopup": "menu" as const,
+                        "aria-expanded": activeMenuDimension === dim,
+                        "aria-label": `${getDimensionLabel(config, dim, pivotData?.getColumnType(dim), adaptiveDateGrains?.[dim])} options`,
+                        onClick: (e: MouseEvent<HTMLTableCellElement>) => {
+                          if (
+                            (e.target as HTMLElement).closest(
+                              `.${styles.headerMenuBtn}`,
+                            )
+                          )
+                            return;
+                          if (
+                            (e.target as HTMLElement).closest(
+                              `.${styles.resizeHandle}`,
+                            )
+                          )
+                            return;
+                          const btn =
+                            e.currentTarget.querySelector<HTMLElement>(
+                              `.${styles.headerMenuBtn}`,
+                            );
+                          const anchor = btn ?? e.currentTarget;
+                          const rect = anchor.getBoundingClientRect();
+                          onOpenMenu!(dim, "row", rect, anchor);
+                        },
+                        onKeyDown: (e: KeyboardEvent<HTMLTableCellElement>) => {
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          if (
+                            (e.target as HTMLElement).closest(
+                              `.${styles.headerMenuBtn}`,
+                            )
+                          )
+                            return;
+                          if (
+                            (e.target as HTMLElement).closest(
+                              `.${styles.resizeHandle}`,
+                            )
+                          )
+                            return;
+                          e.preventDefault();
+                          const btn =
+                            e.currentTarget.querySelector<HTMLElement>(
+                              `.${styles.headerMenuBtn}`,
+                            );
+                          const anchor = btn ?? e.currentTarget;
+                          const rect = anchor.getBoundingClientRect();
+                          onOpenMenu!(dim, "row", rect, anchor);
+                        },
+                      }
+                    : {})}
               >
                 <div className={styles.headerCellInner}>
                   {canToggleThisDim && (
@@ -1202,6 +1258,7 @@ export function renderColumnHeaders(
                       axis="row"
                       isOpen={activeMenuDimension === dim}
                       onOpen={onOpenMenu}
+                      tabIndex={canToggleThisDim ? undefined : -1}
                     />
                   )}
                 </div>
@@ -1477,7 +1534,56 @@ export function renderColumnHeaders(
                       ? `Expand ${val}`
                       : `Collapse ${val}`,
                   }
-                : {})}
+                : hasMenu
+                  ? {
+                      tabIndex: 0,
+                      "aria-haspopup": "menu" as const,
+                      "aria-expanded": activeMenuDimension === dimName,
+                      "aria-label": `${dimName} options`,
+                      onClick: (e: MouseEvent<HTMLTableCellElement>) => {
+                        if (
+                          (e.target as HTMLElement).closest(
+                            `.${styles.headerMenuBtn}`,
+                          )
+                        )
+                          return;
+                        if (
+                          (e.target as HTMLElement).closest(
+                            `.${styles.resizeHandle}`,
+                          )
+                        )
+                          return;
+                        const btn = e.currentTarget.querySelector<HTMLElement>(
+                          `.${styles.headerMenuBtn}`,
+                        );
+                        const anchor = btn ?? e.currentTarget;
+                        const rect = anchor.getBoundingClientRect();
+                        onOpenMenu!(dimName, "col", rect, anchor);
+                      },
+                      onKeyDown: (e: KeyboardEvent<HTMLTableCellElement>) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        if (
+                          (e.target as HTMLElement).closest(
+                            `.${styles.headerMenuBtn}`,
+                          )
+                        )
+                          return;
+                        if (
+                          (e.target as HTMLElement).closest(
+                            `.${styles.resizeHandle}`,
+                          )
+                        )
+                          return;
+                        e.preventDefault();
+                        const btn = e.currentTarget.querySelector<HTMLElement>(
+                          `.${styles.headerMenuBtn}`,
+                        );
+                        const anchor = btn ?? e.currentTarget;
+                        const rect = anchor.getBoundingClientRect();
+                        onOpenMenu!(dimName, "col", rect, anchor);
+                      },
+                    }
+                  : {})}
             >
               <div className={styles.headerCellInner}>
                 {canToggle && onToggleColGroup && (
@@ -1515,6 +1621,7 @@ export function renderColumnHeaders(
                     axis="col"
                     isOpen={activeMenuDimension === dimName}
                     onOpen={onOpenMenu}
+                    tabIndex={canToggle ? undefined : -1}
                   />
                 )}
               </div>
@@ -1665,6 +1772,56 @@ export function renderColumnHeaders(
             title={valFieldHelp || undefined}
             data-tooltip={valFieldHelp || undefined}
             data-testid="pivot-value-label"
+            {...(hasMenu
+              ? {
+                  tabIndex: 0,
+                  "aria-haspopup": "menu" as const,
+                  "aria-expanded": activeMenuDimension === valField,
+                  "aria-label": `${getRenderedValueLabel(config, valField)} options`,
+                  onClick: (e: MouseEvent<HTMLTableCellElement>) => {
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.headerMenuBtn}`,
+                      )
+                    )
+                      return;
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.resizeHandle}`,
+                      )
+                    )
+                      return;
+                    const btn = e.currentTarget.querySelector<HTMLElement>(
+                      `.${styles.headerMenuBtn}`,
+                    );
+                    const anchor = btn ?? e.currentTarget;
+                    const rect = anchor.getBoundingClientRect();
+                    onOpenMenu!(valField, "value", rect, anchor);
+                  },
+                  onKeyDown: (e: KeyboardEvent<HTMLTableCellElement>) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.headerMenuBtn}`,
+                      )
+                    )
+                      return;
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.resizeHandle}`,
+                      )
+                    )
+                      return;
+                    e.preventDefault();
+                    const btn = e.currentTarget.querySelector<HTMLElement>(
+                      `.${styles.headerMenuBtn}`,
+                    );
+                    const anchor = btn ?? e.currentTarget;
+                    const rect = anchor.getBoundingClientRect();
+                    onOpenMenu!(valField, "value", rect, anchor);
+                  },
+                }
+              : {})}
           >
             <div className={styles.headerCellInner}>
               <span>
@@ -1684,6 +1841,7 @@ export function renderColumnHeaders(
                   axis="value"
                   isOpen={activeMenuDimension === valField}
                   onOpen={onOpenMenu}
+                  tabIndex={-1}
                 />
               )}
             </div>
@@ -1729,6 +1887,56 @@ export function renderColumnHeaders(
             title={valFieldHelp || undefined}
             data-tooltip={valFieldHelp || undefined}
             data-testid="pivot-value-label"
+            {...(hasMenu
+              ? {
+                  tabIndex: 0,
+                  "aria-haspopup": "menu" as const,
+                  "aria-expanded": activeMenuDimension === valField,
+                  "aria-label": `${getRenderedValueLabel(config, valField)} options`,
+                  onClick: (e: MouseEvent<HTMLTableCellElement>) => {
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.headerMenuBtn}`,
+                      )
+                    )
+                      return;
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.resizeHandle}`,
+                      )
+                    )
+                      return;
+                    const btn = e.currentTarget.querySelector<HTMLElement>(
+                      `.${styles.headerMenuBtn}`,
+                    );
+                    const anchor = btn ?? e.currentTarget;
+                    const rect = anchor.getBoundingClientRect();
+                    onOpenMenu!(valField, "value", rect, anchor);
+                  },
+                  onKeyDown: (e: KeyboardEvent<HTMLTableCellElement>) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.headerMenuBtn}`,
+                      )
+                    )
+                      return;
+                    if (
+                      (e.target as HTMLElement).closest(
+                        `.${styles.resizeHandle}`,
+                      )
+                    )
+                      return;
+                    e.preventDefault();
+                    const btn = e.currentTarget.querySelector<HTMLElement>(
+                      `.${styles.headerMenuBtn}`,
+                    );
+                    const anchor = btn ?? e.currentTarget;
+                    const rect = anchor.getBoundingClientRect();
+                    onOpenMenu!(valField, "value", rect, anchor);
+                  },
+                }
+              : {})}
           >
             <div className={styles.headerCellInner}>
               <span>
@@ -1748,6 +1956,7 @@ export function renderColumnHeaders(
                   axis="value"
                   isOpen={activeMenuDimension === valField}
                   onOpen={onOpenMenu}
+                  tabIndex={-1}
                 />
               )}
             </div>
@@ -3562,6 +3771,15 @@ const TableRenderer: FC<TableRendererProps> = ({
 
       activeTooltipEl.current = el;
 
+      // Suppress the native title tooltip immediately on enter so it never
+      // races with our styled tooltip (browsers fire native title at ~300 ms,
+      // before our 400 ms show delay).
+      const nativeTitle = el!.getAttribute("title") ?? "";
+      if (nativeTitle) {
+        el!.removeAttribute("title");
+        suppressedTitle.current = { el: el!, value: nativeTitle };
+      }
+
       // Different element: cancel previous show, clear current tooltip.
       if (helpShowTimer.current) {
         clearTimeout(helpShowTimer.current);
@@ -3572,13 +3790,6 @@ const TableRenderer: FC<TableRendererProps> = ({
       const capturedEl = el as HTMLElement;
       helpShowTimer.current = setTimeout(() => {
         helpShowTimer.current = null;
-        // Suppress the native browser title tooltip so it doesn't appear on
-        // top of the styled tooltip after its own delay (~700 ms).
-        const nativeTitle = capturedEl.getAttribute("title") ?? "";
-        if (nativeTitle) {
-          capturedEl.removeAttribute("title");
-          suppressedTitle.current = { el: capturedEl, value: nativeTitle };
-        }
         const rect = capturedEl.getBoundingClientRect();
         setHelpTooltip({
           text,
@@ -4047,6 +4258,33 @@ const TableRenderer: FC<TableRendererProps> = ({
     onConfigChange,
     adaptiveDateGrains,
   });
+
+  // Close the header menu on any scroll so the popover does not float
+  // detached from its anchor cell. The scroll event does not bubble, so we
+  // listen in the capture phase at the document root to catch scroll on the
+  // wrapper, any descendant overflow container, or the window itself.
+  //
+  // A 150 ms guard delay prevents stale scroll events that were queued
+  // synchronously during the click-to-open sequence (e.g. scrollIntoView
+  // followed by click) from immediately re-closing the menu before the user
+  // has had a chance to interact with it.
+  useEffect(() => {
+    if (!menuTarget) return;
+    let listener: (() => void) | null = null;
+    const timerId = setTimeout(() => {
+      const onScroll = () => handleCloseMenu();
+      listener = onScroll;
+      document.addEventListener("scroll", onScroll, {
+        passive: true,
+        capture: true,
+      });
+    }, 150);
+    return () => {
+      clearTimeout(timerId);
+      if (listener)
+        document.removeEventListener("scroll", listener, { capture: true });
+    };
+  }, [menuTarget, handleCloseMenu]);
 
   const rowKeys = projectedRowEntries
     ? projectedRowEntries.map((entry) => entry.key)

@@ -99,13 +99,44 @@ def click_and_wait_for_sort(panel, column_name: str, expected_aria_sort: str) ->
 
 
 def open_header_menu(page: Page, trigger_locator, menu_test_id: str):
-    """Open a header menu and wait for it to become visible."""
-    expect(trigger_locator).to_be_visible(timeout=5000)
+    """Open a header menu via the ⋮ trigger button.
+
+    Use this for *toggle* cells (expandable column groups, drillable temporal
+    dims) where clicking the cell itself triggers expand/collapse rather than
+    opening the menu.  The trigger button is hidden at rest (opacity: 0) so we
+    check it is attached rather than visible, and click via JS to bypass
+    Playwright's visibility check.
+    """
+    expect(trigger_locator).to_be_attached(timeout=5000)
     menu = page.get_by_test_id(menu_test_id)
     for attempt in range(2):
         trigger_locator.evaluate(
-            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest' }); el.click(); }"
+            # behavior:'instant' ensures the scroll completes synchronously before
+            # click() fires. Without it, smooth-scroll animation events can arrive
+            # after the menu opens and trigger our capture-phase scroll-to-close
+            # listener, closing the menu immediately after it appears.
+            "el => { el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); el.click(); }"
         )
+        try:
+            expect(menu).to_be_visible(timeout=5000)
+            return menu
+        except AssertionError:
+            if attempt == 1:
+                raise
+
+
+def open_header_menu_by_cell(page: Page, cell_locator, menu_test_id: str):
+    """Open a header menu by clicking the header cell directly.
+
+    Use this for *non-toggle* cells — value labels (measure headers) and row/col
+    dimension labels where there is no expand/collapse action — where the whole
+    cell is the click target for the menu.  The cell is always visible so
+    standard Playwright actionability checks apply; no workarounds are needed.
+    """
+    expect(cell_locator).to_be_visible(timeout=5000)
+    menu = page.get_by_test_id(menu_test_id)
+    for attempt in range(2):
+        cell_locator.click()
         try:
             expect(menu).to_be_visible(timeout=5000)
             return menu
@@ -128,14 +159,20 @@ def activate_sort_option(
     option_test_id: str,
     *,
     close_after: bool = True,
+    via_cell: bool = False,
 ):
-    """Open a sort menu and activate a preset, normalizing any pre-active state."""
-    menu = open_header_menu(page, trigger_locator, menu_test_id)
+    """Open a sort menu and activate a preset, normalizing any pre-active state.
+
+    Pass ``via_cell=True`` when ``trigger_locator`` is a visible header cell
+    (non-toggle) rather than the hidden ⋮ trigger button.
+    """
+    opener = open_header_menu_by_cell if via_cell else open_header_menu
+    menu = opener(page, trigger_locator, menu_test_id)
 
     option = menu.get_by_test_id(option_test_id)
     if option.get_attribute("aria-pressed") == "true":
         click_menu_item(option)
-        menu = open_header_menu(page, trigger_locator, menu_test_id)
+        menu = opener(page, trigger_locator, menu_test_id)
         option = menu.get_by_test_id(option_test_id)
 
     click_menu_item(option)
@@ -152,9 +189,10 @@ def test_header_menu_sort_key_asc(page_at_app: Page):
 
     activate_sort_option(
         page,
-        container.get_by_test_id("header-menu-trigger-Region"),
+        container.get_by_test_id("pivot-row-dim-label-Region"),
         "header-menu-Region",
         "header-sort-key-asc",
+        via_cell=True,
     )
 
     row_headers = container.get_by_test_id("pivot-row-header")
@@ -172,9 +210,10 @@ def test_header_menu_sort_key_desc(page_at_app: Page):
 
     activate_sort_option(
         page,
-        container.get_by_test_id("header-menu-trigger-Region"),
+        container.get_by_test_id("pivot-row-dim-label-Region"),
         "header-menu-Region",
         "header-sort-key-desc",
+        via_cell=True,
     )
 
     row_headers = container.get_by_test_id("pivot-row-header")
@@ -199,10 +238,11 @@ def test_header_menu_sort_by_value(page_at_app: Page):
 
     activate_sort_option(
         page,
-        container.get_by_test_id("header-menu-trigger-Region"),
+        container.get_by_test_id("pivot-row-dim-label-Region"),
         "header-menu-Region",
         "header-sort-value-desc",
         close_after=False,
+        via_cell=True,
     )
     value_field = page.get_by_test_id("header-sort-value-field")
     expect(value_field).to_be_visible(timeout=5000)
@@ -295,9 +335,11 @@ def test_header_menu_show_values_as_pct(page_at_app: Page):
     container = get_pivot(page, "test_pivot_cond_fmt")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    trigger = container.get_by_test_id("header-menu-trigger-Revenue").first
-    expect(trigger).to_be_visible(timeout=5000)
-    menu = open_header_menu(page, trigger, "header-menu-Revenue")
+    # Revenue is a value-label cell (non-toggle): click the cell directly.
+    revenue_cell = (
+        container.get_by_test_id("pivot-value-label").filter(has_text="Revenue").first
+    )
+    menu = open_header_menu_by_cell(page, revenue_cell, "header-menu-Revenue")
 
     display_group = page.get_by_test_id("header-menu-display")
     expect(display_group).to_be_visible(timeout=5000)
@@ -326,7 +368,7 @@ def test_date_hierarchy_uses_adaptive_default_and_enables_comparisons(
 
     menu = open_header_menu(
         page,
-        container.locator('[data-testid="header-menu-trigger-revenue"]:visible').first,
+        container.locator('[data-testid="header-menu-trigger-revenue"]').first,
         "header-menu-revenue",
     )
     expect(menu.get_by_test_id("header-display-diff_from_prev")).to_be_visible(
@@ -349,9 +391,7 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.locator(
-            '[data-testid="header-menu-trigger-order_date"]:visible'
-        ).first,
+        container.locator('[data-testid="header-menu-trigger-order_date"]').first,
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
@@ -364,9 +404,7 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.locator(
-            '[data-testid="header-menu-trigger-order_date"]:visible'
-        ).first,
+        container.locator('[data-testid="header-menu-trigger-order_date"]').first,
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
@@ -377,9 +415,7 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.locator(
-            '[data-testid="header-menu-trigger-order_date"]:visible'
-        ).first,
+        container.locator('[data-testid="header-menu-trigger-order_date"]').first,
         "header-menu-order_date",
     )
     grain_select = menu.get_by_test_id("header-date-grain")
@@ -389,7 +425,7 @@ def test_date_hierarchy_supports_drill_week_and_original(page_at_app: Page):
 
     menu = open_header_menu(
         page,
-        container.locator('[data-testid="header-menu-trigger-revenue"]:visible').first,
+        container.locator('[data-testid="header-menu-trigger-revenue"]').first,
         "header-menu-revenue",
     )
     expect(menu.get_by_test_id("header-display-diff_from_prev")).to_have_count(0)
@@ -771,7 +807,7 @@ def test_locked_mode_header_sort_and_filter_still_work(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     trigger = container.get_by_test_id("header-menu-trigger-Region")
-    expect(trigger).to_be_visible()
+    expect(trigger).to_be_attached()
 
     trigger.evaluate("el => el.click()")
     menu = page.get_by_test_id("header-menu-Region")
@@ -803,7 +839,7 @@ def test_locked_mode_show_values_as_still_works(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     trigger = container.get_by_test_id("header-menu-trigger-Revenue").first
-    expect(trigger).to_be_visible(timeout=5000)
+    expect(trigger).to_be_attached(timeout=5000)
     trigger.evaluate("el => el.click()")
 
     display_group = page.get_by_test_id("header-menu-display")
@@ -1145,9 +1181,10 @@ def test_hierarchical_sort_preserves_parent_groups(page_at_app: Page):
 
     activate_sort_option(
         page,
-        container.get_by_test_id("header-menu-trigger-Category"),
+        container.get_by_test_id("pivot-row-dim-label-Category"),
         "header-menu-Category",
         "header-sort-key-asc",
+        via_cell=True,
     )
     page.wait_for_timeout(500)
 
@@ -1330,7 +1367,7 @@ def test_hierarchy_header_menu_no_subtotal_toggle(page_at_app: Page):
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
     trigger = container.locator("[data-testid^='header-menu-trigger-region']").first
-    expect(trigger).to_be_visible(timeout=5000)
+    expect(trigger).to_be_attached(timeout=5000)
 
     menu = open_header_menu(page, trigger, "header-menu-Region")
     expect(menu.get_by_test_id("header-menu-sort")).to_be_visible()

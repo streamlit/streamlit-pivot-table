@@ -3436,3 +3436,222 @@ describe("TableRenderer - column_config.text max_chars", () => {
     expect(foundYearTruncation).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Header hover & menu UX — whole-cell click activation
+// ---------------------------------------------------------------------------
+describe("TableRenderer - menu-only header whole-cell click activation", () => {
+  // makeConfig defaults: rows=["region"], columns=["year"], values=["revenue"],
+  // show_totals=true, interactive=true. With onSortChange + onFilterChange the
+  // component creates hasHeaderMenu=true and passes handleOpenMenu to
+  // renderColumnHeaders. Tests verify the menu DOM element appears (same
+  // strategy as the existing "opens header menu when trigger is clicked" test).
+
+  const interactive = {
+    onSortChange: vi.fn(),
+    onFilterChange: vi.fn(),
+  };
+
+  // Multi-value config is required for value-label cells to render (the
+  // value-label row only appears when there are 2+ measures).
+  const multiValueConfig = makeConfig({ values: ["revenue", "profit"] });
+
+  // Test 1 — clicking a non-toggle column slot header opens the col-dim menu
+  it("clicking a menu-only non-toggle column slot cell opens the menu", () => {
+    const pd = createPivotData(SAMPLE_DATA, makeConfig());
+    render(
+      <TableRenderer pivotData={pd} config={makeConfig()} {...interactive} />,
+    );
+    const slotHeaders = screen.getAllByTestId("pivot-header-cell");
+    // Click the first year-value slot (non-toggle, has menu)
+    fireEvent.click(slotHeaders[0]);
+    expect(screen.getByTestId("header-menu-year")).toBeInTheDocument();
+  });
+
+  // Test 2 — clicking a menu-only row-dim header opens the row-dim menu
+  it("clicking a menu-only non-toggle row-dim cell opens the menu", () => {
+    const pd = createPivotData(SAMPLE_DATA, makeConfig());
+    render(
+      <TableRenderer pivotData={pd} config={makeConfig()} {...interactive} />,
+    );
+    const rowDimHeader = screen.getByTestId("pivot-row-dim-label-region");
+    fireEvent.click(rowDimHeader);
+    expect(screen.getByTestId("header-menu-region")).toBeInTheDocument();
+  });
+
+  // Test 3 — clicking a value-label cell opens the value menu
+  it("clicking a value-label cell opens the menu", () => {
+    const pd = createPivotData(SAMPLE_DATA, multiValueConfig);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={multiValueConfig}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const valueLabel = screen.getAllByTestId("pivot-value-label")[0];
+    fireEvent.click(valueLabel);
+    // A value menu for one of the two measures should appear.
+    expect(
+      screen.getByTestId(/header-menu-revenue|header-menu-profit/),
+    ).toBeInTheDocument();
+  });
+
+  // Test 3b — clicking a row-total value-label cell opens the value menu
+  it("clicking a row-total value-label cell opens the menu", () => {
+    const config = makeConfig({
+      values: ["revenue", "profit"],
+      show_totals: true,
+    });
+    const pd = createPivotData(SAMPLE_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const allValueLabels = screen.getAllByTestId("pivot-value-label");
+    const totalLabel = allValueLabels.find((el) =>
+      el.className.includes("totalsCol"),
+    );
+    expect(totalLabel).toBeDefined();
+    fireEvent.click(totalLabel!);
+    expect(
+      screen.getByTestId(/header-menu-revenue|header-menu-profit/),
+    ).toBeInTheDocument();
+  });
+
+  // Test 4 — Enter and Space on a value-label cell open the menu
+  it("Enter and Space on a menu-only value-label cell opens the menu", () => {
+    const pd = createPivotData(SAMPLE_DATA, multiValueConfig);
+    const { unmount } = render(
+      <TableRenderer
+        pivotData={pd}
+        config={multiValueConfig}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const valueLabel = screen.getAllByTestId("pivot-value-label")[0];
+
+    fireEvent.keyDown(valueLabel, { key: "Enter" });
+    expect(
+      screen.getByTestId(/header-menu-revenue|header-menu-profit/),
+    ).toBeInTheDocument();
+
+    unmount();
+
+    // Re-render for the Space key check
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={multiValueConfig}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const valueLabel2 = screen.getAllByTestId("pivot-value-label")[0];
+    fireEvent.keyDown(valueLabel2, { key: " " });
+    expect(
+      screen.getByTestId(/header-menu-revenue|header-menu-profit/),
+    ).toBeInTheDocument();
+  });
+
+  // Test 5 — keyDown Enter on the ⋮ button does not double-open the menu
+  // (button has stopPropagation; cell keyDown guard skips when target is the btn)
+  it("keyDown Enter on the ⋮ button does not double-fire through the cell keyDown", () => {
+    const pd = createPivotData(SAMPLE_DATA, multiValueConfig);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={multiValueConfig}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const menuBtn = screen
+      .getAllByTestId("pivot-value-label")[0]
+      .querySelector("[data-testid^='header-menu-trigger']") as HTMLElement;
+    expect(menuBtn).not.toBeNull();
+
+    // keyDown Enter on the button: the button's own keyDown handler doesn't
+    // fire a menu in jsdom (no native button activation), but importantly the
+    // cell's keyDown guard (closest(headerMenuBtn)) should prevent the cell
+    // handler from opening the menu.
+    fireEvent.keyDown(menuBtn, { key: "Enter" });
+    expect(
+      screen.queryByTestId(/header-menu-revenue|header-menu-profit/),
+    ).not.toBeInTheDocument();
+  });
+
+  // Test 6 — clicking the ⋮ button opens the menu exactly once (no double-fire)
+  it("clicking the ⋮ button opens the menu once (stopPropagation prevents cell double-fire)", () => {
+    const pd = createPivotData(SAMPLE_DATA, multiValueConfig);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={multiValueConfig}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const menuBtn = screen
+      .getAllByTestId("pivot-value-label")[0]
+      .querySelector("[data-testid^='header-menu-trigger']") as HTMLElement;
+    expect(menuBtn).not.toBeNull();
+
+    fireEvent.click(menuBtn);
+    // Exactly one menu should appear, not two stacked menus.
+    expect(
+      screen.getAllByTestId(/header-menu-revenue|header-menu-profit/).length,
+    ).toBe(1);
+  });
+
+  // Test 7 — clicking the resize handle does NOT open the menu
+  it("clicking the resize handle on a value-label cell does not open the menu", () => {
+    const pd = createPivotData(SAMPLE_DATA, multiValueConfig);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={multiValueConfig}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const resizeHandle = screen
+      .getAllByTestId("pivot-value-label")[0]
+      .querySelector("[class*='resizeHandle']") as HTMLElement;
+    expect(resizeHandle).not.toBeNull();
+
+    // mouseDown fires the resize handler; click on the resize handle is
+    // guarded in the cell's onClick via closest(resizeHandle).
+    fireEvent.click(resizeHandle);
+    expect(
+      screen.queryByTestId(/header-menu-revenue|header-menu-profit/),
+    ).not.toBeInTheDocument();
+  });
+
+  // Test 8 — menu-only cells expose a single tab stop (cell tabbable, ⋮ not)
+  it("menu-only value-label cell is tabbable and its nested ⋮ button is not", () => {
+    const pd = createPivotData(SAMPLE_DATA, multiValueConfig);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={multiValueConfig}
+        {...interactive}
+        onShowValuesAsChange={vi.fn()}
+      />,
+    );
+    const valueLabel = screen.getAllByTestId("pivot-value-label")[0];
+    expect(valueLabel.getAttribute("tabindex")).toBe("0");
+
+    const menuBtn = valueLabel.querySelector(
+      "[data-testid^='header-menu-trigger']",
+    ) as HTMLElement;
+    expect(menuBtn).not.toBeNull();
+    expect(menuBtn.getAttribute("tabindex")).toBe("-1");
+  });
+});

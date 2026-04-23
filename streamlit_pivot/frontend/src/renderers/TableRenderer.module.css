@@ -383,9 +383,7 @@
   gap: 4px;
 }
 
-.headerCellInner:has(.headerMenuBtn):not(:has(.headerMenuBtnInline)) {
-  padding-right: 20px;
-}
+/* No reserved padding — button is hidden at rest and appears on hover only. */
 
 .formulaWarningIcon {
   color: var(--st-color-warning, #faca2b);
@@ -405,14 +403,22 @@
   padding: 0;
   border: none;
   border-radius: calc(var(--st-base-radius) - 2px);
-  background: color-mix(in srgb, var(--st-text-color) 8%, transparent);
+  /* Solid header-matching background so the button cleanly covers any text
+     behind it in narrow columns, matching st.dataframe's column menu button. */
+  background: var(
+    --pivot-column-header-bg,
+    var(
+      --st-dataframe-header-background-color,
+      var(--st-secondary-background-color)
+    )
+  );
   color: var(--st-text-color);
   cursor: pointer;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   line-height: 1;
-  opacity: 0.4;
+  opacity: 0;
   transition: opacity 0.1s, background 0.1s;
 }
 
@@ -424,7 +430,17 @@
 
 .headerMenuBtn:hover {
   opacity: 1;
-  background: color-mix(in srgb, var(--st-text-color) 15%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--st-text-color) 12%,
+    var(
+      --pivot-column-header-bg,
+      var(
+        --st-dataframe-header-background-color,
+        var(--st-secondary-background-color)
+      )
+    )
+  );
 }
 
 .headerMenuBtn:focus-visible {
@@ -458,6 +474,25 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
   outline: none;
   opacity: 1;
+}
+
+/* Hover tint + pointer cursor for menu-only header cells (no primary toggle
+   action). Excludes toggle cells and breadcrumb inline triggers so only cells
+   where "whole-cell click = open menu" get the affordance. */
+.headerCell:not(.groupToggleCell):not(.dimensionToggleCell):has(.headerMenuBtn):not(:has(.headerMenuBtnInline)):hover,
+.valueLabel:has(.headerMenuBtn):not(:has(.headerMenuBtnInline)):hover {
+  background-color: color-mix(
+    in srgb,
+    var(--st-text-color) 6%,
+    var(--pivot-column-header-bg, var(--st-dataframe-header-background-color, var(--st-secondary-background-color)))
+  );
+  cursor: pointer;
+}
+
+.headerCell:not(.groupToggleCell):not(.dimensionToggleCell):has(.headerMenuBtn):not(:has(.headerMenuBtnInline)):focus-visible,
+.valueLabel:has(.headerMenuBtn):not(:has(.headerMenuBtnInline)):focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
 }
 
 /* Active state indicator on header cells */

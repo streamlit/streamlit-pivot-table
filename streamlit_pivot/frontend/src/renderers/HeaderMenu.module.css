@@ -21,7 +21,7 @@
   max-height: 420px;
   display: flex;
   flex-direction: column;
-  padding: 6px 0;
+  padding: 0 0 6px;
   background: var(--st-background-color);
   border: 1px solid var(--st-border-color);
   border-radius: var(--st-base-radius);
@@ -31,12 +31,13 @@
 }
 
 .menuTitle {
-  padding: 4px 12px 6px;
+  padding: 4px 12px 4px;
   font-weight: 600;
-  font-size: 0.82em;
-  color: color-mix(in srgb, var(--st-text-color) 72%, transparent);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--st-text-color) 82%, transparent);
+  background: var(--st-secondary-background-color);
+  border-radius: calc(var(--st-base-radius) - 1px) calc(var(--st-base-radius) - 1px) 0 0;
+  margin-bottom: 4px;
 }
 
 /* ---- Sort section ---- */
@@ -202,7 +203,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: color-mix(in srgb, var(--st-text-color) 55%, transparent);
-  padding: 4px 8px 2px;
+  padding: 0px 8px 4px;
   display: block;
 }
 
@@ -227,8 +228,9 @@
 
 .searchInput {
   box-sizing: border-box;
-  width: 100%;
   padding: 4px 7px;
+  margin-left: 4px;
+  margin-right: 4px;
   border: 1px solid var(--st-border-color);
   border-radius: calc(var(--st-base-radius) - 2px);
   background: var(--st-background-color);
@@ -246,7 +248,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  padding: 4px 0;
+  padding: 4px 4px;
 }
 
 .actionButton {

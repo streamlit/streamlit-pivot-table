@@ -532,6 +532,33 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     adaptiveDateGrains,
   });
 
+  // Close the header menu on any scroll so the popover does not float
+  // detached from its anchor cell. The scroll event does not bubble, so we
+  // listen in the capture phase at the document root to catch scroll on the
+  // wrapper, any descendant overflow container, or the window itself.
+  //
+  // A 150 ms guard delay prevents stale scroll events that were queued
+  // synchronously during the click-to-open sequence (e.g. scrollIntoView
+  // followed by click) from immediately re-closing the menu before the user
+  // has had a chance to interact with it.
+  useEffect(() => {
+    if (!menuTarget) return;
+    let listener: (() => void) | null = null;
+    const timerId = setTimeout(() => {
+      const onScroll = () => handleCloseMenu();
+      listener = onScroll;
+      document.addEventListener("scroll", onScroll, {
+        passive: true,
+        capture: true,
+      });
+    }, 150);
+    return () => {
+      clearTimeout(timerId);
+      if (listener)
+        document.removeEventListener("scroll", listener, { capture: true });
+    };
+  }, [menuTarget, handleCloseMenu]);
+
   const totalVirtualRows = projectedRowEntries
     ? projectedRowEntries.length
     : groupedRows
