@@ -1380,6 +1380,131 @@ st_pivot_table(
 section_hierarchy()
 
 # ---------------------------------------------------------------------------
+# Section 13b: Row Layout Modes (Table vs. Hierarchy)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("13b. Row Layout Modes (Table vs. Hierarchy)")
+
+
+@st.fragment
+def section_row_layout():
+    st.markdown(
+        """
+The `row_layout` parameter controls how row dimensions are arranged in the row header.
+Both modes display the **same data** — only the visual arrangement differs.
+
+| Mode | `row_layout=` | What you see |
+|------|--------------|--------------|
+| **Table** (default) | `"table"` | One dedicated column per row dimension. Region, Category, and Product each get their own header column; repeated labels are merged by default. |
+| **Hierarchy** | `"hierarchy"` | A **single indented tree column** for all row dimensions. Depth is shown through indentation. A breadcrumb bar at the top of the column shows the current drill path and lets you jump back to any ancestor level. |
+
+**When to use Table:** for 1–2 row dimensions, when each dimension label should be visually distinct in its own column, or when `repeat_row_labels=True` is needed.
+
+**When to use Hierarchy:** for 3+ row dimensions or when horizontal space is limited.
+The compact single-column layout keeps wide value columns visible without side-scrolling,
+and the breadcrumb bar makes deep nesting easy to navigate.
+"""
+    )
+
+    row_layout_cols = st.columns(2)
+
+    with row_layout_cols[0]:
+        st.markdown('**`row_layout="table"` (default)**')
+        st.caption("Each row dimension gets its own column.")
+        st_pivot_table(
+            df_medium,
+            key="row_layout_table",
+            rows=["Region", "Category", "Product"],
+            columns=["Year"],
+            values=["Revenue"],
+            aggregation="sum",
+            show_subtotals=True,
+            row_layout="table",
+            max_height=400,
+        )
+
+    with row_layout_cols[1]:
+        st.markdown('**`row_layout="hierarchy"`**')
+        st.caption(
+            "All row dimensions in one indented tree column. " "Subtotals auto-enable."
+        )
+        st_pivot_table(
+            df_medium,
+            key="row_layout_hierarchy",
+            rows=["Region", "Category", "Product"],
+            columns=["Year"],
+            values=["Revenue"],
+            aggregation="sum",
+            row_layout="hierarchy",
+            max_height=400,
+        )
+
+    st.info(
+        '**Auto-subtotals in hierarchy mode:** When `row_layout="hierarchy"` and '
+        "`show_subtotals` is not explicitly set, subtotals are automatically enabled for "
+        "all grouping levels so every group node shows its aggregate. "
+        "Pass `show_subtotals=False` to opt out."
+    )
+
+    st.markdown("#### Breadcrumb navigation and `repeat_row_labels`")
+    st.markdown(
+        """
+The hierarchy column header contains a **breadcrumb bar** that tracks your current drill level:
+
+- Click a breadcrumb label to **collapse all descendants** back to that ancestor level.
+- The **+/−** toggle on each group row expands or collapses that individual branch.
+- Temporal date hierarchies (Year → Quarter → Month → Day) render as nested tree levels
+  within the single hierarchy column — identical in behavior to any other dimension nesting.
+
+`repeat_row_labels` is **ignored** in hierarchy mode — the row axis is a single column, so
+there are no labels to repeat across columns. The Settings Panel disables the toggle automatically
+when hierarchy mode is active.
+"""
+    )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+# Default: one column per row dimension
+st_pivot_table(
+    df,
+    key="table_mode",
+    rows=["Region", "Category", "Product"],
+    columns=["Year"],
+    values=["Revenue"],
+    show_subtotals=True,
+    row_layout="table",   # default; can be omitted
+)
+
+# Hierarchy: single indented tree column
+# show_subtotals auto-enables when not explicitly set
+st_pivot_table(
+    df,
+    key="hierarchy_mode",
+    rows=["Region", "Category", "Product"],
+    columns=["Year"],
+    values=["Revenue"],
+    row_layout="hierarchy",
+)
+
+# Hierarchy with subtotals explicitly disabled
+st_pivot_table(
+    df,
+    key="hierarchy_no_sub",
+    rows=["Region", "Category", "Product"],
+    columns=["Year"],
+    values=["Revenue"],
+    row_layout="hierarchy",
+    show_subtotals=False,   # override the auto-enable
+)
+""",
+            language="python",
+        )
+
+
+section_row_layout()
+
+# ---------------------------------------------------------------------------
 # Section 14: Server-Side Drill-Down (Hybrid Mode)
 # ---------------------------------------------------------------------------
 st.divider()

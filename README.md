@@ -390,17 +390,34 @@ Grouped buckets export as grouped labels such as `Jan 2024`, `Q1 2024`, or `2024
 
 ### Row Layout Modes
 
-Choose between two row presentation modes:
+Choose between two row presentation modes. Both modes display the same data — only the visual arrangement differs.
 
-| Mode | Value | Description |
+| Mode | Value | What you see |
 |------|-------|-------------|
-| Table | `"table"` | Classic pivot layout with one visible row-header column per row dimension, plus expanded temporal levels as separate row-header columns when applicable. |
-| Hierarchy | `"hierarchy"` | Compact tree layout with a single visible row hierarchy column, indentation by depth, breadcrumb controls, and inline expand/collapse. |
+| Table | `"table"` | Classic pivot layout with one visible row-header column per row dimension. Region, Category, and Product each appear as their own column; repeated labels are merged by default (or repeated when `repeat_row_labels=True`). |
+| Hierarchy | `"hierarchy"` | Compact tree layout with a **single visible row hierarchy column**. All row dimensions are collapsed into one indented column. A breadcrumb bar at the top shows the current drill path and lets you jump back to any ancestor level with a click. |
+
+**When to use Table:** for 1–2 row dimensions; when each dimension should be a distinct visible column; or when `repeat_row_labels` behavior is needed.
+
+**When to use Hierarchy:** for 3+ row dimensions or when horizontal space is limited. The single-column layout keeps value columns visible without side-scrolling. Subtotals are auto-enabled so every group node shows its aggregate immediately.
 
 ```python
+# Default: one column per row dimension
 st_pivot_table(
     df,
-    key="row_layout_example",
+    key="table_mode",
+    rows=["Region", "Category", "Customer"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    row_layout="table",      # default; can be omitted
+    show_subtotals=True,
+)
+
+# Hierarchy: single indented tree column
+# show_subtotals auto-enables when not explicitly set
+st_pivot_table(
+    df,
+    key="hierarchy_mode",
     rows=["Region", "Category", "Customer"],
     columns=["Year"],
     values=["Revenue", "Profit"],
@@ -410,10 +427,9 @@ st_pivot_table(
 
 Behavior notes:
 
-- `table` preserves the traditional multi-column row-axis layout and works naturally with `repeat_row_labels`.
-- `hierarchy` renders parent groups before their children and uses a single visible row column rather than separate columns per row dimension. Indentation reflects depth and the top grouping level uses a subtle background tint; deeper levels rely on indentation plus group-boundary borders.
 - **Auto-subtotals:** when `row_layout="hierarchy"` and `show_subtotals` is not explicitly set, subtotals are automatically enabled for all grouping levels so the tree exposes group aggregations out of the box. Pass `show_subtotals=False` or `show_subtotals=[...]` to override.
 - **`repeat_row_labels` is ignored** in hierarchy mode because the row axis is a single indented column; the Settings Panel disables the toggle accordingly.
+- In hierarchy mode, the top grouping level uses a subtle background tint and deeper levels use indentation plus group-boundary borders to reinforce depth.
 - Temporal date hierarchies work in both layouts. In `table`, date levels expand into separate row-header columns; in `hierarchy`, those same levels render as nested tree levels within the single hierarchy column.
 - Export parity is preserved. CSV, TSV, clipboard, and XLSX outputs follow the selected row layout, including hierarchy indentation.
 - Execution-mode parity is also preserved. `row_layout` works in both `client_only` and `threshold_hybrid`; the layout mostly affects rendering, not whether hybrid execution is allowed.
@@ -1170,7 +1186,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains 19 sections covering the major features and usage patterns with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains more than 20 sections covering the major features and usage patterns with interactive examples and inline documentation.
 
 ### Building the frontend
 

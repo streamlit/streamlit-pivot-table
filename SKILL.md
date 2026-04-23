@@ -212,7 +212,7 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `max_height` | `int` | `500` | Max auto-size height (px). Table scrolls past this. |
 | `height` | `int \| None` | `None` | **Deprecated.** Treated as `max_height` when provided. |
 | `sticky_headers` | `bool` | `True` | Column headers stick to the top of the scroll container. |
-| `row_layout` | `"table" \| "hierarchy"` | `"table"` | `"hierarchy"` renders a single indented tree column and auto-enables subtotals when unset. |
+| `row_layout` | `"table" \| "hierarchy"` | `"table"` | Controls how row dimensions are arranged. `"table"` gives one visible column per row dimension (traditional pivot look). `"hierarchy"` collapses all row dimensions into a single indented tree column with breadcrumb navigation, and auto-enables subtotals when `show_subtotals` is not explicitly set. See [Row Layout Modes](#row-layout-modes). |
 
 #### Interactivity and Callbacks
 
@@ -349,10 +349,58 @@ Parent headers (e.g. `2024`, `Q1 2024`) collapse/expand inline on both axes. Exp
 
 ### Row Layout Modes
 
-| Mode | Value | Description |
+`row_layout` controls how row dimensions are visually arranged in the row header. Both modes display the same data — only the visual structure changes.
+
+| Mode | Value | What you see |
 |------|-------|-------------|
-| Table | `"table"` | Classic layout, one row-header column per dimension. |
-| Hierarchy | `"hierarchy"` | Single indented tree column with breadcrumb controls; subtotals auto-enabled when unspecified. |
+| Table | `"table"` | **One column per row dimension.** Region, Category, and Product each appear as their own header column. Repeated labels are merged by default (or repeated when `repeat_row_labels=True`). This is the traditional spreadsheet-pivot look. |
+| Hierarchy | `"hierarchy"` | **A single indented tree column** for all row dimensions. Depth is shown through indentation. A breadcrumb bar at the top of the column shows the current drill path and lets users jump back to any ancestor level with a click. |
+
+**When to use Table:** 1–2 row dimensions; when each dimension should be visually distinct in its own column; or when `repeat_row_labels=True` is needed.
+
+**When to use Hierarchy:** 3+ row dimensions or when horizontal space is limited. The compact single-column layout keeps value columns visible without side-scrolling. Subtotals are auto-enabled so every group node shows its aggregate out of the box.
+
+**Key behavior differences:**
+
+- **Auto-subtotals:** when `row_layout="hierarchy"` and `show_subtotals` is not explicitly set, subtotals are automatically enabled for all grouping levels. Pass `show_subtotals=False` or `show_subtotals=[...]` to override. In `"table"` mode, `show_subtotals` defaults to `False` as usual.
+- **`repeat_row_labels` is ignored** in hierarchy mode — the row axis is a single column, so there are no repeated labels to merge or repeat. The Settings Panel disables the Repeat Labels toggle automatically when hierarchy mode is active.
+- Temporal date hierarchies (Year → Quarter → Month → Day) work in both layouts. In `"table"`, each date level expands as a separate row-header column; in `"hierarchy"`, the same levels render as nested tree levels within the single column.
+- Export parity is preserved — CSV, TSV, clipboard, and XLSX outputs follow the selected row layout, including hierarchy indentation.
+
+```python
+# Default: one dedicated column per row dimension
+st_pivot_table(
+    df,
+    key="table_mode",
+    rows=["Region", "Category", "Product"],
+    columns=["Year"],
+    values=["Revenue"],
+    show_subtotals=True,
+    row_layout="table",   # default; can be omitted
+)
+
+# Hierarchy: single indented tree column
+# show_subtotals auto-enables when not explicitly set
+st_pivot_table(
+    df,
+    key="hierarchy_mode",
+    rows=["Region", "Category", "Product"],
+    columns=["Year"],
+    values=["Revenue"],
+    row_layout="hierarchy",
+)
+
+# Hierarchy with subtotals explicitly disabled
+st_pivot_table(
+    df,
+    key="hierarchy_no_sub",
+    rows=["Region", "Category", "Product"],
+    columns=["Year"],
+    values=["Revenue"],
+    row_layout="hierarchy",
+    show_subtotals=False,   # override the auto-enable
+)
+```
 
 ### Number Format Patterns
 
