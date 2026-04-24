@@ -602,8 +602,8 @@ def test_source_filters_and_config_filters_intersect_on_same_field(
     assert len(payload["dataframe"]) == 0
 
 
-def test_non_dimension_filter_causes_client_fallback(pivot_module):
-    """Programmatic filter on non-dimension field makes hybrid incompatible."""
+def test_off_axis_filter_does_not_block_hybrid(pivot_module):
+    """Off-axis filters are now handled server-side in hybrid mode; config is always compatible."""
     cfg = {
         "rows": ["Region"],
         "columns": ["Year"],
@@ -612,8 +612,8 @@ def test_non_dimension_filter_causes_client_fallback(pivot_module):
         "filters": {"Category": {"include": ["A"]}},
     }
     ok, msg = pivot_module._can_use_threshold_hybrid(cfg)
-    assert ok is False
-    assert "Category" in msg
+    assert ok is True
+    assert "compatible" in msg
 
 
 def test_adaptive_date_grains_in_payload(pivot_module, mount_recorder):

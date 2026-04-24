@@ -542,10 +542,15 @@ class TestAlignmentReconciliation:
         assert result["column_alignment"] == {"Revenue": "right", "Region": "center"}
 
     def test_object_style_alignment_populates_translation(self, pivot_module):
-        """st.column_config.Column(alignment=...) flows through."""
-        import streamlit as st
+        """A column_config spec dict with an 'alignment' key flows through.
 
-        spec = dict(st.column_config.NumberColumn(alignment="center"))
+        Streamlit ≥ 1.55 removed the alignment= parameter from NumberColumn,
+        so we build the spec dict directly rather than through the live API —
+        the test is validating _translate_column_config, not Streamlit's API.
+        """
+        # Mimic the shape that older Streamlit would have produced via
+        # dict(st.column_config.NumberColumn(alignment="center"))
+        spec = {"label": None, "width": None, "alignment": "center"}
         df = pd.DataFrame({"Revenue": [1.0]})
         result = pivot_module._translate_column_config({"Revenue": spec}, df)
         assert result["column_alignment"] == {"Revenue": "center"}

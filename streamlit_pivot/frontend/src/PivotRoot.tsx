@@ -66,6 +66,7 @@ import ErrorBoundary from "./shared/ErrorBoundary";
 import TableRenderer from "./renderers/TableRenderer";
 import VirtualizedTableRenderer from "./renderers/VirtualizedTableRenderer";
 import Toolbar from "./config/Toolbar";
+import { FilterBar } from "./config/FilterBar";
 import DrilldownPanel from "./renderers/DrilldownPanel";
 import WarningBanner from "./shared/WarningBanner";
 
@@ -119,6 +120,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   drilldown_request_id,
   hybrid_totals,
   hybrid_agg_remap,
+  filter_field_values,
   source_row_count,
   original_column_types,
   adaptive_date_grains,
@@ -691,6 +693,31 @@ const PivotRoot: FC<PivotRootProps> = ({
     [currentConfig, handleConfigChange],
   );
 
+  const handleRemoveFilterField = useCallback(
+    (field: string) => {
+      const newFilterFields = (currentConfig.filter_fields ?? []).filter(
+        (f) => f !== field,
+      );
+      const filters = { ...(currentConfig.filters ?? {}) };
+      // Dual-role guard: only clear the filter entry if the field is NOT also
+      // in rows or columns. If it is, the header-menu indicator must stay active.
+      const rowColSet = new Set([
+        ...currentConfig.rows,
+        ...currentConfig.columns,
+      ]);
+      if (!rowColSet.has(field)) {
+        delete filters[field];
+      }
+      const hasFilters = Object.keys(filters).length > 0;
+      handleConfigChange({
+        ...currentConfig,
+        filter_fields: newFilterFields.length ? newFilterFields : undefined,
+        filters: hasFilters ? filters : undefined,
+      });
+    },
+    [currentConfig, handleConfigChange],
+  );
+
   const handleDrilldownMeasured = useCallback(
     (action: PerfActionMeasurement) => {
       setDebugMetrics((prev) =>
@@ -848,6 +875,8 @@ const PivotRoot: FC<PivotRootProps> = ({
             frozenColumns={frozenColumns.size > 0 ? frozenColumns : undefined}
             showStickyToggle={isTableScrollable}
             pivotData={pivotData ?? undefined}
+            filterFieldValues={filter_field_values}
+            pickerPortalTarget={containerRef.current}
             exportFilename={export_filename}
             onCollapseChange={
               currentConfig.interactive ? handleCollapseChange : undefined
@@ -856,6 +885,23 @@ const PivotRoot: FC<PivotRootProps> = ({
             onToggleFullscreen={handleToggleFullscreen}
           />
         )}
+
+        {(currentConfig.filter_fields?.length ?? 0) > 0 &&
+          currentConfig.show_sections !== false &&
+          pivotData && (
+            <FilterBar
+              filterFields={currentConfig.filter_fields!}
+              filters={currentConfig.filters}
+              pivotData={pivotData}
+              config={currentConfig}
+              adaptiveDateGrains={typedAdaptiveGrains}
+              filterFieldValues={filter_field_values}
+              onFilterChange={handleFilterChange}
+              onRemoveField={handleRemoveFilterField}
+              menuLimit={menu_limit}
+              portalTarget={containerRef.current}
+            />
+          )}
 
         <div
           style={

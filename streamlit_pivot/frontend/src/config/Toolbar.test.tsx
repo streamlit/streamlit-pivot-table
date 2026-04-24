@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   render,
   screen,
@@ -3025,5 +3025,545 @@ describe("Toolbar - settings panel DnD invalid zone rendering", () => {
     fireEvent.click(regionChip);
     expect(screen.queryByText("Add to Values")).not.toBeInTheDocument();
     expect(screen.getByText("Add to Rows")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Filters zone — canDropFieldToZone
+// ---------------------------------------------------------------------------
+
+describe("canDropFieldToZone - filters zone", () => {
+  const numericFields = new Set(["revenue", "profit"]);
+  const base = { numericFields, rowFields: ["region"], columnFields: ["year"] };
+
+  it("accepts dimension field in filters zone", () => {
+    expect(
+      canDropFieldToZone({ ...base, field: "category", toZone: "filters" }),
+    ).toBe(true);
+  });
+
+  it("accepts numeric field in filters zone (users may want to filter by year)", () => {
+    expect(
+      canDropFieldToZone({ ...base, field: "revenue", toZone: "filters" }),
+    ).toBe(true);
+  });
+
+  it("accepts a field already in rows in filters zone (dual-role)", () => {
+    expect(
+      canDropFieldToZone({ ...base, field: "region", toZone: "filters" }),
+    ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyDragMove — filters zone
+// ---------------------------------------------------------------------------
+
+describe("applyDragMove - filters zone", () => {
+  it("adds field to filter_fields without removing from rows (dual-role)", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue"],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "filters",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.filter_fields).toContain("region");
+    expect(result!.rows).toContain("region"); // dual-role: stays in rows
+  });
+
+  it("removes field from filter_fields when moving out to rows, clears filter for non-dual-role field", () => {
+    const cfg = makeConfig({
+      rows: [],
+      columns: ["year"],
+      values: ["revenue"],
+      filter_fields: ["category"],
+      filters: { category: { include: ["A"] } },
+    });
+    const result = applyDragMove({
+      sourceZone: "filters",
+      targetZone: "rows",
+      field: "category",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.rows).toContain("category");
+    expect(result!.filter_fields ?? []).not.toContain("category");
+    // filter entry should be cleared since not in rows/columns of result
+    expect(result!.filters?.category).toBeUndefined();
+  });
+
+  it("preserves filter when removing dual-role field from filter_fields to rows", () => {
+    const cfg = makeConfig({
+      rows: ["category"],
+      columns: ["year"],
+      values: ["revenue"],
+      filter_fields: ["category"],
+      filters: { category: { include: ["A"] } },
+    });
+    const result = applyDragMove({
+      sourceZone: "filters",
+      targetZone: "rows",
+      field: "category",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result).not.toBeNull();
+    // field is already in rows → dual-role: filter preserved
+    expect(result!.filters?.category?.include).toContain("A");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validatePivotConfigV1 — filter_fields + show_sections round-trip
+// ---------------------------------------------------------------------------
+
+import { validatePivotConfigV1 } from "../engine/types";
+
+describe("validatePivotConfigV1 - filter_fields and show_sections", () => {
+  it("passes through filter_fields", () => {
+    const raw = {
+      version: 1,
+      rows: [],
+      columns: [],
+      values: [],
+      aggregation: {},
+      show_totals: false,
+      empty_cell_value: "",
+      interactive: true,
+      filter_fields: ["category", "region"],
+    };
+    const result = validatePivotConfigV1(raw);
+    expect(result.filter_fields).toEqual(["category", "region"]);
+  });
+
+  it("passes through show_sections=false", () => {
+    const raw = {
+      version: 1,
+      rows: [],
+      columns: [],
+      values: [],
+      aggregation: {},
+      show_totals: false,
+      empty_cell_value: "",
+      interactive: true,
+      show_sections: false,
+    };
+    const result = validatePivotConfigV1(raw);
+    expect(result.show_sections).toBe(false);
+  });
+
+  it("strips empty filter_fields (not stored when empty)", () => {
+    const raw = {
+      version: 1,
+      rows: [],
+      columns: [],
+      values: [],
+      aggregation: {},
+      show_totals: false,
+      empty_cell_value: "",
+      interactive: true,
+      filter_fields: [],
+    };
+    const result = validatePivotConfigV1(raw);
+    expect(result.filter_fields).toBeUndefined();
+  });
+
+  it("throws on non-string filter_fields entries", () => {
+    const raw = {
+      version: 1,
+      rows: [],
+      columns: [],
+      values: [],
+      aggregation: {},
+      show_totals: false,
+      empty_cell_value: "",
+      interactive: true,
+      filter_fields: [123],
+    };
+    expect(() => validatePivotConfigV1(raw)).toThrow("filter_fields");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FilterBar — chip summary (no dismiss button)
+// ---------------------------------------------------------------------------
+
+import { FilterBar } from "./FilterBar";
+
+describe("FilterBar - chip summary", () => {
+  const mockPivotData = {
+    getUniqueValues: () => ["A", "B", "C"],
+  } as unknown as import("../engine/PivotData").PivotData;
+
+  it("renders no summary text for a field with no filter", () => {
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={undefined}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    // Chip should exist and show just the label (no summary when unfiltered)
+    expect(screen.getByTestId("filter-chip-category")).toBeInTheDocument();
+  });
+
+  it("renders active chip (no summary count text) for include list", () => {
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={{ category: { include: ["A", "B"] } }}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    // Chip exists; summary count text is no longer shown inline (matches ZoneChip style)
+    const chip = screen.getByTestId("filter-chip-category");
+    expect(chip).toBeInTheDocument();
+    expect(chip).not.toHaveTextContent("selected");
+    expect(chip).not.toHaveTextContent("excluded");
+  });
+
+  it("renders × remove button when onRemoveField is provided", () => {
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={{ category: { exclude: ["C"] } }}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+        onRemoveField={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByTestId("filter-chip-clear-category"),
+    ).toBeInTheDocument();
+  });
+
+  it("dismiss button is no longer rendered (sections collapse via toolbar)", () => {
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={undefined}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("filter-bar-dismiss")).not.toBeInTheDocument();
+  });
+
+  it("renders one chip per filter field", () => {
+    render(
+      <FilterBar
+        filterFields={["category", "region"]}
+        filters={undefined}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("filter-chip-category")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-chip-region")).toBeInTheDocument();
+  });
+
+  it("clicking × remove button calls onRemoveField with the field name", () => {
+    const onRemove = vi.fn();
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={undefined}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+        onRemoveField={onRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("filter-chip-clear-category"));
+    expect(onRemove).toHaveBeenCalledWith("category");
+  });
+
+  it("clicking × does not call onRemoveField when prop is omitted", () => {
+    // Without onRemoveField the × button should not be rendered at all
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={undefined}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("filter-chip-clear-category"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clicking chip opens FilterPickerPopover", () => {
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={undefined}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("filter-chip-category"));
+    // FilterPickerPopover uses data-testid="filter-picker-{field}"
+    expect(screen.getByTestId("filter-picker-category")).toBeInTheDocument();
+  });
+
+  it("clicking open chip again closes the picker", () => {
+    render(
+      <FilterBar
+        filterFields={["category"]}
+        filters={undefined}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("filter-chip-category"));
+    expect(screen.getByTestId("filter-picker-category")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("filter-chip-category"));
+    expect(
+      screen.queryByTestId("filter-picker-category"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("count badge shows number of active filters", () => {
+    render(
+      <FilterBar
+        filterFields={["category", "region"]}
+        filters={{
+          category: { include: ["A"] },
+          region: { exclude: ["West"] },
+        }}
+        pivotData={mockPivotData}
+        config={makeConfig()}
+        onFilterChange={vi.fn()}
+      />,
+    );
+    // Both fields are active — badge should show 2
+    const badges = screen.getAllByText("2");
+    expect(badges.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SettingsPanel — Filters zone UI
+// ---------------------------------------------------------------------------
+
+describe("SettingsPanel - Filters zone", () => {
+  it("shows 'Add to Filters' in chip menu for unassigned field", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [], columns: [], values: ["revenue"] })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-region"));
+    expect(screen.getByText("Add to Filters")).toBeInTheDocument();
+  });
+
+  it("opening Settings on a clean config (no filter fields) does not enable Apply", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [], columns: [], values: ["revenue"] })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    const applyBtn = screen.getByTestId("settings-apply");
+    expect(applyBtn).toBeDisabled();
+  });
+
+  it("adding a field to Filters zone enables Apply", () => {
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [], columns: [], values: ["revenue"] })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    // Add region to filters via click menu
+    fireEvent.click(screen.getByTestId("settings-available-region"));
+    fireEvent.click(screen.getByText("Add to Filters"));
+    const applyBtn = screen.getByTestId("settings-apply");
+    expect(applyBtn).not.toBeDisabled();
+  });
+
+  it("applies filter_fields on Apply (no show_filter_bar — replaced by show_sections)", () => {
+    const onChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({ rows: [], columns: [], values: ["revenue"] })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-settings"));
+    fireEvent.click(screen.getByTestId("settings-available-region"));
+    fireEvent.click(screen.getByText("Add to Filters"));
+    fireEvent.click(screen.getByTestId("settings-apply"));
+    expect(onChange).toHaveBeenCalled();
+    const called = onChange.mock.calls[0][0];
+    expect(called.filter_fields).toContain("region");
+    expect(called.show_filter_bar).toBeUndefined(); // removed: use show_sections instead
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Toolbar — sections collapse/expand toggle
+// ---------------------------------------------------------------------------
+
+describe("Toolbar - sections collapse/expand", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("renders zone cards by default (sections expanded)", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: [],
+          values: ["revenue"],
+        })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("toolbar-rows-header")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("toolbar-compact-summary"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows compact summary when show_sections=false", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: ["year"],
+          values: ["revenue"],
+          show_sections: false,
+        })}
+        allColumns={["region", "year", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("toolbar-compact-summary")).toBeInTheDocument();
+    expect(screen.queryByTestId("toolbar-rows-header")).not.toBeInTheDocument();
+    expect(screen.getByTestId("toolbar-compact-summary")).toHaveTextContent(
+      "region",
+    );
+  });
+
+  it("compact summary shows filter dot when active filters exist (filter_fields)", () => {
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: [],
+          values: ["revenue"],
+          filter_fields: ["category"],
+          filters: { category: { include: ["Electronics"] } },
+          show_sections: false,
+        })}
+        allColumns={["region", "category", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("toolbar-compact-summary")).toHaveTextContent(
+      "1 filter",
+    );
+  });
+
+  it("compact summary counts header-menu filters on row/column dimensions", () => {
+    // header-menu filters appear in config.filters but NOT in filter_fields
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: ["year"],
+          values: ["revenue"],
+          filter_fields: undefined,
+          filters: {
+            region: { include: ["East"] }, // header-menu filter on row
+            year: { include: ["2023"] }, // header-menu filter on column
+          },
+          show_sections: false,
+        })}
+        allColumns={["region", "year", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={vi.fn()}
+      />,
+    );
+    // Both header-menu filters must be reflected in the compact summary dot
+    expect(screen.getByTestId("toolbar-compact-summary")).toHaveTextContent(
+      "2 filters",
+    );
+  });
+
+  it("toggle button calls onConfigChange with show_sections toggled", () => {
+    const onChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: [],
+          values: ["revenue"],
+        })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-toggle-sections"));
+    expect(onChange).toHaveBeenCalled();
+    const called = onChange.mock.calls[0][0];
+    expect(called.show_sections).toBe(false);
+  });
+
+  it("expand button in compact summary calls onConfigChange to expand", () => {
+    const onChange = vi.fn();
+    render(
+      <Toolbar
+        config={makeConfig({
+          rows: ["region"],
+          columns: [],
+          values: ["revenue"],
+          show_sections: false,
+        })}
+        allColumns={["region", "revenue"]}
+        numericColumns={["revenue"]}
+        onConfigChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("toolbar-expand-sections"));
+    expect(onChange).toHaveBeenCalled();
+    const called = onChange.mock.calls[0][0];
+    expect(called.show_sections).toBe(true);
   });
 });

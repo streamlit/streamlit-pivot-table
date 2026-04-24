@@ -21,7 +21,6 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 0;
-  margin-bottom: 8px;
   font-family: var(--st-font);
   font-size: var(--st-base-font-size);
   align-items: stretch;
@@ -284,21 +283,29 @@
   white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.chipPrimaryText {
-  white-space: nowrap;
-}
-
+/* Label wrapper shrinks first so action buttons (▾ ×) are never clipped */
 .chipLabelText {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.25rem;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+/* Text inside the label truncates with ellipsis when space is tight */
+.chipPrimaryText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .chipRemove {
   cursor: pointer;
+  flex-shrink: 0;
   border: none;
   background: none;
   color: var(--st-text-color);
@@ -374,6 +381,7 @@
   line-height: 1;
   color: inherit;
   opacity: 0.88;
+  flex-shrink: 0;
 }
 
 /* --- Drag-and-drop styles --- */
@@ -857,4 +865,92 @@
 .exportActionButton:focus-visible {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
   outline: none;
+}
+
+/* ── Compact summary bar (show_sections = false) ────────────────────────── */
+
+/*
+ * Single-row summary shown instead of the full Rows/Columns/Values cards
+ * when the user collapses the toolbar sections. Inherits the same padding
+ * and flex context as .toolbar so the utilGroup stays right-aligned.
+ */
+.compactSummary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-family: var(--st-font);
+  font-size: var(--st-base-font-size);
+  color: var(--st-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.compactSummaryText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+}
+
+/* Section label: "Rows:", "Cols:", "Values:" — bold, normal color */
+.compactSectionLabel {
+  font-weight: 600;
+}
+
+/* Field names after the section label — normal weight */
+.compactSectionFields {
+  font-weight: 400;
+}
+
+/* Pipe separator between sections */
+.compactDot {
+  opacity: 0.3;
+  font-weight: 400;
+  padding: 0 2px;
+}
+
+/* Coloured dot indicating active filters */
+.filterDot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--st-primary-color);
+}
+
+.filterDotLabel {
+  font-size: 0.8em;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+/* Expand/collapse toggle button — same visual style as other icon buttons */
+.expandBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--st-text-color);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.1s, background 0.1s;
+  font-size: 0.8em;
+}
+
+.expandBtn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+.expandBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
 }

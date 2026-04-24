@@ -224,12 +224,20 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `locked` | `bool` | `False` | Viewer mode. Config locked; export, expand/collapse, drill-down, header-menu sort/filter remain. |
 | `export_filename` | `str \| None` | `None` | Base filename for exports; date + extension auto-appended. |
 
+#### Filters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Initial user-facing dimension filters. Maps field name to `{"include": [...]}` or `{"exclude": [...]}`. Values use **resolved-value semantics** (same as header-menu filters — dates compare at grain, null buckets use display string). Any filter key not in `filter_fields` or `rows`/`columns` is auto-promoted to `filter_fields`, so there is never a hidden active filter. |
+| `filter_fields` | `list[str] \| None` | `None` | Ordered list of fields in the Filters zone. Appear as chips in the FilterBar and Settings panel. A field can appear in both `rows`/`columns` and `filter_fields` simultaneously (dual-role). |
+| `show_sections` | `bool \| None` | `True` | Expand (`True`) or collapse (`False`) the Rows/Columns/Values cards and FilterBar into a compact summary. Users can toggle interactively. |
+| `source_filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Server-only filters applied **before** pivot processing. Not sent to the frontend. `include` wins over `exclude`. |
+
 #### Data Control
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `null_handling` | `str \| dict[str, str] \| None` | `None` | `"exclude"`, `"zero"`, or `"separate"`. Global or per-field. |
-| `source_filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Report-level filters applied **before** pivot processing. `include` wins over `exclude`. |
 | `hidden_attributes` | `list[str] \| None` | `None` | Columns hidden from the UI entirely. |
 | `hidden_from_aggregators` | `list[str] \| None` | `None` | Columns hidden from the Values/aggregators menu only. |
 | `frozen_columns` | `list[str] \| None` | `None` | Pinned to zone; no drag, no remove. |

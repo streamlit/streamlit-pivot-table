@@ -2721,6 +2721,137 @@ st_pivot_table(
 section_styling()
 
 # ---------------------------------------------------------------------------
+# Section 22: Filters Zone + FilterBar (report-level filtering)
+# ---------------------------------------------------------------------------
+
+st.subheader("22. Filters Zone + FilterBar (Report-Level Filtering)")
+
+
+@st.fragment
+def section_filter_bar():
+    st.markdown(
+        """
+The **Filters zone** in the Settings panel lets users filter on any dimension field —
+even one that is **not placed in Rows or Columns**. This is report-level (page) filtering,
+similar to the filter shelf in Excel or Tableau.
+
+Once a field is placed in the Filters zone and the config is applied, a **FilterBar** appears
+above the pivot table (when sections are expanded). Each chip shows the field name; active
+selections are indicated by a highlighted chip background. Clicking a chip opens a value
+picker with search, Select All, and Clear All. Use the **×** button on a chip to remove the
+field from the Filters zone entirely.
+
+**Toolbar sections visibility (`show_sections`):**
+- The **Collapse Sections** button in the toolbar collapses the Rows/Columns/Values cards and FilterBar
+  into a compact single-line summary, e.g. `Rows: Region | Cols: Year | Values: Revenue, Profit ● 1 filter`.
+- The summary dot shows the total number of active filters — both FilterBar filters and any header-menu filters applied to row/column dimensions.
+- Set `show_sections=False` in Python to start collapsed by default.
+
+**Filter chips in Settings panel:**
+- Each chip in the Filters zone is **clickable**: clicking opens the value picker inline
+  (same picker as the FilterBar above the table). Active filters highlight the chip background.
+- Use the **×** button to remove a field from the Filters zone.
+
+**Pre-configured example:**
+- `Category` is in the Filters zone (off-axis) with an initial include filter.
+- `Region` is in **both** Rows and the Filters zone (dual-role): its header-menu filter and
+  FilterBar chip share the same underlying `config.filters["Region"]` state.
+
+**Hybrid mode note:** In `threshold_hybrid` execution, unique values for off-axis filter fields
+are pre-computed on the server (`filter_field_values` sidecar) so the picker is always
+fully populated. Dual-role fields read unique values from the current data — a dependent-filter
+effect where one active filter can narrow the options shown for others (standard BI behavior).
+
+**Try it:**
+1. Click the `Category` chip in the FilterBar → open picker → change the selection.
+2. Open Settings → click a chip in the Filters zone to set values without leaving Settings.
+3. Use the **Collapse Sections** button in the toolbar to hide sections; note the filter dot in the summary.
+4. Drag `Category` from Available Fields directly into the Filters drop zone.
+"""
+    )
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.caption("Pre-configured FilterBar (Category off-axis + Region dual-role)")
+        st_pivot_table(
+            df,
+            key="filter_bar_demo",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue", "Profit"],
+            filter_fields=["Category", "Region"],  # ordered Filters zone fields
+            filters={"Category": {"include": ["Electronics", "Furniture"]}},
+            show_totals=True,
+        )
+
+    with col_right:
+        st.caption("Start from scratch — open Settings and use the Filters zone")
+        st_pivot_table(
+            df_medium,
+            key="filter_bar_blank",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+        )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+# Pre-configured: Category in Filters zone (off-axis) + Region in both Rows and Filters
+st_pivot_table(
+    df,
+    key="filter_bar_demo",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Profit"],
+    filter_fields=["Category", "Region"],  # ordered list of filter-bar fields
+    filters={"Category": {"include": ["Electronics", "Furniture"]}},
+    show_totals=True,
+)
+
+# Start collapsed (sections hidden, compact summary shown):
+st_pivot_table(
+    df,
+    key="compact_demo",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    filter_fields=["Category"],
+    show_sections=False,   # collapses Rows/Columns/Values cards + FilterBar
+)
+
+# Users can also add fields interactively:
+# 1. Open Settings → drag a field into the Filters zone (or use click menu)
+# 2. Click the chip to set filter values without leaving Settings
+# 3. Click Apply → FilterBar appears above the table (when sections expanded)
+# 4. Use the ⊟ button in the toolbar to collapse all sections
+""",
+            language="python",
+        )
+
+    # Show what's currently in the config for the pre-configured demo
+    demo_state = st.session_state.get("filter_bar_demo", {})
+    if demo_state.get("config"):
+        cfg = demo_state["config"]
+        active_filters = cfg.get("filters") or {}
+        filter_fields = cfg.get("filter_fields") or []
+        if filter_fields:
+            summaries = []
+            for f in filter_fields:
+                flt = active_filters.get(f)
+                if not flt:
+                    summaries.append(f"**{f}**: All")
+                elif flt.get("include"):
+                    summaries.append(f"**{f}**: {len(flt['include'])} selected")
+                elif flt.get("exclude"):
+                    summaries.append(f"**{f}**: {len(flt['exclude'])} excluded")
+            st.caption("Active filter state: " + " · ".join(summaries))
+
+
+section_filter_bar()
+
+# ---------------------------------------------------------------------------
 # Footer: Raw Data
 # ---------------------------------------------------------------------------
 st.divider()

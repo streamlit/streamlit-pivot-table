@@ -325,6 +325,29 @@
   opacity: 0.3;
 }
 
+/* Filter zone chip — active state (has a staged filter selection) */
+.zoneChipActive {
+  background: color-mix(in srgb, var(--st-primary-color) 12%, var(--st-background-color));
+}
+
+/* Modifier applied to filter zone chips — enables hover feedback and bolder ▾ */
+.zoneChipFilter {
+  cursor: pointer;
+}
+
+.zoneChipFilter:hover {
+  background: color-mix(in srgb, var(--st-text-color) 8%, var(--st-secondary-background-color));
+}
+
+.zoneChipActive.zoneChipFilter:hover {
+  background: color-mix(in srgb, var(--st-primary-color) 18%, var(--st-background-color));
+}
+
+.zoneChipFilter .chipMenuBtn {
+  opacity: 0.6;
+}
+
+
 .dragOverlayChip {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   transform: scale(1.03);

@@ -18,6 +18,7 @@
 import {
   FC,
   ReactElement,
+  ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -103,8 +104,12 @@ export interface ToolbarProps {
   frozenColumns?: Set<string>;
   /** Show the sticky headers toggle (only when table content is scrollable). */
   showStickyToggle?: boolean;
-  /** PivotData instance for data export. */
+  /** PivotData instance for data export and filter picker. */
   pivotData?: PivotData;
+  /** Pre-computed unique values sidecar for off-axis filter fields (hybrid mode). */
+  filterFieldValues?: Record<string, string[]>;
+  /** Top-level container element for picker portals (from PivotRoot). */
+  pickerPortalTarget?: Element | null;
   /** Base filename (without extension) for exported files. */
   exportFilename?: string;
   /** Viewer-safe collapse updates, enabled whenever interactive is true. */
@@ -187,7 +192,7 @@ const AGG_CHIP_LABELS: Record<AggregationType, string> = {
   percentile_90: "P90",
 };
 
-type ZoneKey = "rows" | "columns" | "values";
+type ZoneKey = "rows" | "columns" | "values" | "filters";
 
 export interface DragMoveParams {
   sourceZone: ZoneKey;
@@ -197,6 +202,11 @@ export interface DragMoveParams {
   overField?: string;
   config: PivotConfigV1;
   numericColumns: string[];
+}
+
+/** Returns the array for a given zone key, handling 'filters' → filter_fields. */
+function getZoneArray(zone: ZoneKey, cfg: PivotConfigV1): string[] {
+  return zone === "filters" ? (cfg.filter_fields ?? []) : cfg[zone];
 }
 
 /**
@@ -212,14 +222,22 @@ export function applyDragMove({
   numericColumns,
 }: DragMoveParams): PivotConfigV1 | null {
   if (sourceZone === targetZone) {
-    const arr = config[sourceZone];
+    const arr = getZoneArray(sourceZone, config);
     const oldIndex = arr.indexOf(field);
     const newIndex = overField ? arr.indexOf(overField) : -1;
     if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex)
       return null;
 
     const reordered = arrayMove(arr, oldIndex, newIndex);
-    const updated: PivotConfigV1 = { ...config, [sourceZone]: reordered };
+    let updated: PivotConfigV1;
+    if (sourceZone === "filters") {
+      updated = {
+        ...config,
+        filter_fields: reordered,
+      };
+    } else {
+      updated = { ...config, [sourceZone]: reordered };
+    }
     if (sourceZone === "rows") {
       delete updated.collapsed_groups;
     } else if (sourceZone === "columns") {
@@ -242,11 +260,40 @@ export function applyDragMove({
     return null;
   }
 
-  const updated: PivotConfigV1 = {
-    ...config,
-    [sourceZone]: config[sourceZone].filter((f: string) => f !== field),
-    [targetZone]: [...config[targetZone], field],
-  };
+  const srcArr = getZoneArray(sourceZone, config);
+  const tgtArr = getZoneArray(targetZone, config);
+
+  // For moves TO filters zone: add to filter_fields but keep in source zone (dual-role).
+  // For moves OUT of filters zone: remove from filter_fields, add to target zone.
+  let updated: PivotConfigV1;
+  if (targetZone === "filters") {
+    updated = {
+      ...config,
+      filter_fields: tgtArr.includes(field) ? tgtArr : [...tgtArr, field],
+    };
+    // Do NOT remove from source zone — filters allow dual-role
+  } else if (sourceZone === "filters") {
+    const rowColSet = new Set([...config.rows, ...config.columns]);
+    const newFilterFields = srcArr.filter((f) => f !== field);
+    updated = {
+      ...config,
+      filter_fields: newFilterFields.length > 0 ? newFilterFields : undefined,
+      [targetZone]: [...tgtArr, field],
+    };
+    // Dual-role cleanup: clear filter entry only if field not also in rows/columns of result
+    if (!rowColSet.has(field) && updated.filters?.[field]) {
+      const newFilters = { ...updated.filters };
+      delete newFilters[field];
+      updated.filters =
+        Object.keys(newFilters).length > 0 ? newFilters : undefined;
+    }
+  } else {
+    updated = {
+      ...config,
+      [sourceZone]: srcArr.filter((f: string) => f !== field),
+      [targetZone]: [...tgtArr, field],
+    };
+  }
 
   const syncAgg = (values: string[], agg: AggregationConfig) =>
     normalizeAggregationConfig(agg, values);
@@ -329,6 +376,8 @@ const Toolbar: FC<ToolbarProps> = ({
   frozenColumns,
   showStickyToggle,
   pivotData,
+  filterFieldValues,
+  pickerPortalTarget,
   exportFilename,
   onCollapseChange,
   isFullscreen,
@@ -610,6 +659,60 @@ const Toolbar: FC<ToolbarProps> = ({
     !!config.show_subtotals && config.rows.length >= 2 && !!onCollapseChange;
   const showColGroups = config.columns.length >= 2 && !!onCollapseChange;
 
+  // Sections collapse/expand
+  const sectionsExpanded = config.show_sections !== false;
+  const handleToggleSections = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      // Close the settings panel whenever sections are toggled so the panel
+      // doesn't linger over a collapsed/expanded layout.
+      setSettingsOpen(false);
+      emitIfChanged({ ...config, show_sections: !sectionsExpanded });
+      // Blur immediately so :focus-within on .utilGroup clears and the toolbar
+      // can fade away once the cursor leaves — matching the pre-click hover behaviour.
+      e.currentTarget.blur();
+    },
+    [config, emitIfChanged, sectionsExpanded],
+  );
+
+  // Compact summary — labeled segments: "Rows Region · Cols Year · Values Revenue, Profit"
+  const compactSummaryText = useMemo((): ReactNode => {
+    type Segment = { label: string; fields: string[] };
+    const segments: Segment[] = [];
+    if (config.rows.length > 0)
+      segments.push({
+        label: "Rows",
+        fields: config.rows.map((f) => getDimensionLabel(config, f)),
+      });
+    if (config.columns.length > 0)
+      segments.push({
+        label: "Cols",
+        fields: config.columns.map((f) => getDimensionLabel(config, f)),
+      });
+    const valueFields = getRenderedValueFields(config);
+    if (valueFields.length > 0)
+      segments.push({
+        label: "Values",
+        fields: valueFields.map((f) => getRenderedValueLabel(config, f)),
+      });
+    if (segments.length === 0) return null;
+    return segments.map((seg, i) => (
+      <span key={seg.label}>
+        {i > 0 && <span className={styles.compactDot}> | </span>}
+        <span className={styles.compactSectionLabel}>{seg.label}:</span>{" "}
+        <span className={styles.compactSectionFields}>
+          {seg.fields.join(", ")}
+        </span>
+      </span>
+    ));
+  }, [config]);
+
+  const activeFilterCount = useMemo(() => {
+    // Count all active filters regardless of zone — includes header-menu filters
+    // applied to row/column dimensions, so they are never invisible in collapsed mode.
+    if (!config.filters) return 0;
+    return Object.keys(config.filters).length;
+  }, [config.filters]);
+
   // Zone card content helpers
   const syntheticMeasures = config.synthetic_measures ?? [];
   const valueOrder = useMemo(() => getRenderedValueFields(config), [config]);
@@ -621,118 +724,153 @@ const Toolbar: FC<ToolbarProps> = ({
       data-testid="pivot-toolbar"
       className={`${styles.toolbar} ${locked ? styles.toolbarLocked : ""}`}
     >
-      <DndContext
-        sensors={sensors}
-        collisionDetection={pointerWithin}
-        onDragStart={handleDragStartWithSettingsClose}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <ZoneCard
-          label="Rows"
-          testId="toolbar-rows"
-          zoneId="rows"
-          selected={config.rows}
-          disabled={locked}
-          frozenColumns={frozenColumns}
-          sortConfig={config.row_sort}
-          filters={config.filters}
-          isDropHighlighted={activeOverZone === "rows"}
-          activeId={activeId}
-          emptyHint={emptyHint}
-          onRemove={(field) => handleRemoveField("rows", field)}
-          displayLabelForField={(field) =>
-            getDimensionLabel(
-              config,
-              field,
-              columnTypes?.get(field),
-              adaptiveDateGrains?.[field],
-            )
-          }
-        />
-        <ZoneCard
-          label="Columns"
-          testId="toolbar-columns"
-          zoneId="columns"
-          selected={config.columns}
-          disabled={locked}
-          frozenColumns={frozenColumns}
-          sortConfig={config.col_sort}
-          filters={config.filters}
-          isDropHighlighted={activeOverZone === "columns"}
-          activeId={activeId}
-          emptyHint={emptyHint}
-          onRemove={(field) => handleRemoveField("columns", field)}
-          displayLabelForField={(field) =>
-            getDimensionLabel(
-              config,
-              field,
-              columnTypes?.get(field),
-              adaptiveDateGrains?.[field],
-            )
-          }
-        />
-        <ZoneCard
-          label="Values"
-          testId="toolbar-values"
-          zoneId="values"
-          selected={config.values}
-          disabled={locked}
-          frozenColumns={frozenColumns}
-          isDropHighlighted={activeOverZone === "values"}
-          activeId={activeId}
-          emptyHint={emptyHint}
-          isValues
-          aggregation={config.aggregation}
-          showValuesAs={config.show_values_as}
-          syntheticMeasures={syntheticMeasures}
-          renderedMeasures={valueOrder}
-          onAggregationChange={handleValueAggChange}
-          onRemove={(field) => handleRemoveField("values", field)}
-          onRemoveSynthetic={handleRemoveSynthetic}
-          aggPortalTarget={toolbarRef.current}
-          aggTestIdPrefix="toolbar-values-agg"
-          displayLabelForField={(field) => getRenderedValueLabel(config, field)}
-        />
-        <DragOverlay dropAnimation={{ duration: 200 }}>
-          {activeField ? (
-            activeField.zone === "synthetic" ? (
-              <SyntheticDragOverlayChip
-                syntheticId={activeField.field}
-                label={
-                  syntheticMeasures.find((m) => m.id === activeField.field)
-                    ?.label ?? activeField.field
-                }
-                testId="toolbar-values"
-              />
-            ) : (
-              <DragOverlayChip
-                field={activeField.field}
-                displayLabel={
-                  activeField.zone === "rows" || activeField.zone === "columns"
-                    ? getDimensionLabel(
-                        config,
-                        activeField.field,
-                        columnTypes?.get(activeField.field),
-                        adaptiveDateGrains?.[activeField.field],
-                      )
-                    : undefined
-                }
-                testId={`toolbar-${activeField.zone}`}
-                isValuesField={activeField.zone === "values"}
-                aggregationLabel={
-                  activeField.zone === "values"
-                    ? AGG_CHIP_LABELS[
-                        config.aggregation?.[activeField.field] ?? "sum"
-                      ]
-                    : undefined
-                }
-              />
-            )
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
+      {!sectionsExpanded ? (
+        /* ── Compact summary bar ── */
+        <div
+          className={styles.compactSummary}
+          data-testid="toolbar-compact-summary"
+        >
+          <button
+            type="button"
+            className={styles.expandBtn}
+            onClick={handleToggleSections}
+            title="Expand sections"
+            aria-label="Expand toolbar sections"
+            data-testid="toolbar-expand-sections"
+          >
+            ▸
+          </button>
+          <span className={styles.compactSummaryText}>
+            {compactSummaryText}
+          </span>
+          {activeFilterCount > 0 && (
+            <>
+              <div className={styles.filterDot} />
+              <span className={styles.filterDotLabel}>
+                {activeFilterCount === 1
+                  ? "1 filter"
+                  : `${activeFilterCount} filters`}
+              </span>
+            </>
+          )}
+        </div>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={pointerWithin}
+          onDragStart={handleDragStartWithSettingsClose}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
+          <ZoneCard
+            label="Rows"
+            testId="toolbar-rows"
+            zoneId="rows"
+            selected={config.rows}
+            disabled={locked}
+            frozenColumns={frozenColumns}
+            sortConfig={config.row_sort}
+            filters={config.filters}
+            isDropHighlighted={activeOverZone === "rows"}
+            activeId={activeId}
+            emptyHint={emptyHint}
+            onRemove={(field) => handleRemoveField("rows", field)}
+            displayLabelForField={(field) =>
+              getDimensionLabel(
+                config,
+                field,
+                columnTypes?.get(field),
+                adaptiveDateGrains?.[field],
+              )
+            }
+          />
+          <ZoneCard
+            label="Columns"
+            testId="toolbar-columns"
+            zoneId="columns"
+            selected={config.columns}
+            disabled={locked}
+            frozenColumns={frozenColumns}
+            sortConfig={config.col_sort}
+            filters={config.filters}
+            isDropHighlighted={activeOverZone === "columns"}
+            activeId={activeId}
+            emptyHint={emptyHint}
+            onRemove={(field) => handleRemoveField("columns", field)}
+            displayLabelForField={(field) =>
+              getDimensionLabel(
+                config,
+                field,
+                columnTypes?.get(field),
+                adaptiveDateGrains?.[field],
+              )
+            }
+          />
+          <ZoneCard
+            label="Values"
+            testId="toolbar-values"
+            zoneId="values"
+            selected={config.values}
+            disabled={locked}
+            frozenColumns={frozenColumns}
+            isDropHighlighted={activeOverZone === "values"}
+            activeId={activeId}
+            emptyHint={emptyHint}
+            isValues
+            aggregation={config.aggregation}
+            showValuesAs={config.show_values_as}
+            syntheticMeasures={syntheticMeasures}
+            renderedMeasures={valueOrder}
+            onAggregationChange={handleValueAggChange}
+            onRemove={(field) => handleRemoveField("values", field)}
+            onRemoveSynthetic={handleRemoveSynthetic}
+            aggPortalTarget={toolbarRef.current}
+            aggTestIdPrefix="toolbar-values-agg"
+            displayLabelForField={(field) =>
+              getRenderedValueLabel(config, field)
+            }
+          />
+          <DragOverlay dropAnimation={{ duration: 200 }}>
+            {activeField ? (
+              activeField.zone === "synthetic" ? (
+                <SyntheticDragOverlayChip
+                  syntheticId={activeField.field}
+                  label={
+                    syntheticMeasures.find((m) => m.id === activeField.field)
+                      ?.label ?? activeField.field
+                  }
+                  testId="toolbar-values"
+                />
+              ) : (
+                <DragOverlayChip
+                  field={activeField.field}
+                  displayLabel={
+                    activeField.zone === "rows" ||
+                    activeField.zone === "columns"
+                      ? getDimensionLabel(
+                          config,
+                          activeField.field,
+                          columnTypes?.get(activeField.field),
+                          adaptiveDateGrains?.[activeField.field],
+                        )
+                      : undefined
+                  }
+                  testId={`toolbar-${activeField.zone}`}
+                  isValuesField={activeField.zone === "values"}
+                  aggregationLabel={
+                    activeField.zone === "values"
+                      ? AGG_CHIP_LABELS[
+                          config.aggregation?.[activeField.field] ?? "sum"
+                        ]
+                      : undefined
+                  }
+                />
+              )
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      )}{" "}
+      {/* end sectionsExpanded */}
       <div
         ref={utilGroupRef}
         className={`${styles.utilGroup} ${settingsOpen ? styles.utilGroupPinned : ""}`}
@@ -899,6 +1037,33 @@ const Toolbar: FC<ToolbarProps> = ({
             </button>
           </span>
         )}
+        {!locked && onConfigChange && (
+          <span
+            className={styles.tooltipWrap}
+            data-tooltip={
+              sectionsExpanded ? "Collapse Sections" : "Expand Sections"
+            }
+          >
+            <button
+              data-testid="toolbar-toggle-sections"
+              data-toolbar-btn
+              tabIndex={-1}
+              className={`${styles.utilButton} ${styles.iconButton} ${!sectionsExpanded ? styles.iconButtonActive : ""}`}
+              onClick={handleToggleSections}
+              aria-label={
+                sectionsExpanded
+                  ? "Collapse toolbar sections"
+                  : "Expand toolbar sections"
+              }
+            >
+              {sectionsExpanded ? (
+                <SectionsCollapseIcon />
+              ) : (
+                <SectionsExpandIcon />
+              )}
+            </button>
+          </span>
+        )}
         <div ref={settingsWrapperRef} className={styles.settingsWrapper}>
           <span className={styles.tooltipWrap} data-tooltip="Table Settings">
             <button
@@ -927,6 +1092,9 @@ const Toolbar: FC<ToolbarProps> = ({
             open={settingsOpen}
             onClose={handleSettingsClose}
             excludeRef={settingsWrapperRef}
+            pivotData={pivotData}
+            filterFieldValues={filterFieldValues}
+            pickerPortalTarget={pickerPortalTarget}
           />
         </div>
       </div>
@@ -1262,6 +1430,48 @@ const CollapseIcon: FC = () => (
     <polyline points="20 10 14 10 14 4" />
     <line x1="14" y1="10" x2="21" y2="3" />
     <line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
+
+/** Panel-top icon with chevron up — "sections are visible, click to collapse" */
+const SectionsCollapseIcon: FC = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    {/* Panel outline */}
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    {/* Horizontal divider separating the "zones" area from the rest */}
+    <path d="M3 11h18" />
+    {/* Chevron up inside the zones area = collapse it upward */}
+    <polyline points="8 8 12 5 16 8" />
+  </svg>
+);
+
+/** Panel-top icon with chevron down — "sections are collapsed, click to expand" */
+const SectionsExpandIcon: FC = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    {/* Panel outline */}
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    {/* Horizontal divider */}
+    <path d="M3 11h18" />
+    {/* Chevron down inside the zones area = expand it back */}
+    <polyline points="8 5 12 8 16 5" />
   </svg>
 );
 

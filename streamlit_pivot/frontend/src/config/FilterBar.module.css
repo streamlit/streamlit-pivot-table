@@ -1,0 +1,134 @@
+/**
+ * Copyright 2025 Snowflake Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * FilterBar card — inline (single-row) layout matching the Rows/Columns/Values cards.
+ * The toolbar has padding: 10px 0 which creates the gap between its cards and the table.
+ * margin-bottom: 10px here mirrors that so spacing is consistent with and without the bar.
+ */
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--st-text-color) 10%, transparent);
+  border-radius: var(--st-base-radius);
+  font-family: var(--st-font);
+  font-size: var(--st-base-font-size);
+  /* Match toolbar padding-bottom so gap to table is the same with or without the bar */
+  margin-bottom: 10px;
+}
+
+/* "Filters" label — same as .sectionTitle in Toolbar.module.css */
+.filterTitle {
+  font-weight: 500;
+  font-size: 0.875em;
+  color: var(--st-text-color);
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+/* ── Filter chip — matches ZoneChip in SettingsPanel for visual consistency ── */
+
+.filterChipGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 3px 7px 3px 9px;
+  height: 24px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: var(--st-secondary-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.75em;
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+}
+
+.filterChipGroup:hover {
+  background: color-mix(in srgb, var(--st-text-color) 8%, var(--st-secondary-background-color));
+}
+
+.filterChipGroupActive:hover {
+  background: color-mix(in srgb, var(--st-primary-color) 18%, var(--st-background-color));
+}
+
+.filterChipGroup:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
+}
+
+.filterChipGroupActive {
+  background: color-mix(in srgb, var(--st-primary-color) 12%, var(--st-background-color));
+}
+
+
+/* Standalone ▾ button — matches .chipMenuBtn in SettingsPanel exactly */
+.filterChipMenuBtn {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--st-text-color);
+  opacity: 0.6;
+  padding: 0 2px;
+  font-size: 1.08em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+.filterChipMenuBtn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+
+/* Remove (×) button — matches .chipRemoveBtn in SettingsPanel.module.css */
+.filterChipClear {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--st-text-color);
+  opacity: 0.5;
+  padding: 0 2px;
+  font-size: 1.08em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  transition: opacity 0.1s, background 0.1s;
+}
+
+
+.filterChipClear:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+
+.filterChipClear:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
+}

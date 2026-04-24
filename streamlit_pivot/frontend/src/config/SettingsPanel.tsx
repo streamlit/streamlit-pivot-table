@@ -55,12 +55,14 @@ import {
   getSyntheticSourceFields,
   type AggregationConfig,
   type AggregationType,
+  type DimensionFilter,
   type PivotConfigV1,
   type RowLayout,
   type SyntheticMeasureConfig,
   showRowTotals as resolveShowRowTotals,
   showColumnTotals as resolveShowColumnTotals,
 } from "../engine/types";
+import type { PivotData } from "../engine/PivotData";
 import {
   formatWithPattern,
   isSupportedFormatPattern,
@@ -68,6 +70,7 @@ import {
 import { compileFormula as compileFormulaFn } from "../engine/formulaParser";
 import { useClickOutside } from "../shared/useClickOutside";
 import { useListboxKeyboard } from "../shared/useListboxKeyboard";
+import { FilterPickerPopover } from "../shared/FilterPickerPopover";
 import styles from "./SettingsPanel.module.css";
 
 // ---------------------------------------------------------------------------
@@ -134,7 +137,7 @@ const ROW_LAYOUT_OPTIONS = [
   { value: "hierarchy", label: "Hierarchy" },
 ] as const satisfies readonly BuilderSelectOption<RowLayout>[];
 
-type ZoneKey = "rows" | "columns" | "values";
+type ZoneKey = "rows" | "columns" | "values" | "filters";
 
 // ---------------------------------------------------------------------------
 // DnD routing logic (extracted for testability)
@@ -320,6 +323,29 @@ export function cleanupConfigAfterFieldChanges(
     delete updated.collapsed_col_groups;
   }
 
+  // Fields removed from filter_fields — apply dual-role cleanup:
+  // Only clear config.filters[field] if the field is not also in rows or columns.
+  const oldFilterFields = new Set(oldConfig.filter_fields ?? []);
+  const newFilterFields = new Set(updated.filter_fields ?? []);
+  const removedFromFilters = [...oldFilterFields].filter(
+    (f) => !newFilterFields.has(f),
+  );
+  if (removedFromFilters.length > 0 && updated.filters) {
+    const rowColSet = new Set([...updated.rows, ...updated.columns]);
+    let updatedFilters = { ...updated.filters };
+    let changed = false;
+    for (const field of removedFromFilters) {
+      if (!rowColSet.has(field) && field in updatedFilters) {
+        delete updatedFilters[field];
+        changed = true;
+      }
+    }
+    if (changed) {
+      updated.filters =
+        Object.keys(updatedFilters).length > 0 ? updatedFilters : undefined;
+    }
+  }
+
   return updated;
 }
 
@@ -343,6 +369,13 @@ export interface SettingsPanelProps {
   onClose: () => void;
   /** Ref to an ancestor element that should NOT trigger click-outside close (e.g. the settings button wrapper). */
   excludeRef?: React.RefObject<HTMLElement | null>;
+  /** PivotData instance — used to supply unique values to the filter picker in the Filters zone. */
+  pivotData?: PivotData;
+  /** Pre-computed unique values sidecar for off-axis fields (hybrid mode). */
+  filterFieldValues?: Record<string, string[]>;
+  /** Top-level portal target for picker popovers (should be PivotRoot's container so CSS vars
+   *  are inherited and the picker escapes the Settings panel's stacking context). */
+  pickerPortalTarget?: Element | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -517,6 +550,144 @@ const ZoneChip: FC<ZoneChipProps> = ({
             </button>
           ))}
         </div>
+      )}
+    </span>
+  );
+};
+
+// -- Filter zone chip: full-chip picker trigger + × remove --
+
+interface FilterZoneChipProps {
+  id: string;
+  field: string;
+  displayLabel?: string;
+  /** Staged filter for this field (from localFilters). */
+  filter: DimensionFilter | undefined;
+  uniqueValues: string[];
+  onFilterChange: (field: string, filter: DimensionFilter | undefined) => void;
+  onRemove: (field: string) => void;
+  /** Element to portal the picker into (for CSS var inheritance). */
+  portalTarget?: Element | null;
+}
+
+const FilterZoneChip: FC<FilterZoneChipProps> = ({
+  id,
+  field,
+  displayLabel,
+  filter,
+  uniqueValues,
+  onFilterChange,
+  onRemove,
+  portalTarget,
+}): ReactElement => {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const chipRef = useRef<HTMLSpanElement>(null);
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, data: { zone: "filters", field } });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : undefined,
+  };
+
+  const isActive = !!filter;
+
+  const handleChipClick = useCallback(
+    (e: React.MouseEvent<HTMLSpanElement>) => {
+      if (pickerOpen) {
+        setPickerOpen(false);
+        setAnchorRect(null);
+      } else {
+        setPickerOpen(true);
+        setAnchorRect(e.currentTarget.getBoundingClientRect());
+      }
+    },
+    [pickerOpen],
+  );
+
+  // Keep picker anchored to the chip while scrolling — mirrors InlineAggPicker behavior.
+  useEffect(() => {
+    if (!pickerOpen || !chipRef.current) return;
+    const el = chipRef.current;
+    const update = () => {
+      if (el.isConnected) setAnchorRect(el.getBoundingClientRect());
+    };
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [pickerOpen]);
+
+  const handlePickerChange = useCallback(
+    (newFilter: DimensionFilter | undefined) => {
+      onFilterChange(field, newFilter);
+    },
+    [field, onFilterChange],
+  );
+
+  const handlePickerClose = useCallback(() => {
+    setPickerOpen(false);
+    setAnchorRect(null);
+  }, []);
+
+  return (
+    <span
+      ref={(node) => {
+        setNodeRef(node);
+        (chipRef as React.MutableRefObject<HTMLSpanElement | null>).current =
+          node;
+      }}
+      className={`${styles.zoneChip} ${styles.zoneChipFilter} ${isDragging ? styles.zoneChipDragging : ""} ${isActive ? styles.zoneChipActive : ""}`}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={handleChipClick}
+      data-testid={`settings-filters-chip-${field}`}
+    >
+      <GripDotsIcon />
+      <span>{displayLabel ?? field}</span>
+      {/* ▾ button — visually identical to chipMenuBtn on Values chips; clicks bubble to outer span */}
+      <button
+        type="button"
+        className={styles.chipMenuBtn}
+        tabIndex={-1}
+        aria-hidden="true"
+      >
+        ▾
+      </button>
+      <button
+        type="button"
+        className={styles.chipRemoveBtn}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(field);
+        }}
+        aria-label={`Remove ${field}`}
+        data-testid={`settings-filters-remove-${field}`}
+      >
+        ×
+      </button>
+      {pickerOpen && anchorRect && (
+        <FilterPickerPopover
+          field={field}
+          filter={filter}
+          uniqueValues={uniqueValues}
+          onFilterChange={handlePickerChange}
+          onClose={handlePickerClose}
+          anchorRect={anchorRect}
+          portalTarget={portalTarget}
+        />
       )}
     </span>
   );
@@ -1314,6 +1485,9 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   open,
   onClose,
   excludeRef,
+  pivotData,
+  filterFieldValues,
+  pickerPortalTarget,
 }): ReactElement | null => {
   const panelRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1352,6 +1526,14 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     config.sticky_headers !== false,
   );
 
+  // Filters zone state
+  const [localFilterFields, setLocalFilterFields] = useState<string[]>(
+    () => config.filter_fields ?? [],
+  );
+  const [localFilters, setLocalFilters] = useState<
+    Record<string, DimensionFilter>
+  >(() => config.filters ?? {});
+
   // Search for available fields
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -1382,6 +1564,8 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       setLocalRowLayout(config.row_layout ?? "table");
       setLocalRepeatLabels(!!config.repeat_row_labels);
       setLocalStickyHeaders(config.sticky_headers !== false);
+      setLocalFilterFields(config.filter_fields ?? []);
+      setLocalFilters(config.filters ?? {});
       setSearchQuery("");
       setSynState(initialSyntheticState);
       configFingerprintRef.current = stringifyPivotConfig(config);
@@ -1444,6 +1628,39 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     [availableFields, normalizedSearch],
   );
 
+  // -- Filters zone context-sensitive removal --
+  const removeFromFilterZone = useCallback(
+    (field: string) => {
+      setLocalFilterFields((prev) => prev.filter((f) => f !== field));
+      const isDualRole = localRows.includes(field) || localCols.includes(field);
+      if (!isDualRole) {
+        // Field has no other UI surface — clear its filter selection
+        setLocalFilters((prev) => {
+          const next = { ...prev };
+          delete next[field];
+          return next;
+        });
+      }
+    },
+    [localRows, localCols],
+  );
+
+  // -- Update a staged filter value from the in-panel filter picker --
+  const handleLocalFilterChange = useCallback(
+    (field: string, filter: DimensionFilter | undefined) => {
+      setLocalFilters((prev) => {
+        const next = { ...prev };
+        if (filter) {
+          next[field] = filter;
+        } else {
+          delete next[field];
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
   // -- Add field to zone --
   const addToZone = useCallback(
     (field: string, zone: ZoneKey) => {
@@ -1460,9 +1677,13 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
           setLocalVals(nextVals);
           setLocalAgg((agg) => normalizeAggregationConfig(agg, nextVals));
         }
+      } else if (zone === "filters") {
+        // No mutual exclusion — filters zone allows dual-role fields
+        if (!localFilterFields.includes(field))
+          setLocalFilterFields((f) => [...f, field]);
       }
     },
-    [localRows, localCols, localVals, numericSet],
+    [localRows, localCols, localVals, localFilterFields, numericSet],
   );
 
   // -- Remove from zone --
@@ -1477,9 +1698,11 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
         const nextVals = localVals.filter((f) => f !== field);
         setLocalVals(nextVals);
         setLocalAgg((agg) => normalizeAggregationConfig(agg, nextVals));
+      } else if (zone === "filters") {
+        removeFromFilterZone(field);
       }
     },
-    [frozenColumns, localVals],
+    [frozenColumns, localVals, removeFromFilterZone],
   );
 
   // -- Move between zones (validates constraints before mutating) --
@@ -1501,6 +1724,32 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
         localRows.includes(field)
       )
         return;
+
+      // Filters zone: add to filter_fields from source zone, but don't remove
+      // from source zone (dual-role: field can be in both rows/cols AND filters).
+      if (toZone === "filters") {
+        setLocalFilterFields((arr) =>
+          arr.includes(field) ? arr : [...arr, field],
+        );
+        return;
+      }
+
+      // Moving OUT of filters zone to another zone
+      if (fromZone === "filters") {
+        removeFromFilterZone(field);
+        const setterTo =
+          toZone === "rows"
+            ? setLocalRows
+            : toZone === "columns"
+              ? setLocalCols
+              : setLocalVals;
+        setterTo((arr) => (arr.includes(field) ? arr : [...arr, field]));
+        if (toZone === "values") {
+          const nextVals = [...localVals, field];
+          setLocalAgg((agg) => normalizeAggregationConfig(agg, nextVals));
+        }
+        return;
+      }
 
       const setterFor = (z: ZoneKey) =>
         z === "rows"
@@ -1525,7 +1774,14 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
         setLocalAgg((agg) => normalizeAggregationConfig(agg, nextVals));
       }
     },
-    [frozenColumns, numericSet, localVals, localRows, localCols],
+    [
+      frozenColumns,
+      numericSet,
+      localVals,
+      localRows,
+      localCols,
+      removeFromFilterZone,
+    ],
   );
 
   // -- Aggregation change --
@@ -1614,6 +1870,17 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       const inRows = localRows.includes(field);
       const inCols = localCols.includes(field);
       const inVals = localVals.includes(field);
+      const inFilters = localFilterFields.includes(field);
+
+      // Field is only in the Filters zone
+      if (inFilters && !inRows && !inCols && !inVals) {
+        return [
+          {
+            label: "Remove from Filters",
+            action: () => removeFromFilterZone(field),
+          },
+        ];
+      }
 
       if (!inRows && !inCols && !inVals) {
         const items: { label: string; action: () => void }[] = [
@@ -1629,14 +1896,40 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
             action: () => addToZone(field, "values"),
           });
         }
+        items.push({
+          label: "Add to Filters",
+          action: () => addToZone(field, "filters"),
+        });
         return items;
       }
 
       if (inRows) {
-        return getRowChipMenu(field);
+        const menu = getRowChipMenu(field);
+        if (!inFilters)
+          menu.push({
+            label: "Also add to Filters",
+            action: () => addToZone(field, "filters"),
+          });
+        else
+          menu.push({
+            label: "Remove from Filters",
+            action: () => removeFromFilterZone(field),
+          });
+        return menu;
       }
       if (inCols) {
-        return getColChipMenu(field);
+        const menu = getColChipMenu(field);
+        if (!inFilters)
+          menu.push({
+            label: "Also add to Filters",
+            action: () => addToZone(field, "filters"),
+          });
+        else
+          menu.push({
+            label: "Remove from Filters",
+            action: () => removeFromFilterZone(field),
+          });
+        return menu;
       }
       if (inVals) {
         return getValChipMenu(field);
@@ -1648,8 +1941,10 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       localRows,
       localCols,
       localVals,
+      localFilterFields,
       numericSet,
       addToZone,
+      removeFromFilterZone,
       getRowChipMenu,
       getColChipMenu,
       getValChipMenu,
@@ -2057,7 +2352,9 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
             ? setLocalRows
             : zone === "columns"
               ? setLocalCols
-              : setLocalVals;
+              : zone === "filters"
+                ? setLocalFilterFields
+                : setLocalVals;
         setter((arr) => {
           const oldIdx = arr.indexOf(field);
           const newIdx = arr.indexOf(overField);
@@ -2124,6 +2421,9 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       repeat_row_labels:
         localRowLayout === "table" && localRepeatLabels ? true : undefined,
       sticky_headers: localStickyHeaders,
+      filter_fields:
+        localFilterFields.length > 0 ? localFilterFields : undefined,
+      filters: Object.keys(localFilters).length > 0 ? localFilters : undefined,
     };
 
     // Reconcile unified value_order against the resolved values / synthetics.
@@ -2173,6 +2473,8 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localRowLayout,
     localRepeatLabels,
     localStickyHeaders,
+    localFilterFields,
+    localFilters,
     onConfigChange,
     onClose,
   ]);
@@ -2299,6 +2601,9 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     if (localRowLayout !== (config.row_layout ?? "table")) return true;
     if (localRepeatLabels !== !!config.repeat_row_labels) return true;
     if (localStickyHeaders !== (config.sticky_headers !== false)) return true;
+    if (!arrEq(localFilterFields, config.filter_fields ?? [])) return true;
+    if (JSON.stringify(localFilters) !== JSON.stringify(config.filters ?? {}))
+      return true;
     return false;
   }, [
     config,
@@ -2314,6 +2619,8 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localRowLayout,
     localRepeatLabels,
     localStickyHeaders,
+    localFilterFields,
+    localFilters,
   ]);
 
   // -- Panel open/close animation --
@@ -2452,7 +2759,8 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                   isAssigned={
                     localRows.includes(f) ||
                     localCols.includes(f) ||
-                    localVals.includes(f)
+                    localVals.includes(f) ||
+                    localFilterFields.includes(f)
                   }
                   chipRef={(el) => {
                     if (el) availChipRefs.current.set(f, el);
@@ -2500,6 +2808,41 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
               </div>,
               containerRef.current,
             )}
+
+          {/* Filters zone */}
+          <span className={styles.sectionTitle}>Filters</span>
+          <DropZone
+            zoneId="filters"
+            isActive={dragActiveZone === "filters" && !dragActiveZoneInvalid}
+            isInvalid={dragActiveZone === "filters" && dragActiveZoneInvalid}
+          >
+            <SortableContext
+              items={localFilterFields.map((f) => makeZoneItemId("filters", f))}
+              strategy={horizontalListSortingStrategy}
+            >
+              {localFilterFields.length === 0 ? (
+                <span className={styles.zoneEmpty}>Drop fields here</span>
+              ) : (
+                localFilterFields.map((field) => (
+                  <FilterZoneChip
+                    key={field}
+                    id={makeZoneItemId("filters", field)}
+                    field={field}
+                    displayLabel={getDimensionLabel(config, field)}
+                    filter={localFilters[field]}
+                    uniqueValues={
+                      filterFieldValues?.[field] ??
+                      pivotData?.getUniqueValues(field) ??
+                      []
+                    }
+                    onFilterChange={handleLocalFilterChange}
+                    onRemove={removeFromFilterZone}
+                    portalTarget={pickerPortalTarget ?? containerRef.current}
+                  />
+                ))
+              )}
+            </SortableContext>
+          </DropZone>
 
           {/* Rows zone */}
           <span className={styles.sectionTitle}>Rows</span>

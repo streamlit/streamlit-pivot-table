@@ -16,7 +16,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen, fireEvent } from "@testing-library/react";
 import { tableToIPC, tableFromArrays } from "apache-arrow";
 import PivotRoot from "./PivotRoot";
 import type { PivotRootProps } from "./PivotRoot";
@@ -356,5 +356,173 @@ describe("PivotRoot - adaptive grain invalidation", () => {
     await flush();
 
     expect(findConfigCall(setStateValue)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PivotRoot — FilterBar visibility and handleRemoveFilterField
+// ---------------------------------------------------------------------------
+
+function makeSimpleDataframe(): Uint8Array {
+  return makeArrowBytes({
+    region: ["East", "West"],
+    category: ["A", "B"],
+    revenue: [100, 200],
+  });
+}
+
+describe("PivotRoot - FilterBar rendering", () => {
+  it("renders FilterBar when filter_fields is non-empty and show_sections is not false", async () => {
+    const props = makeBaseProps({
+      config: makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        filter_fields: ["category"],
+      }),
+      dataframe: makeSimpleDataframe(),
+      original_column_types: {},
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+    expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+  });
+
+  it("does not render FilterBar when filter_fields is empty", async () => {
+    const props = makeBaseProps({
+      config: makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+      }),
+      dataframe: makeSimpleDataframe(),
+      original_column_types: {},
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+    expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
+  });
+
+  it("does not render FilterBar when show_sections=false", async () => {
+    const props = makeBaseProps({
+      config: makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        filter_fields: ["category"],
+        show_sections: false,
+      }),
+      dataframe: makeSimpleDataframe(),
+      original_column_types: {},
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+    expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
+  });
+});
+
+describe("PivotRoot - handleRemoveFilterField", () => {
+  it("clicking × on FilterBar chip removes field from filter_fields and clears its filter", async () => {
+    const setStateValue = vi.fn();
+    const props = makeBaseProps({
+      config: makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        filter_fields: ["category", "region"],
+        filters: { category: { include: ["A"] } },
+      }),
+      dataframe: makeSimpleDataframe(),
+      original_column_types: {},
+      setStateValue,
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+
+    // Click × on the category chip
+    fireEvent.click(screen.getByTestId("filter-chip-clear-category"));
+    await flush();
+
+    const updatedConfig = findConfigCall(setStateValue);
+    expect(updatedConfig).toBeDefined();
+    expect((updatedConfig!.filter_fields as string[]) ?? []).not.toContain(
+      "category",
+    );
+    expect(updatedConfig!.filter_fields as string[]).toContain("region");
+    // filter for category should be cleared
+    expect(
+      (updatedConfig!.filters as Record<string, unknown> | undefined)?.[
+        "category"
+      ],
+    ).toBeUndefined();
+  });
+
+  it("removing last filter field clears filter_fields entirely", async () => {
+    const setStateValue = vi.fn();
+    const props = makeBaseProps({
+      config: makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        filter_fields: ["category"],
+        filters: { category: { include: ["A"] } },
+      }),
+      dataframe: makeSimpleDataframe(),
+      original_column_types: {},
+      setStateValue,
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("filter-chip-clear-category"));
+    await flush();
+
+    const updatedConfig = findConfigCall(setStateValue);
+    expect(updatedConfig).toBeDefined();
+    expect(
+      (updatedConfig!.filter_fields as string[] | undefined) ?? [],
+    ).toHaveLength(0);
+    expect(updatedConfig!.filters).toBeUndefined();
+  });
+
+  it("removing a dual-role field from filter_fields preserves its header-menu filter", async () => {
+    const setStateValue = vi.fn();
+    const props = makeBaseProps({
+      config: makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        // region is both in rows AND filter_fields — it is dual-role
+        filter_fields: ["region", "category"],
+        filters: {
+          region: { include: ["East"] }, // applied via header-menu / FilterBar
+          category: { include: ["A"] },
+        },
+      }),
+      dataframe: makeSimpleDataframe(),
+      original_column_types: {},
+      setStateValue,
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+
+    // Remove region from the FilterBar — it must stay in rows, filter must survive
+    fireEvent.click(screen.getByTestId("filter-chip-clear-region"));
+    await flush();
+
+    const updatedConfig = findConfigCall(setStateValue);
+    expect(updatedConfig).toBeDefined();
+    // region removed from filter_fields
+    expect(
+      (updatedConfig!.filter_fields as string[] | undefined) ?? [],
+    ).not.toContain("region");
+    // but its filter entry MUST be kept (dual-role: still in rows)
+    expect(
+      (updatedConfig!.filters as Record<string, unknown>)?.["region"],
+    ).toEqual({ include: ["East"] });
+    // category filter is unaffected
+    expect(
+      (updatedConfig!.filters as Record<string, unknown>)?.["category"],
+    ).toEqual({ include: ["A"] });
   });
 });

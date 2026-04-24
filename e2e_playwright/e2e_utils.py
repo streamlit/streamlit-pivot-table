@@ -244,7 +244,21 @@ def open_settings_panel(page: Page, container: Locator) -> Locator:
     button.scroll_into_view_if_needed()
     button.evaluate("el => el.click()")
     expect(panel).to_be_visible(timeout=5000)
-    page.wait_for_timeout(100)
+    # Wait for at least one available-field chip to confirm that allColumns has
+    # been populated from the Arrow dataframe (not just the outer panel div).
+    # On a loaded CI runner, React 18's concurrent renderer can commit the panel
+    # wrapper before a subsequent data-delivery render cycle completes, leaving
+    # allColumns=[] momentarily.  Locked panels have no field chips; swallow the
+    # timeout so callers that open locked-panel views aren't affected.
+    try:
+        panel.locator("[data-testid^='settings-available-']").first.wait_for(
+            state="visible", timeout=10000
+        )
+        # Allow the one-shot ResizeObserver (available-fields container height)
+        # to fire before callers read bounding boxes, e.g. for DnD drag targets.
+        page.wait_for_timeout(200)
+    except Exception:
+        page.wait_for_timeout(100)
     return panel
 
 

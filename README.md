@@ -114,12 +114,20 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 
 > **Frontend-only interactions:** Drag-and-drop field reordering/moving, column resize (drag header edges), and fullscreen mode (toolbar expand icon) are available automatically when `interactive=True`. No additional Python parameters are needed.
 
+#### Filters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Initial user-facing dimension filters stored in the frontend config. Maps field name to `{"include": [...]}` or `{"exclude": [...]}`. Values are matched using **resolved-value semantics** (same as the interactive header-menu filter): for dates compare at the effective grain (e.g. `"2023 Q1"`), for null buckets use the display string (e.g. `"(empty)"`). Any filter key not already in `filter_fields` or the current `rows`/`columns` layout is automatically added to `filter_fields` so there is never a hidden active filter. Use `source_filters` for server-only filters that should not be exposed to the user. |
+| `filter_fields` | `list[str] \| None` | `None` | Ordered list of dimension fields to place in the Filters zone. Fields appear as interactive chips in the FilterBar (when sections are expanded) and in the Settings panel's Filters zone. A field can be in both `rows`/`columns` and `filter_fields` simultaneously (dual-role). |
+| `show_sections` | `bool \| None` | `True` | Whether the toolbar sections (Rows, Columns, Values cards and FilterBar) are expanded. `False` collapses them into a compact single-line summary that still shows active-filter count. Users can toggle interactively with the collapse/expand button. |
+| `source_filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Server-only report-level filters applied before any pivot processing. `include` takes precedence over `exclude`. `None` matches null-like values, `""` matches only literal empty strings, and no type coercion is performed. |
+
 #### Data Control
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `null_handling` | `str \| dict[str, str] \| None` | `None` | How to treat null/NaN values. See [Null Handling](#null-handling). |
-| `source_filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Server-only report-level filters applied before any pivot processing. `include` takes precedence over `exclude`. `None` matches null-like values, `""` matches only literal empty strings, and no type coercion is performed. |
 | `hidden_attributes` | `list[str] \| None` | `None` | Column names to hide entirely from the UI. |
 | `hidden_from_aggregators` | `list[str] \| None` | `None` | Column names hidden from the values/aggregators dropdown only. |
 | `frozen_columns` | `list[str] \| None` | `None` | Column names that cannot be removed from their toolbar zone and cannot be reordered or moved via drag-and-drop. Frozen chips render without a drag handle. |

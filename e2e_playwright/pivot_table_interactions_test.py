@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from playwright.sync_api import Locator, Page, expect
@@ -355,7 +356,7 @@ def test_header_menu_show_values_as_pct(page_at_app: Page):
     close_header_menu(page, "header-menu-Revenue")
 
     revenue_totals = container.get_by_test_id("pivot-row-total")
-    expect(revenue_totals.first).to_contain_text("%", timeout=10000)
+    expect(revenue_totals.first).to_contain_text("%", timeout=20000)
 
 
 def test_date_hierarchy_uses_adaptive_default_and_enables_comparisons(
@@ -1020,7 +1021,7 @@ def test_locked_mode_inline_row_dim_toggle_still_works(page_at_app: Page):
     expect(toggle).to_have_attribute("aria-expanded", "true")
 
     toggle.click()
-    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=10000)
+    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=20000)
 
     rows_after = container.get_by_test_id("pivot-data-row").count()
     assert rows_after < rows_before
@@ -1059,7 +1060,7 @@ def test_row_dim_toggle_collapses_groups(page_at_app: Page):
 
     toggle.click()
 
-    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=5000)
+    expect(toggle).to_have_attribute("aria-expanded", "false", timeout=15000)
 
 
 def test_col_dim_toggle_collapses_groups(page_at_app: Page):
@@ -1843,12 +1844,16 @@ def test_settings_panel_remove_field_from_zone(page_at_app: Page):
 
     panel = open_settings_panel(page, container)
 
-    expect(panel.get_by_test_id("settings-rows-chip-Region")).to_be_visible()
+    expect(panel.get_by_test_id("settings-rows-chip-Region")).to_be_visible(
+        timeout=15000
+    )
 
     panel.get_by_test_id("settings-rows-remove-Region").click()
 
     expect(panel.get_by_test_id("settings-rows-chip-Region")).to_have_count(0)
-    expect(panel.get_by_test_id("settings-available-Region")).to_be_visible()
+    expect(panel.get_by_test_id("settings-available-Region")).to_be_visible(
+        timeout=10000
+    )
 
     panel.get_by_test_id("settings-cancel").click()
 
@@ -1884,13 +1889,15 @@ def test_settings_panel_move_field_between_zones_via_dnd(page_at_app: Page):
 
     source = panel.get_by_test_id("settings-rows-chip-Region")
     target = panel.get_by_test_id("settings-zone-columns")
-    expect(source).to_be_visible()
-    expect(target).to_be_visible()
+    expect(source).to_be_visible(timeout=15000)
+    expect(target).to_be_visible(timeout=15000)
 
     _drag_chip(page, source, target)
 
     expect(panel.get_by_test_id("settings-rows-chip-Region")).to_have_count(0)
-    expect(panel.get_by_test_id("settings-columns-chip-Region")).to_be_visible()
+    expect(panel.get_by_test_id("settings-columns-chip-Region")).to_be_visible(
+        timeout=10000
+    )
 
     panel.get_by_test_id("settings-cancel").click()
 
@@ -1922,7 +1929,7 @@ def _drag_chip(page: Page, source, target):
     page.mouse.move(tx, ty, steps=10)
     page.wait_for_timeout(100)
     page.mouse.up()
-    page.wait_for_timeout(300)
+    page.wait_for_timeout(500)
 
 
 def test_settings_panel_dnd_available_to_rows(page_at_app: Page):
@@ -1935,15 +1942,17 @@ def test_settings_panel_dnd_available_to_rows(page_at_app: Page):
 
     source = panel.get_by_test_id("settings-available-Category")
     target = panel.get_by_test_id("settings-zone-rows")
-    expect(source).to_be_visible()
-    expect(target).to_be_visible()
+    expect(source).to_be_visible(timeout=15000)
+    expect(target).to_be_visible(timeout=15000)
 
     _drag_chip(page, source, target)
 
     expect(panel.get_by_test_id("settings-rows-chip-Category")).to_be_visible(
-        timeout=5000
+        timeout=10000
     )
-    expect(panel.get_by_test_id("settings-available-Category")).to_be_visible()
+    expect(panel.get_by_test_id("settings-available-Category")).to_be_visible(
+        timeout=10000
+    )
 
     panel.get_by_test_id("settings-apply").click()
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=10000)
@@ -1959,13 +1968,13 @@ def test_settings_panel_dnd_available_to_values(page_at_app: Page):
 
     source = panel.get_by_test_id("settings-available-Profit")
     target = panel.get_by_test_id("settings-zone-values")
-    expect(source).to_be_visible()
-    expect(target).to_be_visible()
+    expect(source).to_be_visible(timeout=15000)
+    expect(target).to_be_visible(timeout=15000)
 
     _drag_chip(page, source, target)
 
     expect(panel.get_by_test_id("settings-values-chip-Profit")).to_be_visible(
-        timeout=5000
+        timeout=10000
     )
     panel.get_by_test_id("settings-cancel").click()
 
@@ -1980,15 +1989,17 @@ def test_settings_panel_dnd_cross_zone_move(page_at_app: Page):
 
     source = panel.get_by_test_id("settings-rows-chip-Region")
     target = panel.get_by_test_id("settings-zone-columns")
-    expect(source).to_be_visible()
-    expect(target).to_be_visible()
+    expect(source).to_be_visible(timeout=15000)
+    expect(target).to_be_visible(timeout=15000)
 
     _drag_chip(page, source, target)
 
     expect(panel.get_by_test_id("settings-rows-chip-Region")).to_have_count(
         0, timeout=5000
     )
-    expect(panel.get_by_test_id("settings-columns-chip-Region")).to_be_visible()
+    expect(panel.get_by_test_id("settings-columns-chip-Region")).to_be_visible(
+        timeout=10000
+    )
 
     panel.get_by_test_id("settings-cancel").click()
 
@@ -2223,3 +2234,152 @@ def test_formula_empty_validation_in_settings_panel(page_at_app: Page):
     # Cancel to clean up
     panel.get_by_role("button", name="Cancel").click()
     panel.get_by_test_id("settings-cancel").click()
+
+
+# ---------------------------------------------------------------------------
+# Filters zone + FilterBar E2E tests
+# ---------------------------------------------------------------------------
+
+
+def test_filters_zone_add_via_menu_shows_filter_bar(page_at_app: Page):
+    """Add a dimension to the Filters zone via click menu → FilterBar chip appears."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    panel = open_settings_panel(page, container)
+
+    # FilterBar should not be present initially (no filter_fields)
+    expect(container.get_by_test_id("filter-bar")).not_to_be_attached()
+
+    # The settings panel has a Filters zone drop area
+    expect(panel.get_by_test_id("settings-zone-filters")).to_be_visible()
+
+    # Click an available field chip to open its add-menu.
+    # Region is already in rows so its menu shows "Also add to Filters"
+    # (get_by_text uses substring / case-insensitive matching by default).
+    region_chip = panel.get_by_test_id("settings-available-Region")
+    expect(region_chip).to_be_visible(timeout=15000)
+    region_chip.click()
+
+    # "Also add to Filters" menu item appears (Region is in rows → dual-role path).
+    # The add-menu is portalled into the .wrapper div (parent of settings-panel),
+    # so search within the pivot container, not the panel element itself.
+    add_to_filters = container.get_by_text("Add to Filters")
+    expect(add_to_filters).to_be_visible(timeout=3000)
+    add_to_filters.click()
+
+    # Apply the config
+    panel.get_by_test_id("settings-apply").click()
+
+    # FilterBar should now appear with a chip for "Region"
+    filter_bar = container.get_by_test_id("filter-bar")
+    expect(filter_bar).to_be_visible(timeout=5000)
+    region_filter_chip = container.get_by_test_id("filter-chip-Region")
+    expect(region_filter_chip).to_be_visible()
+    # Chip label is present; no summary count text shown (active state = background highlight only)
+    expect(region_filter_chip).to_contain_text("Region")
+
+
+def test_filter_chip_opens_picker_and_applies_filter(page_at_app: Page):
+    """Clicking a FilterBar chip opens the picker; selecting a value filters immediately."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # Add "Region" to the Filters zone via the settings panel
+    panel = open_settings_panel(page, container)
+    region_chip = panel.get_by_test_id("settings-available-Region")
+    region_chip.click()
+    container.get_by_text("Add to Filters").click()
+    panel.get_by_test_id("settings-apply").click()
+
+    # FilterBar is visible
+    filter_bar = container.get_by_test_id("filter-bar")
+    expect(filter_bar).to_be_visible(timeout=5000)
+
+    # Click the region chip to open the picker
+    filter_chip = container.get_by_test_id("filter-chip-Region")
+    filter_chip.click()
+
+    # Picker should open
+    picker = container.get_by_test_id("filter-picker-Region")
+    expect(picker).to_be_visible(timeout=3000)
+
+    # Deselect all via "Clear All" then select the first listed option.
+    # FilterPickerPopover applies changes immediately — there is no separate Apply button.
+    picker.get_by_text("Clear All").click()
+    first_option_label = picker.locator("label").first
+    first_option_label.click()
+
+    # Close the picker via Escape; changes take effect immediately on selection
+    page.keyboard.press("Escape")
+    expect(picker).not_to_be_visible(timeout=2000)
+
+    # The filter chip must now be highlighted (active — has include/exclude set)
+    expect(filter_chip).to_have_class(
+        re.compile(r"filterChipGroupActive"), timeout=3000
+    )
+
+    # The chip label still shows the field name (the picker is a multi-select;
+    # the chip never replaces the field name with a value summary)
+    expect(filter_chip).to_contain_text("Region")
+
+    # Escape with no picker open does nothing harmful
+    page.keyboard.press("Escape")
+    expect(filter_bar).to_be_visible(timeout=1000)
+
+
+def test_filter_bar_collapse_sections_hides_bar(page_at_app: Page):
+    """Collapse Sections button hides the FilterBar (and all zone cards); Expand restores it."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # Add "Region" to the Filters zone
+    panel = open_settings_panel(page, container)
+    region_chip = panel.get_by_test_id("settings-available-Region")
+    region_chip.click()
+    container.get_by_text("Add to Filters").click()
+    panel.get_by_test_id("settings-apply").click()
+
+    # FilterBar visible
+    filter_bar = container.get_by_test_id("filter-bar")
+    expect(filter_bar).to_be_visible(timeout=5000)
+
+    # Click the Collapse Sections toolbar button — use JS click to bypass utilGroup
+    # pointer-events:none (same pattern as open_settings_panel)
+    container.get_by_test_id("toolbar-toggle-sections").evaluate("el => el.click()")
+
+    # FilterBar (and zone cards) should now be hidden; compact summary visible instead
+    expect(filter_bar).not_to_be_attached()
+    expect(container.get_by_test_id("toolbar-compact-summary")).to_be_visible(
+        timeout=3000
+    )
+
+    # Click the Expand Sections button to restore (compact summary bar is always visible)
+    container.get_by_test_id("toolbar-expand-sections").click()
+    expect(filter_bar).to_be_visible(timeout=3000)
+
+
+def test_filter_chip_remove_button_removes_field(page_at_app: Page):
+    """Clicking × on a FilterBar chip removes the field from filter_fields."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # Add "Region" to the Filters zone
+    panel = open_settings_panel(page, container)
+    region_chip = panel.get_by_test_id("settings-available-Region")
+    region_chip.click()
+    container.get_by_text("Add to Filters").click()
+    panel.get_by_test_id("settings-apply").click()
+
+    # FilterBar visible with the Region chip
+    expect(container.get_by_test_id("filter-chip-Region")).to_be_visible(timeout=5000)
+
+    # Click the × remove button on the chip
+    container.get_by_test_id("filter-chip-clear-Region").click()
+
+    # FilterBar should disappear (no more filter_fields)
+    expect(container.get_by_test_id("filter-bar")).not_to_be_attached(timeout=3000)

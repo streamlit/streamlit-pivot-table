@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 from e2e_utils import APP_CONFIGS, StreamlitRunner
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 
 @pytest.fixture(scope="session")
@@ -87,6 +87,13 @@ def page_at_app(app, page: Page):
 
 
 def pytest_configure(config):
+    # Raise the default Playwright assertion timeout from 5 s to 15 s.  The
+    # interactions app renders 25+ pivot components per worker; on a loaded
+    # 4-vCPU CI runner with 3 concurrent browser workers this causes random
+    # assertion timeouts across the whole suite.  Individual assertions that
+    # already pass an explicit timeout= parameter are NOT affected.
+    expect.set_options(timeout=15000)
+
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )

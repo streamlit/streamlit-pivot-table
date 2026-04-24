@@ -33,8 +33,8 @@ def test_can_use_threshold_hybrid_accepts_avg(pivot_module):
     assert ok is True
 
 
-def test_non_dimension_filter_causes_fallback(pivot_module):
-    """Filter on a field not in rows/columns makes hybrid incompatible."""
+def test_off_axis_filter_compatible_with_hybrid(pivot_module):
+    """Off-axis filters are handled server-side; config is always hybrid-compatible."""
     cfg = {
         "rows": ["region"],
         "columns": ["year"],
@@ -43,8 +43,8 @@ def test_non_dimension_filter_causes_fallback(pivot_module):
         "filters": {"category": {"include": ["A"]}},
     }
     ok, msg = pivot_module._can_use_threshold_hybrid(cfg)
-    assert ok is False
-    assert "category" in msg
+    assert ok is True
+    assert "compatible" in msg
 
 
 def test_dimension_filter_allows_hybrid(pivot_module):
@@ -1552,3 +1552,122 @@ class TestAdaptiveGrainFingerprint:
             adaptive_date_grains={"d": "year"},
         )
         assert fp1 != fp2
+
+
+# ---------------------------------------------------------------------------
+# _compute_filter_field_values sidecar
+# ---------------------------------------------------------------------------
+
+
+class TestComputeFilterFieldValues:
+    """Regression coverage for the hybrid-mode filter_field_values sidecar."""
+
+    def _df(self):
+        return pd.DataFrame(
+            {
+                "region": ["East", "West", "East", "West", "East"],
+                "category": ["A", "B", "A", "A", "B"],
+                "revenue": [100, 200, 150, 50, 300],
+            }
+        )
+
+    def _cfg(self, filter_fields, rows=None, columns=None):
+        return {
+            "version": 1,
+            "rows": rows or ["region"],
+            "columns": columns or [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "sum"},
+            "filter_fields": filter_fields,
+        }
+
+    def test_off_axis_field_returns_unique_sorted_values(self, pivot_module):
+        df = self._df()
+        cfg = self._cfg(filter_fields=["category"])
+        result = pivot_module._compute_filter_field_values(df, cfg, None)
+        assert result is not None
+        assert "category" in result
+        assert result["category"] == ["A", "B"]
+
+    def test_on_axis_field_is_skipped(self, pivot_module):
+        """Fields already in rows/columns are indexed client-side; sidecar omits them."""
+        df = self._df()
+        cfg = self._cfg(filter_fields=["region"])  # region is also in rows
+        result = pivot_module._compute_filter_field_values(df, cfg, None)
+        # on-axis field → skipped → no entries → None returned
+        assert result is None
+
+    def test_mixed_on_and_off_axis(self, pivot_module):
+        """Only off-axis fields appear in the sidecar."""
+        df = self._df()
+        cfg = self._cfg(
+            filter_fields=["region", "category"]
+        )  # region on-axis, category off-axis
+        result = pivot_module._compute_filter_field_values(df, cfg, None)
+        assert result is not None
+        assert "category" in result
+        assert "region" not in result
+
+    def test_empty_filter_fields_returns_none(self, pivot_module):
+        df = self._df()
+        cfg = self._cfg(filter_fields=[])
+        result = pivot_module._compute_filter_field_values(df, cfg, None)
+        assert result is None
+
+    def test_no_filter_fields_key_returns_none(self, pivot_module):
+        df = self._df()
+        cfg = {
+            "version": 1,
+            "rows": ["region"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "sum"},
+        }
+        result = pivot_module._compute_filter_field_values(df, cfg, None)
+        assert result is None
+
+    def test_values_use_pre_filter_dataframe(self, pivot_module):
+        """Sidecar uses df BEFORE config.filters so all possible values are present."""
+        df = self._df()
+        # If the df is already pre-filtered to only "East", sidecar should reflect that,
+        # demonstrating the sidecar reflects whatever df is passed in (pre-config-filter).
+        df_east_only = df[df["region"] == "East"].copy()
+        cfg = self._cfg(filter_fields=["category"])
+        result = pivot_module._compute_filter_field_values(df_east_only, cfg, None)
+        assert result is not None
+        # Only categories present in East rows are returned
+        assert set(result["category"]) == {"A", "B"}  # both A and B appear in East
+
+    def test_missing_field_is_skipped_gracefully(self, pivot_module):
+        df = self._df()
+        cfg = self._cfg(filter_fields=["nonexistent_field", "category"])
+        result = pivot_module._compute_filter_field_values(df, cfg, None)
+        assert result is not None
+        assert "nonexistent_field" not in result
+        assert "category" in result
+
+    def test_sidecar_emitted_in_hybrid_payload(
+        self, pivot_module, mount_recorder, sample_df
+    ):
+        """Integration: filter_field_values appears in the hybrid data payload."""
+        calls = mount_recorder()
+        # Replicate the df to cross the hybrid threshold
+        large_df = sample_df.loc[sample_df.index.repeat(20000)].reset_index(drop=True)
+        pivot_module.st_pivot_table(
+            large_df,
+            key="pivot",
+            rows=["Region"],
+            values=["Revenue"],
+            filter_fields=["Category"],  # Category is off-axis → sidecar expected
+            execution_mode="threshold_hybrid",
+        )
+        payload = calls[0]["data"]
+        assert (
+            payload["execution_mode"] == "threshold_hybrid"
+        ), "expected threshold_hybrid mode to be active"
+        # In hybrid mode the sidecar should be present for off-axis filter_fields
+        assert "filter_field_values" in payload, (
+            "filter_field_values sidecar must be present in threshold_hybrid payload "
+            "when off-axis filter_fields are configured"
+        )
+        assert "Category" in payload["filter_field_values"]

@@ -361,13 +361,16 @@ describe("PivotData - filtering", () => {
     expect(pd.getRowKeys()).toEqual([["EU"]]);
   });
 
-  it("filter on non-existent field is a no-op", () => {
+  it("filter on non-existent field is a no-op (column absent from data source — hybrid mode guard)", () => {
+    // Fields not present in the data source are skipped by _shouldIncludeRow.
+    // This prevents double-filtering in hybrid mode where off-axis fields are
+    // absent from the pre-aggregated frame but may still be present in config.filters.
     const pd = new PivotData(
       SAMPLE_DATA,
       makeConfig({ filters: { nonexistent: { include: ["x"] } } }),
     );
-    expect(pd.getGrandTotal().value()).toBeNull();
-    expect(pd.uniqueRowKeyCount).toBe(0);
+    expect(pd.getGrandTotal().value()).toBe(750); // all rows pass — filter is a no-op
+    expect(pd.uniqueRowKeyCount).toBe(2); // US and EU still present
   });
 
   it("all-excluded returns empty pivot", () => {

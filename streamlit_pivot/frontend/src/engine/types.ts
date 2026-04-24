@@ -175,6 +175,13 @@ export interface PivotConfigV1 {
   column_alignment?: Record<string, "left" | "center" | "right">;
   /** Phase 5: region-based visual styling. See PivotStyle for the full shape. */
   style?: PivotStyle;
+  /** Ordered list of dimension fields shown in the FilterBar above the table.
+   *  A field here may or may not have an entry in `filters`.
+   *  No entry = "All values" (no filtering). */
+  filter_fields?: string[];
+  /** Whether the toolbar sections (Rows/Columns/Values cards + FilterBar) are expanded.
+   *  Defaults to true (expanded). Set to false to collapse to a compact one-line summary. */
+  show_sections?: boolean;
   /**
    * Per-field display-label override. Populated from column_config.label.
    * Display-only: does NOT rewrite canonical field ids in rows/columns/values.
@@ -1434,6 +1441,20 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
   ) {
     result.style = o.style as PivotStyle;
   }
+  if (
+    o.filter_fields !== undefined &&
+    (!Array.isArray(o.filter_fields) ||
+      !(o.filter_fields as unknown[]).every((v) => typeof v === "string"))
+  ) {
+    throw new Error("'filter_fields' must be an array of strings");
+  }
+  if (
+    Array.isArray(o.filter_fields) &&
+    (o.filter_fields as string[]).length > 0
+  )
+    result.filter_fields = o.filter_fields as string[];
+  if (typeof o.show_sections === "boolean")
+    result.show_sections = o.show_sections;
   return result;
 }
 
@@ -1690,6 +1711,9 @@ export interface PivotTableData {
   hybrid_totals?: HybridTotals;
   /** Aggregation type remap for count/count_distinct leaf cells in hybrid mode. */
   hybrid_agg_remap?: Record<string, AggregationType>;
+  /** Pre-computed unique resolved values for off-axis filter fields in hybrid mode.
+   *  Absent in client_only mode — FilterPickerPopover falls back to pivotData.getUniqueValues(). */
+  filter_field_values?: Record<string, string[]>;
   /** Server-provided drill-down rows (hybrid mode round-trip). */
   drilldown_records?: Record<string, unknown>[];
   /** Column names for server drill-down rows, in display order. */

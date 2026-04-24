@@ -225,6 +225,8 @@ export class PivotData {
   > = new Map();
   /** Fields whose distinct values/indexes are worth precomputing. */
   private readonly _indexedFields: ReadonlySet<string>;
+  /** Columns present in the data source — used to guard _shouldIncludeRow in hybrid mode. */
+  private readonly _columnSet: ReadonlySet<string>;
 
   /** Merged column types (Arrow + Python supplement). */
   private readonly _columnTypes: ColumnTypeMap | undefined;
@@ -330,8 +332,10 @@ export class PivotData {
     this._indexedFields = new Set([
       ...config.rows,
       ...config.columns,
+      ...(config.filter_fields ?? []),
       ...Object.keys(config.filters ?? {}),
     ]);
+    this._columnSet = new Set(this._dataSource.getColumnNames());
 
     const hybridTotals = options?.hybridTotals;
     if (hybridTotals) {
@@ -493,6 +497,10 @@ export class PivotData {
     const filters = this._config.filters;
     if (!filters) return true;
     for (const [field, filter] of Object.entries(filters)) {
+      // In hybrid mode, off-axis filter fields are absent from the pre-aggregated
+      // frame (they were applied server-side). Skip them to prevent double-filtering
+      // which would otherwise exclude all rows.
+      if (!this._columnSet.has(field)) continue;
       const raw = this._dataSource.getValue(rowIndex, field);
       const val = this._resolveDimKey(field, raw);
       if (filter.include && filter.include.length > 0) {

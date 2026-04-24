@@ -382,6 +382,9 @@ class PivotConfig(TypedDict, total=False):
     field_widths: dict[str, int | str]
     field_renderers: dict[str, dict[str, Any]]
     style: PivotStyle
+    filters: dict[str, dict[str, list[Any]]]
+    filter_fields: list[str]
+    show_sections: bool
 
 
 VALID_AGGREGATIONS = frozenset(
@@ -584,15 +587,8 @@ def _apply_source_filters(
 
 
 def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
-    filters = config.get("filters", {})
-    if filters:
-        dim_set = set(config.get("rows", []) + config.get("columns", []))
-        non_dim = [f for f in filters if f not in dim_set]
-        if non_dim:
-            return False, (
-                f"threshold_hybrid requires filters on row/column dimensions only; "
-                f"filter on {non_dim} is not in the current layout"
-            )
+    # Off-axis filters are applied server-side by _resolve_and_filter inside
+    # _prepare_threshold_hybrid_frame before the groupby. No restriction needed.
     return True, "config is compatible with threshold_hybrid"
 
 
@@ -764,6 +760,46 @@ def _prepare_threshold_hybrid_frame(
         out = out.drop(columns=[sum_col, cnt_col])
 
     return out
+
+
+def _compute_filter_field_values(
+    df: Any,  # filtered_data: after source_filters, before config.filters
+    config: PivotConfig,
+    null_handling: Any,
+    column_types: dict[str, str] | None = None,
+    adaptive_grains: dict[str, str] | None = None,
+) -> dict[str, list[str]] | None:
+    """Unique resolved values for off-axis filter fields, for the FilterBar picker in hybrid mode.
+
+    Uses df before config.filters so all possible values are shown regardless of current
+    filter state — matching the semantics of the header-menu picker in client-only mode.
+    On-axis fields (also in rows/columns) are skipped; the frontend indexes them client-side.
+    """
+    filter_fields = config.get("filter_fields", [])
+    if not filter_fields:
+        return None
+    row_col_set = set(config.get("rows", []) + config.get("columns", []))
+    date_grains = config.get("date_grains", {})
+    auto_date_hierarchy = config.get("auto_date_hierarchy", True)
+    df_cols = set(df.columns)
+    result: dict[str, list[str]] = {}
+    for field in filter_fields:
+        if field in row_col_set or field not in df_cols:
+            continue  # on-axis fields are indexed client-side; missing fields skipped
+        col_type = column_types.get(field) if column_types else None
+        mode = _get_null_mode(field, null_handling)
+        grain = _get_effective_date_grain(
+            field,
+            config.get("rows", []),
+            config.get("columns", []),
+            date_grains,
+            auto_date_hierarchy,
+            column_types,
+            adaptive_grains=adaptive_grains,
+        )
+        resolved = _resolve_dim_value_series(df[field], col_type, mode, grain)
+        result[field] = sorted(resolved.dropna().astype(str).unique().tolist())
+    return result or None
 
 
 def _build_hybrid_agg_remap(aggregation: dict[str, str]) -> dict[str, str]:
@@ -2522,6 +2558,10 @@ def _default_config(
     field_widths: dict[str, int | str] | None = None,
     field_renderers: dict[str, dict[str, Any]] | None = None,
     style: PivotStyle | None = None,
+    # Report-level filtering
+    filters: dict[str, dict[str, list[Any]]] | None = None,
+    filter_fields: list[str] | None = None,
+    show_sections: bool | None = None,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -2608,6 +2648,25 @@ def _default_config(
         cfg["field_renderers"] = field_renderers
     if style is not None:
         cfg["style"] = style
+    if filters:
+        cfg["filters"] = filters
+    # Auto-promote any filters key that is not already visible in the UI.
+    # A filter for a field that is neither in rows/columns nor in filter_fields
+    # would be an invisible active filter — silently changing results with no
+    # way to inspect or clear it. We add those fields to filter_fields so every
+    # active filter always has a corresponding chip in the FilterBar.
+    effective_filter_fields: list[str] = list(filter_fields) if filter_fields else []
+    if filters:
+        layout_set = set(cfg["rows"]) | set(cfg.get("columns") or [])
+        ff_set = set(effective_filter_fields)
+        for field in filters:
+            if field not in layout_set and field not in ff_set:
+                effective_filter_fields.append(field)
+                ff_set.add(field)
+    if effective_filter_fields:
+        cfg["filter_fields"] = effective_filter_fields
+    if show_sections is not None:
+        cfg["show_sections"] = show_sections
     return cfg
 
 
@@ -2753,8 +2812,12 @@ def st_pivot_table(
     enable_drilldown: bool = True,
     export_filename: str | None = None,
     execution_mode: str = "auto",
-    # Report-level filtering
+    # Report-level filtering (server-side developer-owned)
     source_filters: dict[str, dict[str, list[Any]]] | None = None,
+    # Report-level filtering (user-owned initial config)
+    filters: dict[str, dict[str, list[Any]]] | None = None,
+    filter_fields: list[str] | None = None,
+    show_sections: bool | None = None,
     # Format hints from Streamlit column_config / dimension_format
     column_config: dict[str, Any] | None = None,
     dimension_format: str | dict[str, str] | None = None,
@@ -2834,6 +2897,43 @@ def st_pivot_table(
         current row/column layout. ``include`` takes precedence over
         ``exclude``. ``None`` matches null-like values, while ``""`` matches
         only literal empty strings. No type coercion is performed.
+    filters : dict[str, dict[str, list[Any]]] or None
+        Initial user-facing dimension filters. Maps field name to a filter
+        dict with an ``"include"`` or ``"exclude"`` key. ``"include"`` takes
+        precedence when both keys are present. Values are matched using the
+        same **resolved-value semantics** as the interactive header-menu
+        filters: null/empty cells are normalised per ``null_handling``, date
+        fields are compared at their effective grain, and the comparison is
+        performed against the *display* representation rather than the raw
+        cell value. For simple string/numeric dimensions the resolved value
+        equals the raw cell value; for date dimensions or custom null buckets
+        use the string the picker shows (e.g. ``"2023 Q1"``, ``"(empty)"``).
+        These filters are stored in the frontend config, are visible as chips
+        in the FilterBar above the table, and survive interactive
+        reconfigurations. Any filter key not already in ``filter_fields`` or
+        the current ``rows``/``columns`` layout is automatically added to
+        ``filter_fields`` so there is never a hidden active filter.
+        Use ``source_filters`` instead for server-only filters that should
+        never be exposed to the user.
+        Example: ``filters={"Category": {"include": ["Electronics", "Furniture"]}}``.
+    filter_fields : list[str] or None
+        Ordered list of dimension fields to place in the Filters zone. Fields
+        in this list appear as interactive chips in the FilterBar above the
+        pivot table (when ``show_sections`` is not ``False``) and in the
+        Settings panel's Filters zone. A field can simultaneously appear in
+        ``rows`` or ``columns`` and in ``filter_fields`` (dual-role): its
+        shared ``filters`` entry then drives both the header-menu filter and
+        the FilterBar chip. Example: ``filter_fields=["Category", "Region"]``.
+    show_sections : bool or None
+        Controls whether the toolbar sections (Rows, Columns, Values cards
+        and the FilterBar) are expanded or collapsed. ``True`` (default) shows
+        all sections. ``False`` collapses them into a compact single-line
+        summary that still shows the total number of active filters (both
+        FilterBar filters and header-menu filters on row/column dimensions),
+        so filter activity is always signalled in the compact view. Users can
+        toggle the state interactively with the collapse/expand button in the
+        toolbar. Pass ``False`` to start in the compact view when screen
+        real-estate is limited.
     null_handling : str or dict[str, str] or None
         How to treat null/NaN values. Global mode ("exclude", "zero",
         "separate") or per-field dict mapping column names to modes.
@@ -3088,6 +3188,45 @@ def st_pivot_table(
 
     if not isinstance(locked, bool):
         raise TypeError(f"locked must be a bool, got {type(locked).__name__}")
+
+    if filter_fields is not None:
+        if not isinstance(filter_fields, list) or not all(
+            isinstance(f, str) for f in filter_fields
+        ):
+            raise TypeError("filter_fields must be a list of strings")
+
+    if show_sections is not None and not isinstance(show_sections, bool):
+        raise TypeError(
+            f"show_sections must be a bool or None, got {type(show_sections).__name__}"
+        )
+
+    if filters is not None:
+        if not isinstance(filters, dict):
+            raise TypeError(
+                f"filters must be a dict or None, got {type(filters).__name__}"
+            )
+        for field, filt in filters.items():
+            if not isinstance(field, str):
+                raise TypeError("filters keys must be strings")
+            if not isinstance(filt, dict):
+                raise TypeError(f"filters[{field!r}] must be a dict")
+            extra_keys = [k for k in filt if k not in {"include", "exclude"}]
+            if extra_keys:
+                raise ValueError(
+                    f"filters[{field!r}] contains unsupported keys: {extra_keys}. "
+                    "Only 'include' and 'exclude' are allowed."
+                )
+            for op_name in ("include", "exclude"):
+                vals = filt.get(op_name)
+                if vals is None:
+                    continue
+                if not isinstance(vals, list):
+                    raise TypeError(f"filters[{field!r}]['{op_name}'] must be a list")
+                for idx, value in enumerate(vals):
+                    if not pd.api.types.is_scalar(value):
+                        raise TypeError(
+                            f"filters[{field!r}]['{op_name}'][{idx}] must be a scalar value"
+                        )
 
     # --- Sort config validation ---
     _VALID_SORT_BY = frozenset(("key", "value"))
@@ -3579,6 +3718,9 @@ def st_pivot_table(
         field_widths=cc_field_widths,
         field_renderers=cc_field_renderers,
         style=resolved_style,
+        filters=filters,
+        filter_fields=filter_fields,
+        show_sections=show_sections,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal
@@ -3641,6 +3783,15 @@ def st_pivot_table(
         )
         if totals_sidecar:
             data_payload["hybrid_totals"] = totals_sidecar
+        filter_val_sidecar = _compute_filter_field_values(
+            filtered_data,
+            config_to_send,
+            null_handling,
+            original_column_types,
+            adaptive_grains=adaptive_date_grains,
+        )
+        if filter_val_sidecar:
+            data_payload["filter_field_values"] = filter_val_sidecar
 
     if null_handling is not None:
         data_payload["null_handling"] = null_handling
