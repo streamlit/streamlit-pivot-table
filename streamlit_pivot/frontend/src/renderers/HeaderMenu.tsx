@@ -342,6 +342,11 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
         { value: "pct_of_total", label: "% of grand total" },
         { value: "pct_of_row", label: "% of row total" },
         { value: "pct_of_col", label: "% of column total" },
+        { value: "running_total", label: "Running total" },
+        { value: "pct_running_total", label: "% running total" },
+        { value: "rank", label: "Rank" },
+        { value: "pct_of_parent", label: "% of parent total" },
+        { value: "index", label: "Index" },
         ...(supportsPeriodComparison
           ? [
               { value: "diff_from_prev", label: "Change vs previous period" },

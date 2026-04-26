@@ -533,6 +533,114 @@ st_pivot_table(
 section_aggregators()
 
 # ---------------------------------------------------------------------------
+# Section 5b: Show Values As — Analytical Modes (0.5.0)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("5b. Show Values As — Running Total, Rank, % of Parent (0.5.0)")
+
+
+@st.fragment
+def section_show_values_as_analytical():
+    import pandas as pd
+
+    sva_df = pd.DataFrame(
+        {
+            "Region": ["US", "US", "US", "EU", "EU", "EU", "APAC", "APAC", "APAC"],
+            "Product": [
+                "Widget",
+                "Gadget",
+                "Doohickey",
+                "Widget",
+                "Gadget",
+                "Doohickey",
+                "Widget",
+                "Gadget",
+                "Doohickey",
+            ],
+            "Quarter": [
+                "Q1",
+                "Q1",
+                "Q1",
+                "Q1",
+                "Q1",
+                "Q1",
+                "Q1",
+                "Q1",
+                "Q1",
+            ],
+            "Revenue": [120, 80, 40, 200, 150, 50, 90, 60, 30],
+        }
+    )
+
+    st.markdown(
+        """
+**0.5.0** adds five new analytical **Show Values As** modes, accessible via the
+**⋮** menu on a value header or via the `show_values_as` API parameter:
+
+| Mode | Description |
+|---|---|
+| `running_total` | Cumulative sum along the row axis; resets per parent group |
+| `pct_running_total` | Running total ÷ parent-group total for the same column |
+| `rank` | Competition rank (1, 1, 3) per column, per parent group |
+| `pct_of_parent` | Cell ÷ immediate parent subtotal |
+| `index` | Excel INDEX formula: `cell × grand_total / (row_total × col_total)` |
+
+The example below shows **running total** by product within each region.
+**Totals and subtotals always display raw aggregates** — a running total at a
+subtotal equals the subtotal itself, so transforming it would be misleading.
+"""
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.caption("Running Total")
+        st_pivot_table(
+            sva_df,
+            key="sva_running_total",
+            rows=["Region", "Product"],
+            columns=["Quarter"],
+            values=["Revenue"],
+            show_values_as={"Revenue": "running_total"},
+        )
+    with col2:
+        st.caption("% of Parent Subtotal")
+        st_pivot_table(
+            sva_df,
+            key="sva_pct_of_parent",
+            rows=["Region", "Product"],
+            columns=["Quarter"],
+            values=["Revenue"],
+            show_values_as={"Revenue": "pct_of_parent"},
+        )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+# Running total — resets per Region group
+st_pivot_table(
+    df,
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    show_values_as={"Revenue": "running_total"},
+)
+
+# % of Parent — each Product ÷ its Region subtotal
+st_pivot_table(
+    df,
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    show_values_as={"Revenue": "pct_of_parent"},
+)
+""",
+            language="python",
+        )
+
+
+section_show_values_as_analytical()
+
+# ---------------------------------------------------------------------------
 # Section 6: Conditional Formatting
 # ---------------------------------------------------------------------------
 st.divider()

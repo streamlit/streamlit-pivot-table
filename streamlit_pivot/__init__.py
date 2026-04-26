@@ -411,6 +411,12 @@ VALID_SHOW_VALUES_AS = frozenset(
         "pct_diff_from_prev",
         "diff_from_prev_year",
         "pct_diff_from_prev_year",
+        # 0.5.0 analytical modes (computed client-side, Python only validates the string)
+        "running_total",
+        "pct_running_total",
+        "rank",
+        "pct_of_parent",
+        "index",
     )
 )
 PERIOD_COMPARISON_SHOW_VALUES_AS = frozenset(

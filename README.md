@@ -298,7 +298,9 @@ When sorting from a specific dimension header, `dimension` is set automatically.
 
 ### Show Values As
 
-Display measures as percentages instead of raw numbers.
+Display measures as percentages, running totals, ranks, or other transformations instead of raw numbers.
+
+#### Percentage and comparison modes
 
 | Mode | Value | Description |
 |------|-------|-------------|
@@ -311,7 +313,27 @@ Display measures as percentages instead of raw numbers.
 | Diff vs Previous Year | `"diff_from_prev_year"` | Current bucket minus same bucket in the prior year |
 | % Diff vs Previous Year | `"pct_diff_from_prev_year"` | Percent change vs same bucket in the prior year |
 
+#### Analytical modes (0.5.0+)
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| Running Total | `"running_total"` | Cumulative sum along the row axis; resets at each distinct parent group |
+| % Running Total | `"pct_running_total"` | Running total ÷ parent-group total for the same column (grand total for single-level pivots) |
+| Rank | `"rank"` | Competition rank (1, 1, 3) per column, per parent group — matches Excel `RANK.EQ` |
+| % of Parent | `"pct_of_parent"` | Cell ÷ immediate parent subtotal; for top-level rows, denominator is the column total |
+| Index | `"index"` | `(cell / grand_total) / ((row_total / grand_total) × (col_total / grand_total))` — Excel INDEX |
+
+**Totals / subtotals behaviour**: `running_total`, `pct_running_total`, and `rank` always display
+the raw aggregate on total and subtotal rows — a running total at a subtotal equals the subtotal
+itself, and 100% for pct_running_total would be misleading. `pct_of_parent` at a subtotal row
+shows the subtotal relative to its own parent. `index` is always `null` for total rows.
+
+**Null denominators**: all modes return the `empty_cell_value` when the denominator is null or zero.
+
+**Export**: transformed values (not raw) are exported for all modes, matching display.
+
 ```python
+# % of Grand Total (classic)
 st_pivot_table(
     df,
     key="show_values_as_example",
@@ -320,11 +342,32 @@ st_pivot_table(
     values=["Revenue", "Profit"],
     show_values_as={"Revenue": "pct_of_total"},
 )
+
+# Running total — accumulates per Region group, resets at each region
+st_pivot_table(
+    df,
+    key="running_total_example",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    show_values_as={"Revenue": "running_total"},
+)
+
+# Competition rank — largest revenue = rank 1 per column, per region
+st_pivot_table(
+    df,
+    key="rank_example",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    show_values_as={"Revenue": "rank"},
+)
 ```
 
 Users can also change this interactively via the value header menu (**&#8942;** icon on a value label header).
 Synthetic measures are always rendered as raw derived values (`show_values_as` does not apply to them).
 Period-comparison modes appear only when there is an active grouped temporal axis, whether that grouping came from auto hierarchy or an explicit `date_grains` override.
+The analytical modes (`running_total`, `pct_running_total`, `rank`, `pct_of_parent`, `index`) are mutually exclusive with period-comparison modes per field.
 
 ### Date Hierarchy and Time Comparisons
 

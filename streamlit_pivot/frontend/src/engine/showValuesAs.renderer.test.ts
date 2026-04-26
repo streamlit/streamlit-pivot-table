@@ -218,3 +218,153 @@ describe("show_values_as subtotal formatting (renderer/export layer)", () => {
     });
   });
 });
+
+// ── 0.5.0 analytical modes — renderer/export layer ───────────────────────────
+
+import {
+  getRunningTotal,
+  getPctRunningTotal,
+  getRank,
+  getPctOfParent,
+  getIndex,
+} from "./showValuesAs";
+import { buildExportIR } from "./exportData";
+
+/**
+ * Two-region, two-year dataset.
+ * US: 2023=100, 2024=200; EU: 2023=300, 2024=400
+ * Col totals: 2023=400, 2024=600; grand=1000
+ */
+const ANALYTICAL_SAMPLE: DataRecord[] = [
+  { region: "US", year: "2023", revenue: 100 },
+  { region: "US", year: "2024", revenue: 200 },
+  { region: "EU", year: "2023", revenue: 300 },
+  { region: "EU", year: "2024", revenue: 400 },
+];
+
+describe("0.5.0 analytical modes — engine helpers via renderer layer", () => {
+  describe("running_total", () => {
+    it("produces correct running total in display order", () => {
+      const config = makeConfig({
+        show_values_as: { revenue: "running_total" },
+      });
+      const pd = new PivotData(ANALYTICAL_SAMPLE, config);
+      const rowKeys = pd.getSortedLeafRowKeys();
+      const colKey = ["2023"];
+
+      // First row: RT = its raw value; second row: RT = first + second
+      const rtFirst = getRunningTotal(pd, rowKeys[0]!, colKey, "revenue");
+      const rtSecond = getRunningTotal(pd, rowKeys[1]!, colKey, "revenue");
+      expect(rtFirst).not.toBeNull();
+      expect(rtSecond).not.toBeNull();
+      const rawFirst = pd
+        .getAggregator(rowKeys[0]!, colKey, "revenue")
+        .value()!;
+      const rawSecond = pd
+        .getAggregator(rowKeys[1]!, colKey, "revenue")
+        .value()!;
+      expect(rtFirst).toBeCloseTo(rawFirst, 1);
+      expect(rtSecond).toBeCloseTo(rawFirst + rawSecond, 1);
+    });
+  });
+
+  describe("pct_running_total — export", () => {
+    it("export cell value equals running_total / parent_group_total (not raw value)", () => {
+      // Single-level: denominator is column grand total
+      const config = makeConfig({
+        show_values_as: { revenue: "pct_running_total" },
+      });
+      const pd = new PivotData(ANALYTICAL_SAMPLE, config);
+      const rowKeys = pd.getSortedLeafRowKeys();
+      const colKey = ["2023"];
+
+      const colTotal2023 = pd.getColTotal(colKey, "revenue").value()!; // 400
+      const rt = getRunningTotal(pd, rowKeys[0]!, colKey, "revenue")!;
+      const expectedPct = rt / colTotal2023;
+
+      const pct = getPctRunningTotal(pd, rowKeys[0]!, colKey, "revenue");
+      expect(pct).not.toBeNull();
+      expect(pct).toBeCloseTo(expectedPct, 3);
+
+      // Verify the export grid reflects pct_running_total (not raw)
+      const grid = buildExportIR(pd, config, "formatted");
+      // Find a data row that has a cell with a "%" display (a value cell, not a label)
+      const pctCell = grid.cells
+        .flat()
+        .find((c) => c.kind === "data" && c.display.includes("%"));
+      expect(pctCell).toBeDefined();
+    });
+
+    it("total row shows raw aggregate (not 100%)", () => {
+      const config = makeConfig({
+        show_values_as: { revenue: "pct_running_total" },
+        show_totals: true,
+      });
+      const pd = new PivotData(ANALYTICAL_SAMPLE, config);
+      // Grand total cell should show the raw grand total value, not "100.0%"
+      const grandTotal = pd.getGrandTotal("revenue").value()!;
+      // The export grand total cell should be the raw aggregate
+      const grid = buildExportIR(pd, config, "formatted");
+      const gtRow = grid.cells.find((row) =>
+        row.some((c) => c.kind === "grand-total"),
+      );
+      expect(gtRow).toBeDefined();
+      const gtCell = gtRow!.find((c) => c.kind === "grand-total");
+      expect(gtCell).toBeDefined();
+      // Grand total for pct_running_total should not be a percentage
+      expect(gtCell!.display).not.toContain("%");
+    });
+  });
+
+  describe("rank", () => {
+    it("assigns competition rank correctly", () => {
+      const config = makeConfig({ show_values_as: { revenue: "rank" } });
+      const pd = new PivotData(ANALYTICAL_SAMPLE, config);
+      const rowKeys = pd.getSortedLeafRowKeys();
+      const colKey = ["2023"];
+
+      // US=100, EU=300 — EU should be rank 1, US rank 2
+      const ranks = rowKeys.map((rk) => getRank(pd, rk, colKey, "revenue"));
+      expect(ranks).toContain(1);
+      expect(ranks).toContain(2);
+      // The rank-1 row has value 300 (EU)
+      const rank1Idx = ranks.indexOf(1);
+      const rawAtRank1 = pd
+        .getAggregator(rowKeys[rank1Idx]!, colKey, "revenue")
+        .value();
+      expect(rawAtRank1).toBeCloseTo(300, 1);
+    });
+  });
+
+  describe("pct_of_parent", () => {
+    it("denominator is column grand total for single-level pivot", () => {
+      const config = makeConfig({
+        show_values_as: { revenue: "pct_of_parent" },
+      });
+      const pd = new PivotData(ANALYTICAL_SAMPLE, config);
+      // US 2023=100; col total 2023=400 → 100/400=25%
+      const pct = getPctOfParent(100, pd, ["US"], ["2023"], "revenue");
+      expect(pct).not.toBeNull();
+      expect(pct).toBeCloseTo(0.25, 3);
+    });
+  });
+
+  describe("index", () => {
+    it("index for a cell matches Excel formula", () => {
+      const config = makeConfig({ show_values_as: { revenue: "index" } });
+      const pd = new PivotData(ANALYTICAL_SAMPLE, config);
+      // cell=100(US,2023), grand=1000, rowTotal_US=300, colTotal_2023=400
+      // index = 100*1000/(300*400) = 100000/120000 ≈ 0.833
+      const idx = getIndex(100, pd, ["US"], ["2023"], "revenue");
+      expect(idx).not.toBeNull();
+      expect(idx).toBeCloseTo((100 * 1000) / (300 * 400), 3);
+    });
+
+    it("returns null for null raw value", () => {
+      const config = makeConfig({ show_values_as: { revenue: "index" } });
+      const pd = new PivotData(ANALYTICAL_SAMPLE, config);
+      const idx = getIndex(null, pd, ["US"], ["2023"], "revenue");
+      expect(idx).toBeNull();
+    });
+  });
+});

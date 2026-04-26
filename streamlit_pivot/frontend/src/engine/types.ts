@@ -486,7 +486,13 @@ export type ShowValuesAs =
   | "diff_from_prev"
   | "pct_diff_from_prev"
   | "diff_from_prev_year"
-  | "pct_diff_from_prev_year";
+  | "pct_diff_from_prev_year"
+  // 0.5.0 analytical modes (computed client-side)
+  | "running_total"
+  | "pct_running_total"
+  | "rank"
+  | "pct_of_parent"
+  | "index";
 
 export type PeriodComparisonMode =
   | "diff_from_prev"
@@ -1223,6 +1229,12 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       "pct_diff_from_prev",
       "diff_from_prev_year",
       "pct_diff_from_prev_year",
+      // 0.5.0 analytical modes
+      "running_total",
+      "pct_running_total",
+      "rank",
+      "pct_of_parent",
+      "index",
     ]);
     const syntheticIds = new Set(syntheticMeasures.map((m) => m.id));
     const sva = o.show_values_as as Record<string, unknown>;

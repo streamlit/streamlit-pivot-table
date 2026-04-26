@@ -502,3 +502,315 @@ describe("Golden Config C — Revenue sum vs Units avg (golden_expected.json + s
     verifyMeasureAgainstGolden(pd, g.measures.Units, "Units", "Config C Units");
   });
 });
+
+// ── 0.5.0 Show Values As analytical modes ────────────────────────────────────
+
+import {
+  computeRunningTotals,
+  computeRanks,
+  getRunningTotal,
+  getPctRunningTotal,
+  getRank,
+  getPctOfParent,
+  getIndex,
+} from "./showValuesAs";
+
+/**
+ * Single-level: region rows, year columns.
+ * US: 2023=150, 2024=150; EU: 2023=200, 2024=250
+ * Col totals: 2023=350, 2024=400; grand=750
+ */
+const SVA_FLAT: DataRecord[] = [
+  { region: "US", year: "2023", revenue: 100 },
+  { region: "US", year: "2023", revenue: 50 },
+  { region: "US", year: "2024", revenue: 150 },
+  { region: "EU", year: "2023", revenue: 200 },
+  { region: "EU", year: "2024", revenue: 250 },
+];
+
+/**
+ * Two-level rows: [region, dept].
+ * US/East: 2023=30, 2024=70
+ * US/West: 2023=50, 2024=50
+ * EU/East: 2023=100, 2024=100
+ * EU/West: 2023=80, 2024=120
+ * US subtotal: 2023=80, 2024=120
+ * EU subtotal: 2023=180, 2024=220
+ * Col totals: 2023=260, 2024=340; grand=600
+ */
+const SVA_SUBTOTAL: DataRecord[] = [
+  { region: "US", dept: "East", year: "2023", revenue: 30 },
+  { region: "US", dept: "East", year: "2024", revenue: 70 },
+  { region: "US", dept: "West", year: "2023", revenue: 50 },
+  { region: "US", dept: "West", year: "2024", revenue: 50 },
+  { region: "EU", dept: "East", year: "2023", revenue: 100 },
+  { region: "EU", dept: "East", year: "2024", revenue: 100 },
+  { region: "EU", dept: "West", year: "2023", revenue: 80 },
+  { region: "EU", dept: "West", year: "2024", revenue: 120 },
+];
+
+function makeSvaConfig(
+  rows: string[],
+  cols: string[],
+  values: string[],
+): PivotConfigV1 {
+  return {
+    version: 1,
+    rows,
+    columns: cols,
+    values,
+    show_totals: true,
+    empty_cell_value: "-",
+    interactive: true,
+    aggregation: normalizeAggregationConfig("sum", values),
+  };
+}
+
+describe("running_total", () => {
+  it("accumulates along row axis in display order (flat pivot)", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    const rowKeys = pd.getSortedLeafRowKeys();
+    const colKey = ["2023"];
+
+    // Default sort is alphabetical: EU first (200), US second (150)
+    // RT: EU=200, US=200+150=350
+    const rtMap = computeRunningTotals(pd, colKey, "revenue");
+    const rtUS = rtMap.get("US");
+    const rtEU = rtMap.get("EU");
+
+    // Both US and EU are top-level (no parent), so accumulation is global.
+    // Whichever comes first has RT = its raw value; the second has RT = first + second.
+    const rawUS = pd.getAggregator(["US"], colKey, "revenue").value()!; // 150
+    const rawEU = pd.getAggregator(["EU"], colKey, "revenue").value()!; // 200
+    const total = rawUS + rawEU; // 350
+
+    expect(rtUS).not.toBeNull();
+    expect(rtEU).not.toBeNull();
+    // One of them is the raw value (first row), the other is the total (second row)
+    const vals = new Set([rtUS, rtEU]);
+    expect(vals.has(rawUS) || vals.has(rawEU)).toBe(true);
+    expect(vals.has(total)).toBe(true);
+  });
+
+  it("resets at parent group boundary (two-level pivot)", () => {
+    const config = makeSvaConfig(["region", "dept"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_SUBTOTAL, config);
+    const colKey = ["2023"];
+
+    const rtMap = computeRunningTotals(pd, colKey, "revenue");
+
+    // Within US group: East=30, West=50 → running totals 30, 80
+    const rtUS_East = rtMap.get("US\x01East");
+    const rtUS_West = rtMap.get("US\x01West");
+    expect(rtUS_East).toBeDefined();
+    expect(rtUS_West).toBeDefined();
+    // The running total for West should be 30+50=80 (East comes first alphabetically)
+    expect(rtUS_East! + 50).toBeCloseTo(rtUS_West!, 1);
+
+    // Within EU group: East=100, West=80 → running totals reset.
+    // Display order is alphabetical: East first (100), West second (80).
+    // RT: East=100, West=100+80=180
+    const rtEU_East = rtMap.get("EU\x01East");
+    const rtEU_West = rtMap.get("EU\x01West");
+    expect(rtEU_East).toBeDefined();
+    expect(rtEU_West).toBeDefined();
+    // EU accumulation is independent of US
+    expect(Math.min(rtEU_East!, rtEU_West!)).toBeCloseTo(100, 1); // East comes first
+    expect(Math.max(rtEU_East!, rtEU_West!)).toBeCloseTo(180, 1);
+  });
+
+  it("returns null for null raw values", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const records: DataRecord[] = [
+      { region: "US", year: "2023", revenue: null },
+      { region: "EU", year: "2023", revenue: 200 },
+    ];
+    const pd = new PivotData(records, config);
+    const rtMap = computeRunningTotals(pd, ["2023"], "revenue");
+    expect(rtMap.get("US")).toBeNull();
+    expect(rtMap.get("EU")).toBe(200); // null row doesn't contribute to accumulator
+  });
+
+  it("getSortedLeafRowKeys returns same keys as getRowKeys", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    expect(pd.getSortedLeafRowKeys()).toEqual(pd.getRowKeys());
+  });
+});
+
+describe("pct_running_total", () => {
+  it("denominator is parent group total for same column (two-level)", () => {
+    const config = makeSvaConfig(["region", "dept"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_SUBTOTAL, config);
+    const colKey = ["2023"];
+
+    // US/East 2023=30, US subtotal 2023=80 → 30/80 = 0.375
+    const pct = getPctRunningTotal(pd, ["US", "East"], colKey, "revenue");
+    expect(pct).not.toBeNull();
+    expect(pct).toBeCloseTo(30 / 80, 3);
+  });
+
+  it("denominator is column grand total for single-level pivot", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    // col grand total 2023 = 350
+    // First row (either US or EU), running total / 350
+    const rowKeys = pd.getSortedLeafRowKeys();
+    const firstKey = rowKeys[0]!;
+    const firstRaw = pd.getAggregator(firstKey, ["2023"], "revenue").value()!;
+    const pct = getPctRunningTotal(pd, firstKey, ["2023"], "revenue");
+    expect(pct).not.toBeNull();
+    expect(pct).toBeCloseTo(firstRaw / 350, 3);
+  });
+
+  it("returns null when denominator is null/zero", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const records: DataRecord[] = [
+      { region: "US", year: "2023", revenue: null },
+      { region: "EU", year: "2023", revenue: null },
+    ];
+    const pd = new PivotData(records, config);
+    const pct = getPctRunningTotal(pd, ["US"], ["2023"], "revenue");
+    expect(pct).toBeNull();
+  });
+
+  it("getParentSubtotal returns column total for top-level rows", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    const colTotal2023 = pd.getColTotal(["2023"], "revenue").value();
+    const parentSubtotal = pd.getParentSubtotal(["US"], ["2023"], "revenue");
+    expect(parentSubtotal).toBeCloseTo(colTotal2023!, 1);
+  });
+
+  it("getParentSubtotal returns subtotal for leaf rows in two-level pivot", () => {
+    const config = makeSvaConfig(["region", "dept"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_SUBTOTAL, config);
+    // US subtotal 2023 = 80
+    const ps = pd.getParentSubtotal(["US", "East"], ["2023"], "revenue");
+    expect(ps).toBeCloseTo(80, 1);
+  });
+});
+
+describe("rank (competition rank)", () => {
+  it("assigns competition rank 1,1,3 for tied values", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    // US and EU both 100 for year=2023 — ranks should be 1,1 (no further rows so no skip)
+    const records: DataRecord[] = [
+      { region: "US", year: "2023", revenue: 100 },
+      { region: "EU", year: "2023", revenue: 100 },
+      { region: "APAC", year: "2023", revenue: 50 },
+    ];
+    const pd = new PivotData(records, config);
+    const colKey = ["2023"];
+    const rankMap = computeRanks(pd, colKey, "revenue");
+
+    const rUS = rankMap.get("US");
+    const rEU = rankMap.get("EU");
+    const rAPAC = rankMap.get("APAC");
+
+    // US and EU tie at rank 1; APAC gets rank 3 (competition rank)
+    expect(rUS).toBe(1);
+    expect(rEU).toBe(1);
+    expect(rAPAC).toBe(3);
+  });
+
+  it("resets rank per parent group", () => {
+    const config = makeSvaConfig(["region", "dept"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_SUBTOTAL, config);
+    const colKey = ["2023"];
+    const rankMap = computeRanks(pd, colKey, "revenue");
+
+    // US group: East=30, West=50 → West is rank 1, East is rank 2
+    const rUS_East = rankMap.get("US\x01East");
+    const rUS_West = rankMap.get("US\x01West");
+    expect(rUS_West).toBe(1);
+    expect(rUS_East).toBe(2);
+
+    // EU group: East=100, West=80 → East is rank 1, West is rank 2
+    const rEU_East = rankMap.get("EU\x01East");
+    const rEU_West = rankMap.get("EU\x01West");
+    expect(rEU_East).toBe(1);
+    expect(rEU_West).toBe(2);
+  });
+
+  it("returns null for null-valued rows", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const records: DataRecord[] = [
+      { region: "US", year: "2023", revenue: null },
+      { region: "EU", year: "2023", revenue: 200 },
+    ];
+    const pd = new PivotData(records, config);
+    const rankMap = computeRanks(pd, ["2023"], "revenue");
+    expect(rankMap.get("US")).toBeNull();
+    expect(rankMap.get("EU")).toBe(1);
+  });
+});
+
+describe("pct_of_parent", () => {
+  it("leaf cell denominator is immediate parent subtotal", () => {
+    const config = makeSvaConfig(["region", "dept"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_SUBTOTAL, config);
+    // US/East 2023=30, US subtotal 2023=80 → 30/80
+    const pct = getPctOfParent(30, pd, ["US", "East"], ["2023"], "revenue");
+    expect(pct).not.toBeNull();
+    expect(pct).toBeCloseTo(30 / 80, 3);
+  });
+
+  it("single-level: denominator is column grand total", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    // US 2023=150, col total 2023=350 → 150/350
+    const pct = getPctOfParent(150, pd, ["US"], ["2023"], "revenue");
+    expect(pct).not.toBeNull();
+    expect(pct).toBeCloseTo(150 / 350, 3);
+  });
+
+  it("returns null when denominator is zero or null", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const records: DataRecord[] = [
+      { region: "US", year: "2023", revenue: null },
+    ];
+    const pd = new PivotData(records, config);
+    const pct = getPctOfParent(0, pd, ["US"], ["2023"], "revenue");
+    expect(pct).toBeNull();
+  });
+
+  it("returns null for null raw value", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    const pct = getPctOfParent(null, pd, ["US"], ["2023"], "revenue");
+    expect(pct).toBeNull();
+  });
+});
+
+describe("index", () => {
+  it("computes Excel INDEX formula correctly", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    // cell=150, grand=750, rowTotal_US=300, colTotal_2023=350
+    // index = 150*750 / (300*350) = 112500/105000 ≈ 1.071
+    const rowTotal = pd.getRowTotal(["US"], "revenue").value()!; // 300
+    const colTotal = pd.getColTotal(["2023"], "revenue").value()!; // 350
+    const grand = pd.getGrandTotal("revenue").value()!; // 750
+    const expected = (150 * grand) / (rowTotal * colTotal);
+    const idx = getIndex(150, pd, ["US"], ["2023"], "revenue");
+    expect(idx).not.toBeNull();
+    expect(idx).toBeCloseTo(expected, 3);
+  });
+
+  it("returns null when grand total is zero", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const records: DataRecord[] = [];
+    const pd = new PivotData(records, config);
+    const idx = getIndex(0, pd, ["US"], ["2023"], "revenue");
+    expect(idx).toBeNull();
+  });
+
+  it("returns null for null raw value", () => {
+    const config = makeSvaConfig(["region"], ["year"], ["revenue"]);
+    const pd = new PivotData(SVA_FLAT, config);
+    const idx = getIndex(null, pd, ["US"], ["2023"], "revenue");
+    expect(idx).toBeNull();
+  });
+});

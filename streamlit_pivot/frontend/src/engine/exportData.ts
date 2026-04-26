@@ -45,6 +45,13 @@ import {
   type ProjectedRowEntry,
   type VisibleRowEntry,
 } from "../renderers/temporalHierarchy";
+import {
+  getRunningTotal,
+  getPctRunningTotal,
+  getRank,
+  getPctOfParent,
+  getIndex,
+} from "./showValuesAs";
 
 export type ExportFormat = "csv" | "tsv" | "clipboard" | "xlsx";
 export type ExportContent = "formatted" | "raw";
@@ -242,19 +249,64 @@ function formatExportValue(
     );
   }
   if (showAs && showAs !== "raw") {
-    let denominator: number | null = null;
-    if (showAs === "pct_of_total") {
-      denominator = pivotData.getGrandTotal(valField).value();
-    } else if (showAs === "pct_of_row") {
-      denominator = pivotData.getRowTotal(rowKey, valField).value();
-    } else if (showAs === "pct_of_col") {
-      denominator = pivotData.getColTotal(colKey, valField).value();
+    // ── Existing percentage modes ────────────────────────────────────────────
+    if (
+      showAs === "pct_of_total" ||
+      showAs === "pct_of_row" ||
+      showAs === "pct_of_col"
+    ) {
+      let denominator: number | null = null;
+      if (showAs === "pct_of_total") {
+        denominator = pivotData.getGrandTotal(valField).value();
+      } else if (showAs === "pct_of_row") {
+        denominator = pivotData.getRowTotal(rowKey, valField).value();
+      } else if (showAs === "pct_of_col") {
+        denominator = pivotData.getColTotal(colKey, valField).value();
+      }
+      if (denominator != null && denominator !== 0) {
+        const pct = rawValue / denominator;
+        return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
+      }
+      return { display: config.empty_cell_value, raw: null };
     }
-    if (denominator != null && denominator !== 0) {
-      const pct = rawValue / denominator;
+
+    // ── 0.5.0 analytical modes ───────────────────────────────────────────────
+    if (showAs === "running_total") {
+      const rt = getRunningTotal(pivotData, rowKey, colKey, valField);
+      if (rt === null) return { display: config.empty_cell_value, raw: null };
+      const pattern =
+        getSyntheticMeasureFormat(config, valField) ??
+        config.number_format?.[valField] ??
+        config.number_format?.["__all__"];
+      if (pattern) {
+        return {
+          display: formatWithPattern(rt, pattern),
+          raw: rt,
+          numberFormat: patternToExcelFormat(pattern),
+        };
+      }
+      return { display: cleanNumber(rt), raw: rt };
+    }
+    if (showAs === "pct_running_total") {
+      const pct = getPctRunningTotal(pivotData, rowKey, colKey, valField);
+      if (pct === null) return { display: config.empty_cell_value, raw: null };
       return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
     }
-    return { display: config.empty_cell_value, raw: null };
+    if (showAs === "rank") {
+      const r = getRank(pivotData, rowKey, colKey, valField);
+      if (r === null) return { display: config.empty_cell_value, raw: null };
+      return { display: String(r), raw: r };
+    }
+    if (showAs === "pct_of_parent") {
+      const pct = getPctOfParent(rawValue, pivotData, rowKey, colKey, valField);
+      if (pct === null) return { display: config.empty_cell_value, raw: null };
+      return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
+    }
+    if (showAs === "index") {
+      const idx = getIndex(rawValue, pivotData, rowKey, colKey, valField);
+      if (idx === null) return { display: config.empty_cell_value, raw: null };
+      return { display: cleanNumber(idx), raw: idx };
+    }
   }
 
   const pattern =
@@ -305,37 +357,70 @@ function formatExportTotalValue(
     );
   }
   if (showAs && showAs !== "raw") {
-    if (isTotalOfShowAsAxis === "row" && showAs === "pct_of_row")
-      return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
-    if (isTotalOfShowAsAxis === "col" && showAs === "pct_of_col")
-      return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
-    if (isTotalOfShowAsAxis === "grand")
-      return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
-    if (showAs === "pct_of_total") {
-      const grand = pivotData.getGrandTotal(valField).value();
-      if (grand) {
-        const pct = rawValue / grand;
-        return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
-      }
-      return { display: config.empty_cell_value, raw: null };
-    }
-    if (showAs === "pct_of_row") {
+    // ── 0.5.0 analytical modes — totals export raw aggregate ─────────────────
+    if (
+      showAs === "running_total" ||
+      showAs === "pct_running_total" ||
+      showAs === "rank"
+    ) {
+      // Fall through to raw formatting below
+    } else if (showAs === "pct_of_parent") {
+      if (isTotalOfShowAsAxis === "grand")
+        return { display: config.empty_cell_value, raw: null };
       const denom = showAsDenominators?.row;
       if (denom != null && denom !== 0) {
         const pct = rawValue / denom;
         return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
       }
       return { display: config.empty_cell_value, raw: null };
-    }
-    if (showAs === "pct_of_col") {
-      const denom = showAsDenominators?.col;
-      if (denom != null && denom !== 0) {
-        const pct = rawValue / denom;
-        return { display: formatPercent(pct), raw: pct, numberFormat: "0.0%" };
-      }
+    } else if (showAs === "index") {
       return { display: config.empty_cell_value, raw: null };
-    }
-  }
+    } else {
+      // ── Existing percentage modes ──────────────────────────────────────────
+      if (isTotalOfShowAsAxis === "row" && showAs === "pct_of_row")
+        return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
+      if (isTotalOfShowAsAxis === "col" && showAs === "pct_of_col")
+        return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
+      if (isTotalOfShowAsAxis === "grand")
+        return { display: formatPercent(1), raw: 1, numberFormat: "0.0%" };
+      if (showAs === "pct_of_total") {
+        const grand = pivotData.getGrandTotal(valField).value();
+        if (grand) {
+          const pct = rawValue / grand;
+          return {
+            display: formatPercent(pct),
+            raw: pct,
+            numberFormat: "0.0%",
+          };
+        }
+        return { display: config.empty_cell_value, raw: null };
+      }
+      if (showAs === "pct_of_row") {
+        const denom = showAsDenominators?.row;
+        if (denom != null && denom !== 0) {
+          const pct = rawValue / denom;
+          return {
+            display: formatPercent(pct),
+            raw: pct,
+            numberFormat: "0.0%",
+          };
+        }
+        return { display: config.empty_cell_value, raw: null };
+      }
+      if (showAs === "pct_of_col") {
+        const denom = showAsDenominators?.col;
+        if (denom != null && denom !== 0) {
+          const pct = rawValue / denom;
+          return {
+            display: formatPercent(pct),
+            raw: pct,
+            numberFormat: "0.0%",
+          };
+        }
+        return { display: config.empty_cell_value, raw: null };
+      }
+    } // end else (existing percentage modes)
+  } // end if (showAs && showAs !== "raw")
 
   const pattern =
     getSyntheticMeasureFormat(config, valField) ??

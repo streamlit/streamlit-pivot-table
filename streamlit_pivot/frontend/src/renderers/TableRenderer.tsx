@@ -66,6 +66,13 @@ import {
   dataCellByMeasureStyle,
 } from "./styleHelpers";
 import { computeCellStyle } from "./ConditionalFormat";
+import {
+  getRunningTotal,
+  getPctRunningTotal,
+  getRank,
+  getPctOfParent,
+  getIndex,
+} from "../engine/showValuesAs";
 import HeaderMenu from "./HeaderMenu";
 import { useHeaderMenu } from "./useHeaderMenu";
 import {
@@ -376,18 +383,58 @@ function formatCellValue(
   }
 
   if (showAs && showAs !== "raw") {
-    let denominator: number | null = null;
-    if (showAs === "pct_of_total") {
-      denominator = pivotData.getGrandTotal(valField).value();
-    } else if (showAs === "pct_of_row") {
-      denominator = pivotData.getRowTotal(rowKey, valField).value();
-    } else if (showAs === "pct_of_col") {
-      denominator = pivotData.getColTotal(colKey, valField).value();
+    // ── Existing percentage modes ────────────────────────────────────────────
+    if (
+      showAs === "pct_of_total" ||
+      showAs === "pct_of_row" ||
+      showAs === "pct_of_col"
+    ) {
+      let denominator: number | null = null;
+      if (showAs === "pct_of_total") {
+        denominator = pivotData.getGrandTotal(valField).value();
+      } else if (showAs === "pct_of_row") {
+        denominator = pivotData.getRowTotal(rowKey, valField).value();
+      } else if (showAs === "pct_of_col") {
+        denominator = pivotData.getColTotal(colKey, valField).value();
+      }
+      if (denominator != null && denominator !== 0) {
+        return { text: formatPercent(rawValue / denominator) };
+      }
+      return { text: emptyCellValue };
     }
-    if (denominator != null && denominator !== 0) {
-      return { text: formatPercent(rawValue / denominator) };
+
+    // ── 0.5.0 analytical modes ───────────────────────────────────────────────
+    if (showAs === "running_total") {
+      const rt = getRunningTotal(pivotData, rowKey, colKey, valField);
+      if (rt === null) return { text: emptyCellValue };
+      const pattern =
+        getSyntheticMeasureFormat(config, valField) ??
+        config.number_format?.[valField] ??
+        config.number_format?.["__all__"];
+      if (pattern) return { text: formatWithPattern(rt, pattern) };
+      return { text: "" }; // fallback: caller uses agg.format()
     }
-    return { text: emptyCellValue };
+    if (showAs === "pct_running_total") {
+      const pct = getPctRunningTotal(pivotData, rowKey, colKey, valField);
+      return { text: pct === null ? emptyCellValue : formatPercent(pct) };
+    }
+    if (showAs === "rank") {
+      const r = getRank(pivotData, rowKey, colKey, valField);
+      return { text: r === null ? emptyCellValue : String(r) };
+    }
+    if (showAs === "pct_of_parent") {
+      const pct = getPctOfParent(rawValue, pivotData, rowKey, colKey, valField);
+      return { text: pct === null ? emptyCellValue : formatPercent(pct) };
+    }
+    if (showAs === "index") {
+      const idx = getIndex(rawValue, pivotData, rowKey, colKey, valField);
+      return {
+        text:
+          idx === null
+            ? emptyCellValue
+            : String(parseFloat(idx.toPrecision(6))),
+      };
+    }
   }
 
   const pattern =
@@ -474,23 +521,59 @@ function formatTotalCellValue(
   }
 
   if (showAs && showAs !== "raw" && rawValue !== null) {
-    if (isTotalOfShowAsAxis === "row" && showAs === "pct_of_row")
-      return formatPercent(1);
-    if (isTotalOfShowAsAxis === "col" && showAs === "pct_of_col")
-      return formatPercent(1);
-    if (isTotalOfShowAsAxis === "grand") return formatPercent(1);
-    if (showAs === "pct_of_total") {
-      const grand = pivotData.getGrandTotal(valField).value();
-      return grand ? formatPercent(rawValue / grand) : config.empty_cell_value;
+    // ── Existing percentage modes ────────────────────────────────────────────
+    if (
+      showAs === "pct_of_total" ||
+      showAs === "pct_of_row" ||
+      showAs === "pct_of_col"
+    ) {
+      if (isTotalOfShowAsAxis === "row" && showAs === "pct_of_row")
+        return formatPercent(1);
+      if (isTotalOfShowAsAxis === "col" && showAs === "pct_of_col")
+        return formatPercent(1);
+      if (isTotalOfShowAsAxis === "grand") return formatPercent(1);
+      if (showAs === "pct_of_total") {
+        const grand = pivotData.getGrandTotal(valField).value();
+        return grand
+          ? formatPercent(rawValue / grand)
+          : config.empty_cell_value;
+      }
+      if (showAs === "pct_of_row") {
+        const denom = showAsDenominators?.row;
+        if (denom != null && denom !== 0)
+          return formatPercent(rawValue / denom);
+        return config.empty_cell_value;
+      }
+      if (showAs === "pct_of_col") {
+        const denom = showAsDenominators?.col;
+        if (denom != null && denom !== 0)
+          return formatPercent(rawValue / denom);
+        return config.empty_cell_value;
+      }
     }
-    if (showAs === "pct_of_row") {
+
+    // ── 0.5.0 analytical modes — totals/subtotals behaviour ─────────────────
+    // `running_total`, `pct_running_total`, `rank`: display raw aggregate for
+    // total/subtotal rows — a running total at a subtotal equals the subtotal
+    // itself, and 100% for pct_running_total would be misleading.
+    if (
+      showAs === "running_total" ||
+      showAs === "pct_running_total" ||
+      showAs === "rank"
+    ) {
+      // Fall through to raw aggregate formatting below (no return here)
+    } else if (showAs === "pct_of_parent") {
+      // Subtotal rows show pct_of_parent relative to their own parent.
+      // `isTotalOfShowAsAxis === "grand"` means this is the grand total — no parent.
+      if (isTotalOfShowAsAxis === "grand") return config.empty_cell_value;
+      // For subtotal rows we need the rowKey (not available directly here).
+      // The caller passes showAsDenominators.row as the parent subtotal value
+      // when this is a row subtotal context.
       const denom = showAsDenominators?.row;
       if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
       return config.empty_cell_value;
-    }
-    if (showAs === "pct_of_col") {
-      const denom = showAsDenominators?.col;
-      if (denom != null && denom !== 0) return formatPercent(rawValue / denom);
+    } else if (showAs === "index") {
+      // Index is undefined for total/subtotal rows.
       return config.empty_cell_value;
     }
   }

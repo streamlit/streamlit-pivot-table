@@ -319,16 +319,27 @@ Scoped sorting (`dimension` set) only reorders that level and below when subtota
 
 ### Show Values As
 
-| Mode | Value |
-|------|-------|
-| Raw | `"raw"` |
-| % of Grand Total | `"pct_of_total"` |
-| % of Row Total | `"pct_of_row"` |
-| % of Column Total | `"pct_of_col"` |
-| Diff vs Previous Period | `"diff_from_prev"` |
-| % Diff vs Previous Period | `"pct_diff_from_prev"` |
-| Diff vs Previous Year | `"diff_from_prev_year"` |
-| % Diff vs Previous Year | `"pct_diff_from_prev_year"` |
+| Mode | Value | Notes |
+|------|-------|-------|
+| Raw | `"raw"` | Default |
+| % of Grand Total | `"pct_of_total"` | |
+| % of Row Total | `"pct_of_row"` | |
+| % of Column Total | `"pct_of_col"` | |
+| Diff vs Previous Period | `"diff_from_prev"` | Requires active temporal axis |
+| % Diff vs Previous Period | `"pct_diff_from_prev"` | Requires active temporal axis |
+| Diff vs Previous Year | `"diff_from_prev_year"` | Requires active temporal axis |
+| % Diff vs Previous Year | `"pct_diff_from_prev_year"` | Requires active temporal axis |
+| **Running Total** | `"running_total"` | 0.5.0+ — cumulative sum per row parent group |
+| **% Running Total** | `"pct_running_total"` | 0.5.0+ — running total ÷ parent-group total |
+| **Rank** | `"rank"` | 0.5.0+ — competition rank (1,1,3) per column, per parent |
+| **% of Parent** | `"pct_of_parent"` | 0.5.0+ — cell ÷ immediate parent subtotal |
+| **Index** | `"index"` | 0.5.0+ — Excel INDEX: `cell × grand / (rowTotal × colTotal)` |
+
+**Analytical mode semantics (0.5.0+):**
+- Totals / subtotals show raw aggregate for `running_total`, `pct_running_total`, `rank`; `index` shows empty; `pct_of_parent` shows relative to the subtotal's own parent.
+- Null denominators → `empty_cell_value`.
+- Export matches display (transformed values).
+- Mutually exclusive with period-comparison modes per field.
 
 Period-comparison modes require an active grouped temporal axis (auto hierarchy or explicit `date_grains`). Synthetic measures render as raw values and ignore `show_values_as`.
 
@@ -1306,9 +1317,9 @@ Before telling the user "replicated," walk through this checklist. If any item i
 
 | Source feature | Supported? | Workaround |
 |---|---|---|
-| **Running Total In / % Running Total** | No | None at the component level. Pre-compute a running-total column in Pandas (`df["cumulative"] = df.groupby(...)["Revenue"].cumsum()`) and add it as a regular value field. |
-| **Rank (Smallest to Largest / Largest to Smallest)** | No | Pre-compute `df["rank"] = df["Revenue"].rank(...)` in Pandas and add as a value field. |
-| **Index** (Excel's Show Values As → Index) | No | Not expressible as a single formula over aggregated fields. Compute in Pandas first. |
+| **Running Total In / % Running Total** | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "running_total"}` or `"pct_running_total"`. |
+| **Rank (Smallest to Largest / Largest to Smallest)** | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "rank"}` (competition rank, largest first). |
+| **Index** (Excel's Show Values As → Index) | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "index"}`. |
 | **Icon sets** (Excel's green/yellow/red arrows, etc.) | No | Closest approximation: a `color_scale` with `mid_value` anchored at a neutral point, or multiple `threshold` rules with emoji-free colored backgrounds. |
 | **Top N / Bottom N / Above Average conditional formatting** | No | Compute the cutoff in Pandas (`df["Revenue"].nlargest(10).min()` or `df["Revenue"].mean()`) and pass it as a `threshold` rule. |
 | **Values laid out on rows** (measures on the row axis) | No | `st_pivot_table` always renders measures on the value axis inside the column hierarchy. If the source tool has measures on rows, reshape by swapping `rows` and `columns`. |

@@ -1262,6 +1262,43 @@ export class PivotData {
     return agg;
   }
 
+  /**
+   * Return the sorted leaf row keys in current display order (after sort, excluding total rows).
+   *
+   * This is an alias for `getRowKeys()` and is used by the showValuesAs transform layer
+   * (running total, rank) to iterate rows in the same order they appear in the table.
+   *
+   * NOTE: When `values_axis="rows"` is introduced in Commit 5, this method must be updated
+   * to return `__vf__:`-encoded leaf keys so that running total / rank transforms look up
+   * the correct encoded row keys. Coordinate this update in Commit 5.
+   */
+  getSortedLeafRowKeys(): string[][] {
+    return this.getRowKeys();
+  }
+
+  /**
+   * Return the subtotal for the immediate parent of `rowKey` at the given `colKey`
+   * and `valField`. The "parent" is `rowKey.slice(0, -1)`.
+   *
+   * - If `rowKey` is a top-level key (length 1), the parent is the root — return the
+   *   column total (`getColTotal(colKey, valField)`), i.e. the same as a single-level
+   *   pivot's denominator for `pct_running_total`.
+   * - If `rowKey` is empty, return null.
+   */
+  getParentSubtotal(
+    rowKey: string[],
+    colKey: string[],
+    valField: string,
+  ): number | null {
+    if (rowKey.length === 0) return null;
+    const parentKey = rowKey.slice(0, -1);
+    if (parentKey.length === 0) {
+      // Top-level row: parent is the column grand total
+      return this.getColTotal(colKey, valField).value();
+    }
+    return this.getSubtotalAggregator(parentKey, colKey, valField).value();
+  }
+
   getGrandTotal(valField?: string): Aggregator {
     const field = valField ?? this._defaultValueField();
     const synthetic = this._syntheticById.get(field);
