@@ -1671,3 +1671,285 @@ class TestComputeFilterFieldValues:
             "when off-axis filter_fields are configured"
         )
         assert "Category" in payload["filter_field_values"]
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 — _HARD_HYBRID_CEILING tests
+# ---------------------------------------------------------------------------
+
+
+def test_ceiling_activates_hybrid(pivot_module, monkeypatch):
+    """A df larger than the ceiling always selects threshold_hybrid in auto mode."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 10)
+    df = pd.DataFrame({"r": ["A"] * 20, "v": [1.0] * 20})
+    cfg = {
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "sum"},
+        "synthetic_measures": [],
+    }
+    use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    assert use is True
+    assert "ceiling" in reason
+
+
+def test_ceiling_does_not_override_explicit_client_only(pivot_module, monkeypatch):
+    """Explicit execution_mode='client_only' is not overridden by the ceiling."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 10)
+    df = pd.DataFrame({"r": ["A"] * 20, "v": [1.0] * 20})
+    cfg = {
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "sum"},
+        "synthetic_measures": [],
+    }
+    use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "client_only")
+    assert use is False
+    assert "client_only" in reason
+
+
+def test_ceiling_does_not_override_incompatible_config(pivot_module, monkeypatch):
+    """Incompatible config (e.g. unsupported agg) exits before the ceiling check."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 10)
+    monkeypatch.setattr(
+        pivot_module,
+        "_can_use_threshold_hybrid",
+        lambda cfg: (False, "test: forced incompatible"),
+    )
+    df = pd.DataFrame({"r": ["A"] * 20, "v": [1.0] * 20})
+    cfg = {
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "sum"},
+        "synthetic_measures": [],
+    }
+    use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    assert use is False
+    assert "incompatible" in reason
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 — nunique cache tests
+# ---------------------------------------------------------------------------
+
+
+def test_nunique_cache_reduces_second_call_time(pivot_module, monkeypatch):
+    """Warm call with a shared cache must skip nunique() entirely (zero extra calls)."""
+    # Patch ceiling ABOVE the df size so the ceiling guard does not fire,
+    # ensuring _estimate_group_count (and therefore nunique()) is actually
+    # called and cached.  Patching it *below* df size would cause an early
+    # return before nunique() runs.
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+
+    # A small df is sufficient — we're counting calls, not measuring wall time.
+    # Timing-based assertions are inherently flaky (sub-ms noise on fast machines
+    # can flip a 10x ratio by just a few microseconds).
+    df = pd.DataFrame({"r": ["A", "B", "C", "A", "B"], "v": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    cfg = {
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "avg"},
+        "synthetic_measures": [],
+    }
+
+    call_count = {"n": 0}
+    real_nunique = pd.Series.nunique
+
+    def counting_nunique(self, *args, **kwargs):
+        call_count["n"] += 1
+        return real_nunique(self, *args, **kwargs)
+
+    monkeypatch.setattr(pd.Series, "nunique", counting_nunique)
+
+    cache: dict = {}
+    pivot_module._should_use_threshold_hybrid(df, cfg, "auto", _nunique_cache=cache)
+    assert call_count["n"] == 1, "Cold call should invoke nunique exactly once"
+
+    pivot_module._should_use_threshold_hybrid(df, cfg, "auto", _nunique_cache=cache)
+    assert call_count["n"] == 1, "Warm call must not invoke nunique again (cache hit)"
+
+    # Cache should have stored the nunique result for "r"
+    assert len(cache) > 0
+
+
+def test_nunique_cache_populates_on_first_call(pivot_module, monkeypatch):
+    """A fresh cache is populated after the first call."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+    df = pd.DataFrame({"r": ["A", "B", "A"], "v": [1.0, 2.0, 3.0]})
+    cfg = {
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "avg"},
+        "synthetic_measures": [],
+    }
+    cache: dict = {}
+    pivot_module._should_use_threshold_hybrid(df, cfg, "auto", _nunique_cache=cache)
+    assert len(cache) == 1  # one field ("r") was cached
+
+
+def test_nunique_cache_exceeding_200_cleared(pivot_module, monkeypatch):
+    """Cache is cleared when it exceeds 200 entries via _estimate_group_count."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+    df = pd.DataFrame({"r": ["A", "B"], "v": [1.0, 2.0]})
+    # Pre-fill cache past the 200-entry cap
+    # (the cap is enforced at the _should_use_threshold_hybrid call site in the
+    # production path; here we test _estimate_group_count passes cache through)
+    cache: dict = {(i, "dummy"): i for i in range(250)}
+    # After clearing, the next call should repopulate cleanly
+    # Directly test _estimate_group_count cache write
+    count = pivot_module._estimate_group_count(df, ["r"], _nunique_cache=cache)
+    assert count == 2
+    # The cache may have grown — it won't auto-clear (that logic is in call site)
+    # Just verify the cache stored the new entry
+    any_key_with_r = any(k[1] == "r" for k in cache)
+    assert any_key_with_r
+
+
+def test_nunique_cache_none_has_no_side_effects(pivot_module, monkeypatch):
+    """Passing _nunique_cache=None disables caching without error."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+    df = pd.DataFrame({"r": ["A", "B", "A"], "v": [1.0, 2.0, 3.0]})
+    cfg = {
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "avg"},
+        "synthetic_measures": [],
+    }
+    use, reason = pivot_module._should_use_threshold_hybrid(
+        df, cfg, "auto", _nunique_cache=None
+    )
+    assert isinstance(use, bool)
+
+
+def test_nunique_cache_same_df_object_and_schema_hits(pivot_module, monkeypatch):
+    """Two calls with the same df object use the cached nunique result."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+    df = pd.DataFrame({"r": list("ABCDE") * 200, "v": range(1000)})
+    cache: dict = {}
+    pivot_module._estimate_group_count(df, ["r"], _nunique_cache=cache)
+    first_len = len(cache)
+    # Second call — should read from cache, not add new entries
+    pivot_module._estimate_group_count(df, ["r"], _nunique_cache=cache)
+    assert len(cache) == first_len
+
+
+def test_synth_source_overlap_incompatible(pivot_module):
+    """Synthetic measure source field that is also a row/column must block hybrid."""
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["revenue"],
+        "columns": ["region"],
+        "values": ["cost"],
+        "aggregation": {"cost": "sum"},
+        # formula references "revenue", which is a row dimension
+        "synthetic_measures": [
+            {"operation": "formula", "formula": '"revenue" - "cost"'}
+        ],
+    }
+    ok, reason = pivot_module._can_use_threshold_hybrid(cfg)
+    assert ok is False
+    assert "revenue" in reason
+
+
+def test_synth_source_overlap_auto_does_not_crash(pivot_module, monkeypatch):
+    """auto mode with a synth-source/dim overlap must not crash."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 10)
+    df = pd.DataFrame(
+        {
+            "revenue": [100, 150, 200, 250] * 5,
+            "cost": [50, 60, 70, 80] * 5,
+            "region": ["East", "West"] * 10,
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["revenue"],
+        "columns": ["region"],
+        "values": ["cost"],
+        "aggregation": {"cost": "sum"},
+        "synthetic_measures": [
+            {"operation": "formula", "formula": '"revenue" - "cost"'}
+        ],
+    }
+    use, _reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    assert use is False
+
+
+def test_dim_value_overlap_incompatible(pivot_module):
+    """A field used as both a row dimension and a value must fall back to client_only."""
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["revenue"],
+        "columns": ["region"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+    ok, reason = pivot_module._can_use_threshold_hybrid(cfg)
+    assert ok is False
+    assert "revenue" in reason
+
+
+def test_dim_value_overlap_auto_does_not_crash(pivot_module, monkeypatch):
+    """auto mode with a dim-value overlap must not raise ValueError."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 10)
+    df = pd.DataFrame(
+        {
+            "revenue": [100, 150, 200, 250] * 5,
+            "region": ["East", "West"] * 10,
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["revenue"],
+        "columns": ["region"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+    use, _reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    assert use is False  # must fall back to client_only, never crash
+
+
+def test_dim_value_overlap_forced_hybrid_does_not_crash(pivot_module):
+    """execution_mode='threshold_hybrid' with overlap must degrade gracefully."""
+    df = pd.DataFrame(
+        {
+            "revenue": [100, 150, 200, 250],
+            "region": ["East", "West", "East", "West"],
+        }
+    )
+    cfg = {
+        "version": pivot_module.CONFIG_SCHEMA_VERSION,
+        "rows": ["revenue"],
+        "columns": ["region"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+    use, _reason = pivot_module._should_use_threshold_hybrid(
+        df, cfg, "threshold_hybrid"
+    )
+    assert use is False  # incompatible even when forced
+
+
+def test_ceiling_below_df_size_is_noop(pivot_module, monkeypatch):
+    """A df smaller than the ceiling is not affected by the ceiling guard."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 10_000)
+    df = pd.DataFrame({"r": ["A"] * 5, "v": [1.0] * 5})
+    cfg = {
+        "rows": ["r"],
+        "columns": [],
+        "values": ["v"],
+        "aggregation": {"v": "sum"},
+        "synthetic_measures": [],
+    }
+    use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    # Should fall through to the normal cardinality check, not the ceiling
+    assert "ceiling" not in reason

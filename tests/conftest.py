@@ -15,12 +15,20 @@
 
 """Shared fixtures for Python-side unit tests."""
 
+import sys
 from importlib import import_module
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
 import pytest
+
+# Ensure the local workspace source is always imported instead of any
+# version installed in site-packages (matches the fix in perf_benchmark.py).
+_repo_root = str(Path(__file__).resolve().parent.parent)
+if sys.path[:1] != [_repo_root]:
+    sys.path.insert(0, _repo_root)
 
 
 @pytest.fixture(scope="session")

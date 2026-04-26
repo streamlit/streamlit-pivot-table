@@ -439,3 +439,288 @@ class TestSidecarFingerprintWithAdaptive:
             adaptive_date_grains={"d": "month"},
         )
         assert fp1 == fp2
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 — Golden parity tests (vectorised _compute_hybrid_totals vs fixtures)
+# ---------------------------------------------------------------------------
+
+
+class TestSidecarGoldenParity:
+    """Assert the vectorised sidecar implementation matches pre-vectorisation fixtures.
+
+    Fixtures were generated with `python - <<'EOF'...EOF` script against the
+    original Python-loop implementation and saved to tests/golden_data/sidecar_golden.json.
+    """
+
+    @pytest.fixture(scope="class")
+    def golden(self):
+        import json
+        import pathlib
+
+        p = pathlib.Path(__file__).parent / "golden_data" / "sidecar_golden.json"
+        return json.loads(p.read_text())
+
+    def _normalise(self, obj):
+        """Sort list entries by JSON key so ordering differences don't fail equality."""
+        import json
+        import math
+
+        if isinstance(obj, dict):
+            return {k: self._normalise(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            normalised = [self._normalise(v) for v in obj]
+            try:
+                return sorted(
+                    normalised, key=lambda x: json.dumps(x, sort_keys=True, default=str)
+                )
+            except Exception:
+                return normalised
+        if isinstance(obj, float) and math.isnan(obj):
+            return None
+        return obj
+
+    def _run(self, pm, df, cfg, null_handling=None, column_types=None):
+        result = pm._compute_hybrid_totals(
+            df, cfg, null_handling, column_types=column_types
+        )
+        if result is None:
+            return None
+        return {k: v for k, v in result.items() if k != "sidecar_fingerprint"}
+
+    def _assert_parity(self, name, actual, golden):
+        assert name in golden, f"No fixture for {name!r}"
+        expected = golden[name]
+        assert self._normalise(actual) == self._normalise(
+            expected
+        ), f"Parity failure for {name!r}"
+
+    def test_rows_only_avg_separate(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU", None],
+                "revenue": [100.0, 200.0, 50.0, 150.0, 75.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "avg"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "rows_only_avg_separate",
+            self._run(pivot_module, df, cfg, "separate"),
+            golden,
+        )
+
+    def test_rows_only_count_distinct_zero(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU", None],
+                "revenue": [100.0, 200.0, 50.0, 150.0, 75.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "count_distinct"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "rows_only_count_distinct_zero",
+            self._run(pivot_module, df, cfg, "zero"),
+            golden,
+        )
+
+    def test_rows_only_median_exclude(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU", None],
+                "revenue": [100.0, 200.0, 50.0, 150.0, 75.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "median"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "rows_only_median_exclude",
+            self._run(pivot_module, df, cfg, "exclude"),
+            golden,
+        )
+
+    def test_rows_only_first_separate(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU", None],
+                "revenue": [100.0, 200.0, 50.0, 150.0, 75.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "first"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "rows_only_first_separate",
+            self._run(pivot_module, df, cfg, "separate"),
+            golden,
+        )
+
+    def test_rows_only_last_separate(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU", None],
+                "revenue": [100.0, 200.0, 50.0, 150.0, 75.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "last"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "rows_only_last_separate",
+            self._run(pivot_module, df, cfg, "separate"),
+            golden,
+        )
+
+    def test_rows_cols_avg_separate(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU"],
+                "year": ["2023", "2024", "2023", "2024"],
+                "revenue": [100.0, 150.0, 200.0, 250.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": ["year"],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "avg"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "rows_cols_avg_separate",
+            self._run(pivot_module, df, cfg, "separate"),
+            golden,
+        )
+
+    def test_rows_cols_count_distinct_zero(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU"],
+                "year": ["2023", "2024", "2023", "2024"],
+                "revenue": [100.0, 150.0, 200.0, 250.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": ["year"],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "count_distinct"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "rows_cols_count_distinct_zero",
+            self._run(pivot_module, df, cfg, "zero"),
+            golden,
+        )
+
+    def test_col_prefix_sidecar(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU"],
+                "year": ["2023", "2023", "2024", "2024"],
+                "quarter": ["Q1", "Q2", "Q1", "Q2"],
+                "revenue": [100.0, 150.0, 200.0, 250.0],
+            }
+        )
+        cfg = {
+            "rows": ["region"],
+            "columns": ["year", "quarter"],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "avg"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "col_prefix_avg_separate",
+            self._run(pivot_module, df, cfg, "separate"),
+            golden,
+        )
+
+    def test_subtotals_3row_avg_separate(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US"] * 4 + ["EU"] * 4,
+                "country": ["NY", "NY", "LA", "LA"] * 2,
+                "city": ["NYC", "BKN"] * 4,
+                "revenue": [100.0, 80.0, 120.0, 60.0, 200.0, 150.0, 90.0, 110.0],
+            }
+        )
+        cfg = {
+            "rows": ["region", "country", "city"],
+            "columns": [],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "avg"},
+            "show_subtotals": True,
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "subtotals_3row_avg_separate",
+            self._run(pivot_module, df, cfg, "separate"),
+            golden,
+        )
+
+    def test_cross_subtotals_count_distinct_zero(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "region": ["US", "US", "EU", "EU"] * 3,
+                "year": ["2023"] * 4 + ["2024"] * 4 + ["2023"] * 4,
+                "cat": list("AABB") * 3,
+                "revenue": [float(i) for i in range(12)],
+            }
+        )
+        cfg = {
+            "rows": ["region", "year"],
+            "columns": ["cat"],
+            "values": ["revenue"],
+            "aggregation": {"revenue": "count_distinct"},
+            "show_subtotals": True,
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "cross_subtotals_countdistinct_zero",
+            self._run(pivot_module, df, cfg, "zero"),
+            golden,
+        )
+
+    def test_special_column_names_avg_separate(self, pivot_module, golden):
+        df = pd.DataFrame(
+            {
+                "my region": ["US", "US", "EU"],
+                "my.value": [100.0, 200.0, 150.0],
+            }
+        )
+        cfg = {
+            "rows": ["my region"],
+            "columns": [],
+            "values": ["my.value"],
+            "aggregation": {"my.value": "avg"},
+            "synthetic_measures": [],
+        }
+        self._assert_parity(
+            "special_col_names_avg_separate",
+            self._run(pivot_module, df, cfg, "separate"),
+            golden,
+        )

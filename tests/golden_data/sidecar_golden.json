@@ -1,0 +1,1512 @@
+{
+  "rows_only_avg_separate": {
+    "grand": {
+      "revenue": 115.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "(null)"
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_avg_zero": {
+    "grand": {
+      "revenue": 115.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_avg_exclude": {
+    "grand": {
+      "revenue": 115.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_count_distinct_separate": {
+    "grand": {
+      "revenue": 5
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "(null)"
+        ],
+        "values": {
+          "revenue": 1
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_count_distinct_zero": {
+    "grand": {
+      "revenue": 5
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 1
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_count_distinct_exclude": {
+    "grand": {
+      "revenue": 5
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 1
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_median_separate": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "(null)"
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_median_zero": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_median_exclude": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_percentile_90_separate": {
+    "grand": {
+      "revenue": 180.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 190.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 140.0
+        }
+      },
+      {
+        "key": [
+          "(null)"
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_percentile_90_zero": {
+    "grand": {
+      "revenue": 180.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 190.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 140.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_percentile_90_exclude": {
+    "grand": {
+      "revenue": 180.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 190.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 140.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_first_separate": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 50.0
+        }
+      },
+      {
+        "key": [
+          "(null)"
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_first_zero": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 50.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_first_exclude": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 50.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_last_separate": {
+    "grand": {
+      "revenue": 75.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "(null)"
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_last_zero": {
+    "grand": {
+      "revenue": 75.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "rows_only_last_exclude": {
+    "grand": {
+      "revenue": 75.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          ""
+        ],
+        "values": {
+          "revenue": 75.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "cols_only_avg_separate": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "cols_only_avg_zero": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "cols_only_count_distinct_separate": {
+    "grand": {
+      "revenue": 4
+    },
+    "row": [],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      }
+    ]
+  },
+  "cols_only_count_distinct_zero": {
+    "grand": {
+      "revenue": 4
+    },
+    "row": [],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      }
+    ]
+  },
+  "cols_only_median_separate": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "cols_only_median_zero": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "rows_cols_avg_separate": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 125.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 225.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "rows_cols_avg_zero": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 125.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 225.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "rows_cols_count_distinct_separate": {
+    "grand": {
+      "revenue": 4
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      }
+    ]
+  },
+  "rows_cols_count_distinct_zero": {
+    "grand": {
+      "revenue": 4
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      }
+    ]
+  },
+  "rows_cols_median_separate": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 125.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 225.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "rows_cols_median_zero": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 125.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 225.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ]
+  },
+  "rows_cols_first_separate": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      }
+    ]
+  },
+  "rows_cols_first_zero": {
+    "grand": {
+      "revenue": 100.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      }
+    ]
+  },
+  "rows_cols_last_separate": {
+    "grand": {
+      "revenue": 250.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 250.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 250.0
+        }
+      }
+    ]
+  },
+  "rows_cols_last_zero": {
+    "grand": {
+      "revenue": 250.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 250.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 250.0
+        }
+      }
+    ]
+  },
+  "col_prefix_avg_separate": {
+    "grand": {
+      "revenue": 175.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "revenue": 125.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 225.0
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "2023",
+          "Q1"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "2023",
+          "Q2"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "2024",
+          "Q1"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      },
+      {
+        "key": [
+          "2024",
+          "Q2"
+        ],
+        "values": {
+          "revenue": 250.0
+        }
+      }
+    ],
+    "col_prefix": [
+      {
+        "key": [
+          "2023"
+        ],
+        "row": [
+          "US"
+        ],
+        "values": {
+          "revenue": 125.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "row": [
+          "EU"
+        ],
+        "values": {
+          "revenue": 225.0
+        }
+      }
+    ],
+    "col_prefix_grand": [
+      {
+        "key": [
+          "2023"
+        ],
+        "values": {
+          "revenue": 125.0
+        }
+      },
+      {
+        "key": [
+          "2024"
+        ],
+        "values": {
+          "revenue": 225.0
+        }
+      }
+    ]
+  },
+  "subtotals_3row_avg_separate": {
+    "grand": {
+      "revenue": 113.75
+    },
+    "row": [
+      {
+        "key": [
+          "US",
+          "NY",
+          "NYC"
+        ],
+        "values": {
+          "revenue": 100.0
+        }
+      },
+      {
+        "key": [
+          "US",
+          "NY",
+          "BKN"
+        ],
+        "values": {
+          "revenue": 80.0
+        }
+      },
+      {
+        "key": [
+          "US",
+          "LA",
+          "NYC"
+        ],
+        "values": {
+          "revenue": 120.0
+        }
+      },
+      {
+        "key": [
+          "US",
+          "LA",
+          "BKN"
+        ],
+        "values": {
+          "revenue": 60.0
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "NY",
+          "NYC"
+        ],
+        "values": {
+          "revenue": 200.0
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "NY",
+          "BKN"
+        ],
+        "values": {
+          "revenue": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "LA",
+          "NYC"
+        ],
+        "values": {
+          "revenue": 90.0
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "LA",
+          "BKN"
+        ],
+        "values": {
+          "revenue": 110.0
+        }
+      }
+    ],
+    "col": [],
+    "subtotals": [
+      {
+        "key": [
+          "US"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 90.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 137.5
+        }
+      },
+      {
+        "key": [
+          "US",
+          "NY"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 90.0
+        }
+      },
+      {
+        "key": [
+          "US",
+          "LA"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 90.0
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "NY"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 175.0
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "LA"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 100.0
+        }
+      }
+    ],
+    "cross_subtotals": []
+  },
+  "special_col_names_avg_separate": {
+    "grand": {
+      "my.value": 150.0
+    },
+    "row": [
+      {
+        "key": [
+          "US"
+        ],
+        "values": {
+          "my.value": 150.0
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "values": {
+          "my.value": 150.0
+        }
+      }
+    ],
+    "col": []
+  },
+  "cross_subtotals_countdistinct_zero": {
+    "grand": {
+      "revenue": 12
+    },
+    "row": [
+      {
+        "key": [
+          "US",
+          "2023"
+        ],
+        "values": {
+          "revenue": 4
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "2023"
+        ],
+        "values": {
+          "revenue": 4
+        }
+      },
+      {
+        "key": [
+          "US",
+          "2024"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      },
+      {
+        "key": [
+          "EU",
+          "2024"
+        ],
+        "values": {
+          "revenue": 2
+        }
+      }
+    ],
+    "col": [
+      {
+        "key": [
+          "A"
+        ],
+        "values": {
+          "revenue": 6
+        }
+      },
+      {
+        "key": [
+          "B"
+        ],
+        "values": {
+          "revenue": 6
+        }
+      }
+    ],
+    "subtotals": [
+      {
+        "key": [
+          "US"
+        ],
+        "col": [
+          "A"
+        ],
+        "values": {
+          "revenue": 6
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "col": [
+          "B"
+        ],
+        "values": {
+          "revenue": 6
+        }
+      },
+      {
+        "key": [
+          "US"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 6
+        }
+      },
+      {
+        "key": [
+          "EU"
+        ],
+        "col": [],
+        "values": {
+          "revenue": 6
+        }
+      }
+    ],
+    "cross_subtotals": []
+  }
+}

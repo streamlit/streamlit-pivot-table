@@ -453,6 +453,11 @@ _warned_keys: set[str] = set()
 _PYTHON_CONFIG_STATE_PREFIX = "__streamlit_pivot_python_config__:"
 _DRILLDOWN_PAGE_SIZE = 500
 _DEFAULT_AUTO_DATE_GRAIN = "month"
+# Hard row ceiling for threshold_hybrid selection.  Any dataset at or above this
+# size is always pre-aggregated server-side, regardless of cardinality.  This
+# fixes the low-cardinality large-dataset bug where the compound AND condition
+# in the legacy heuristic would fall back to client_only and ship ~100MB payloads.
+_HARD_HYBRID_CEILING = 500_000
 
 
 def _get_temporal_hierarchy_levels(grain: str) -> list[str]:
@@ -531,10 +536,31 @@ def _compute_adaptive_date_grains(
     return result
 
 
-def _estimate_group_count(df: Any, fields: list[str]) -> int:
+def _estimate_group_count(
+    df: Any,
+    fields: list[str],
+    _nunique_cache: dict | None = None,
+) -> int:
     if not fields:
         return 1
-    distinct_counts = [int(df[field].nunique(dropna=False)) for field in fields]
+    # Build a fingerprint that covers the common "same schema, same size" case.
+    # False hits are safe — this is only an input to the threshold heuristic.
+    fingerprint = (
+        id(df),
+        len(df),
+        tuple(df.columns.tolist()),
+        str(df.dtypes.to_dict()),
+    )
+    distinct_counts = []
+    for field in fields:
+        cache_key = (fingerprint, field)
+        if _nunique_cache is not None and cache_key in _nunique_cache:
+            distinct_counts.append(_nunique_cache[cache_key])
+        else:
+            count = int(df[field].nunique(dropna=False))
+            if _nunique_cache is not None:
+                _nunique_cache[cache_key] = count
+            distinct_counts.append(count)
     return min(len(df), int(prod(distinct_counts)))
 
 
@@ -589,6 +615,28 @@ def _apply_source_filters(
 def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
     # Off-axis filters are applied server-side by _resolve_and_filter inside
     # _prepare_threshold_hybrid_frame before the groupby. No restriction needed.
+    #
+    # A field that appears in both rows/columns AND values cannot be expressed
+    # in a flat pre-aggregated DataFrame without duplicate column names
+    # (reset_index restores the dimension column while .agg() produces an agg
+    # column with the same name, raising ValueError).  Fall back to client_only
+    # so the frontend handles the aggregation itself — it already does this
+    # correctly in client_only mode.
+    dim_fields = set(config.get("rows", [])) | set(config.get("columns", []))
+    # Include synthetic measure source fields: _prepare_threshold_hybrid_frame
+    # aggregates config["values"] + synth_sources, so a synth source that is
+    # also a row/column dimension causes the same reset_index() column collision.
+    value_fields = set(config.get("values", [])) | set(
+        _get_synthetic_source_fields(config.get("synthetic_measures"))
+    )
+    overlap = dim_fields & value_fields
+    if overlap:
+        names = ", ".join(sorted(overlap))
+        return False, (
+            f"client_only required: field(s) [{names}] appear in both "
+            "rows/columns and values/synthetic-sources — hybrid pre-aggregation "
+            "would produce duplicate column names"
+        )
     return True, "config is compatible with threshold_hybrid"
 
 
@@ -596,6 +644,7 @@ def _should_use_threshold_hybrid(
     df: Any,
     config: PivotConfig,
     execution_mode: str,
+    _nunique_cache: dict | None = None,
 ) -> tuple[bool, str]:
     compatible, reason = _can_use_threshold_hybrid(config)
     if execution_mode == "client_only":
@@ -610,8 +659,24 @@ def _should_use_threshold_hybrid(
     if not compatible:
         return False, reason
 
-    row_groups = _estimate_group_count(df, config.get("rows", []))
-    col_groups = _estimate_group_count(df, config.get("columns", []))
+    # Hard ceiling: always pre-aggregate when the dataset is very large,
+    # regardless of cardinality.  This prevents low-cardinality large datasets
+    # (e.g. 1M rows × 5 distinct values) from being sent as full Arrow payloads
+    # in client_only mode.  Placed after compatibility and explicit-mode guards
+    # so those remain authoritative; placed before _estimate_group_count to skip
+    # the O(N) nunique() calls for datasets that always need hybrid.
+    if len(df) >= _HARD_HYBRID_CEILING:
+        return True, (
+            f"auto-selected threshold_hybrid: dataset exceeds {_HARD_HYBRID_CEILING:,} row ceiling "
+            "regardless of cardinality"
+        )
+
+    row_groups = _estimate_group_count(
+        df, config.get("rows", []), _nunique_cache=_nunique_cache
+    )
+    col_groups = _estimate_group_count(
+        df, config.get("columns", []), _nunique_cache=_nunique_cache
+    )
     rendered_values = max(1, len(config.get("values", [])))
     visible_cells = row_groups * min(col_groups, 200) * rendered_values
     estimated_pivot_groups = row_groups * col_groups
@@ -1595,24 +1660,122 @@ def _sidecar_agg_func(
     return None
 
 
+def _first_valid(x: Any) -> Any:
+    """Return first non-NaN element of a Series, or NaN if empty after dropna."""
+    clean = x.dropna()
+    return clean.iloc[0] if len(clean) else float("nan")
+
+
+def _last_valid(x: Any) -> Any:
+    """Return last non-NaN element of a Series, or NaN if empty after dropna."""
+    clean = x.dropna()
+    return clean.iloc[-1] if len(clean) else float("nan")
+
+
+def _build_sidecar_named_agg(
+    group_cols: list[str],
+    sidecar_fields: dict[str, str],
+    df: Any,
+    null_handling: Any,
+) -> tuple[Any, dict, list[str], dict[str, str]]:
+    """Build a NamedAgg dict for vectorised sidecar aggregation.
+
+    Returns ``(working_df, named_agg_dict, avg_fields, output_map)``.
+
+    *working_df* contains group_cols + pre-processed value columns.
+    *avg_fields* tracks the **output** column names for avg pairs (after
+    aliasing); callers pass this to ``_apply_avg_cols``.
+    *output_map* maps each original ``vf`` to its internal output column
+    name in the aggregated DataFrame.  When ``vf`` appears in both
+    ``group_cols`` and ``sidecar_fields``, ``reset_index()`` would produce
+    two columns with the same name and raise ``ValueError: cannot insert
+    <vf>, already exists``.  The alias ``{vf}__val`` avoids the collision.
+    Callers must use ``output_map[vf]`` to read the aggregated value for
+    field ``vf`` rather than ``vf`` directly.
+    """
+    collision_set = frozenset(group_cols) & frozenset(sidecar_fields)
+    needed_cols = list(dict.fromkeys([*group_cols, *sidecar_fields]))
+    working = df[needed_cols].copy()
+    named: dict = {}
+    avg_fields: list[str] = []  # output names (post-alias)
+    output_map: dict[str, str] = {}  # vf → internal output column name
+
+    for vf, agg in sidecar_fields.items():
+        # Alias output when this field is also a groupby dimension to avoid
+        # the duplicate-column ValueError from reset_index().
+        out = f"{vf}__val" if vf in collision_set else vf
+        output_map[vf] = out
+
+        if agg == "avg":
+            working[vf] = _coerce_measure_series(working[vf], vf, null_handling)
+            named[f"{out}__sum"] = pd.NamedAgg(column=vf, aggfunc="sum")
+            named[f"{out}__cnt"] = pd.NamedAgg(column=vf, aggfunc="count")
+            avg_fields.append(out)  # track the output alias, not vf
+        elif agg == "median":
+            working[vf] = _coerce_measure_series(working[vf], vf, null_handling)
+            named[out] = pd.NamedAgg(column=vf, aggfunc="median")
+        elif agg == "percentile_90":
+            working[vf] = _coerce_measure_series(working[vf], vf, null_handling)
+            named[out] = pd.NamedAgg(column=vf, aggfunc=lambda x: x.quantile(0.9))
+        elif agg == "first":
+            working[vf] = _coerce_measure_series(working[vf], vf, null_handling)
+            named[out] = pd.NamedAgg(column=vf, aggfunc=_first_valid)
+        elif agg == "last":
+            working[vf] = _coerce_measure_series(working[vf], vf, null_handling)
+            named[out] = pd.NamedAgg(column=vf, aggfunc=_last_valid)
+        elif agg == "count_distinct":
+            working[vf] = _resolve_count_series(working[vf], vf, null_handling)
+            named[out] = pd.NamedAgg(column=vf, aggfunc="nunique")
+
+    return working, named, avg_fields, output_map
+
+
+def _apply_avg_cols(agg_df: Any, avg_fields: list[str]) -> Any:
+    """Post-process avg sum/count pairs into a single average column.
+
+    *avg_fields* contains the **output** (possibly aliased) column names
+    produced by ``_build_sidecar_named_agg`` — i.e. ``{vf}__val`` for
+    collision fields, ``{vf}`` otherwise.
+    """
+    for out in avg_fields:
+        cnt = agg_df[f"{out}__cnt"].astype("float64")
+        agg_df[out] = agg_df[f"{out}__sum"].astype("float64").div(cnt).where(cnt > 0)
+        agg_df = agg_df.drop(columns=[f"{out}__sum", f"{out}__cnt"])
+    return agg_df
+
+
 def _sidecar_groupby_agg(
     df: Any,
     group_cols: list[str],
     sidecar_fields: dict[str, str],
     null_handling: Any = None,
 ) -> list[dict[str, Any]]:
-    """GroupBy + aggregate for sidecar total entries."""
+    """Vectorised groupby + aggregate for sidecar total entries.
+
+    Uses ``_build_sidecar_named_agg`` for C-extension speed instead of
+    iterating groups in Python.  ``to_dict("records")`` is used for
+    key extraction so that column names with spaces, punctuation, or other
+    unusual characters are handled safely.
+    """
     if not group_cols or not sidecar_fields:
         return []
+    working, named, avg_fields, output_map = _build_sidecar_named_agg(
+        group_cols, sidecar_fields, df, null_handling
+    )
+    agg_df = (
+        working.groupby(group_cols, dropna=False, observed=True, sort=False)
+        .agg(**named)
+        .reset_index()
+    )
+    agg_df = _apply_avg_cols(agg_df, avg_fields)
+    out_cols = [output_map[vf] for vf in sidecar_fields]
     entries: list[dict[str, Any]] = []
-    grouped = df.groupby(group_cols, dropna=False, observed=True, sort=False)
-    for key_tuple, group_df in grouped:
-        key = list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
-        key = [str(k) for k in key]
-        values: dict[str, int | float | None] = {}
-        for field, agg in sidecar_fields.items():
-            val = _sidecar_agg_func(agg, group_df[field], field, null_handling)
-            values[field] = _normalize_sidecar_value(val)
+    for record in agg_df[group_cols + out_cols].to_dict("records"):
+        key = [str(record[c]) for c in group_cols]
+        values = {
+            vf: _normalize_sidecar_value(record[output_map[vf]])
+            for vf in sidecar_fields
+        }
         entries.append({"key": key, "values": values})
     return entries
 
@@ -1725,35 +1888,44 @@ def _compute_hybrid_totals(
         col_prefix_grand_entries: list[dict[str, Any]] = []
 
         if rows:
-            grouped = working.groupby(
-                rows + col_prefix, dropna=False, observed=True, sort=False
+            grp_cols_cp = rows + col_prefix
+            wk_cp, named_cp, avg_cp, omap_cp = _build_sidecar_named_agg(
+                grp_cols_cp, sidecar_fields, working, null_handling
             )
-            for key_tuple, group_df in grouped:
-                parts = list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
-                parts = [str(p) for p in parts]
+            agg_cp = (
+                wk_cp.groupby(grp_cols_cp, dropna=False, observed=True, sort=False)
+                .agg(**named_cp)
+                .reset_index()
+            )
+            agg_cp = _apply_avg_cols(agg_cp, avg_cp)
+            out_cols_cp = [omap_cp[vf] for vf in sidecar_fields]
+            for rec in agg_cp[grp_cols_cp + out_cols_cp].to_dict("records"):
+                parts = [str(rec[c]) for c in grp_cols_cp]
                 row_key = parts[: len(rows)]
                 cp_key = parts[len(rows) :]
-                vals: dict[str, int | float | None] = {}
-                for field, agg in sidecar_fields.items():
-                    v = _sidecar_agg_func(agg, group_df[field], field, null_handling)
-                    vals[field] = _normalize_sidecar_value(v)
+                vals = {
+                    vf: _normalize_sidecar_value(rec[omap_cp[vf]])
+                    for vf in sidecar_fields
+                }
                 col_prefix_entries.append(
                     {"key": cp_key, "row": row_key, "values": vals}
                 )
 
-        grouped_grand = working.groupby(
-            col_prefix, dropna=False, observed=True, sort=False
+        wk_cpg, named_cpg, avg_cpg, omap_cpg = _build_sidecar_named_agg(
+            col_prefix, sidecar_fields, working, null_handling
         )
-        for key_val, group_df in grouped_grand:
-            cp_key = (
-                [str(key_val)]
-                if not isinstance(key_val, tuple)
-                else [str(k) for k in key_val]
-            )
-            vals_grand: dict[str, int | float | None] = {}
-            for field, agg in sidecar_fields.items():
-                v = _sidecar_agg_func(agg, group_df[field], field, null_handling)
-                vals_grand[field] = _normalize_sidecar_value(v)
+        agg_cpg = (
+            wk_cpg.groupby(col_prefix, dropna=False, observed=True, sort=False)
+            .agg(**named_cpg)
+            .reset_index()
+        )
+        agg_cpg = _apply_avg_cols(agg_cpg, avg_cpg)
+        out_cols_cpg = [omap_cpg[vf] for vf in sidecar_fields]
+        for rec in agg_cpg[col_prefix + out_cols_cpg].to_dict("records"):
+            cp_key = [str(rec[c]) for c in col_prefix]
+            vals_grand = {
+                vf: _normalize_sidecar_value(rec[omap_cpg[vf]]) for vf in sidecar_fields
+            }
             col_prefix_grand_entries.append({"key": cp_key, "values": vals_grand})
 
         result["col_prefix"] = col_prefix_entries
@@ -1794,27 +1966,28 @@ def _compute_hybrid_totals(
                 groupby_cols[temporal_idx] = tp_col_name
 
                 if rows:
-                    grouped_tp = working.groupby(
-                        rows + groupby_cols, dropna=False, observed=True, sort=False
+                    grp_tp = rows + groupby_cols
+                    wk_tp, named_tp, avg_tp, omap_tp = _build_sidecar_named_agg(
+                        grp_tp, sidecar_fields, working, null_handling
                     )
-                    for key_tuple, group_df in grouped_tp:
-                        parts = (
-                            list(key_tuple)
-                            if isinstance(key_tuple, tuple)
-                            else [key_tuple]
-                        )
-                        parts = [str(p) for p in parts]
+                    agg_tp = (
+                        wk_tp.groupby(grp_tp, dropna=False, observed=True, sort=False)
+                        .agg(**named_tp)
+                        .reset_index()
+                    )
+                    agg_tp = _apply_avg_cols(agg_tp, avg_tp)
+                    out_cols_tp = [omap_tp[vf] for vf in sidecar_fields]
+                    for rec in agg_tp[grp_tp + out_cols_tp].to_dict("records"):
+                        parts = [str(rec[c]) for c in grp_tp]
                         row_key = parts[: len(rows)]
                         col_key = parts[len(rows) :]
                         col_key[temporal_idx] = (
                             f"tp:{col_field}:{col_key[temporal_idx]}"
                         )
-                        vals_tp: dict[str, int | float | None] = {}
-                        for field, agg in sidecar_fields.items():
-                            v = _sidecar_agg_func(
-                                agg, group_df[field], field, null_handling
-                            )
-                            vals_tp[field] = _normalize_sidecar_value(v)
+                        vals_tp = {
+                            vf: _normalize_sidecar_value(rec[omap_tp[vf]])
+                            for vf in sidecar_fields
+                        }
                         temporal_parent_entries.append(
                             {
                                 "row": row_key,
@@ -1825,24 +1998,27 @@ def _compute_hybrid_totals(
                             }
                         )
 
-                grouped_tp_grand = working.groupby(
-                    groupby_cols, dropna=False, observed=True, sort=False
+                wk_tpg, named_tpg, avg_tpg, omap_tpg = _build_sidecar_named_agg(
+                    groupby_cols, sidecar_fields, working, null_handling
                 )
-                for key_tuple, group_df in grouped_tp_grand:
-                    parts = (
-                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                agg_tpg = (
+                    wk_tpg.groupby(
+                        groupby_cols, dropna=False, observed=True, sort=False
                     )
-                    parts = [str(p) for p in parts]
-                    col_key_g = list(parts)
+                    .agg(**named_tpg)
+                    .reset_index()
+                )
+                agg_tpg = _apply_avg_cols(agg_tpg, avg_tpg)
+                out_cols_tpg = [omap_tpg[vf] for vf in sidecar_fields]
+                for rec in agg_tpg[groupby_cols + out_cols_tpg].to_dict("records"):
+                    col_key_g = [str(rec[c]) for c in groupby_cols]
                     col_key_g[temporal_idx] = (
                         f"tp:{col_field}:{col_key_g[temporal_idx]}"
                     )
-                    vals_tp_g: dict[str, int | float | None] = {}
-                    for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(
-                            agg, group_df[field], field, null_handling
-                        )
-                        vals_tp_g[field] = _normalize_sidecar_value(v)
+                    vals_tp_g = {
+                        vf: _normalize_sidecar_value(rec[omap_tpg[vf]])
+                        for vf in sidecar_fields
+                    }
                     temporal_parent_grand_entries.append(
                         {
                             "col": col_key_g,
@@ -1890,28 +2066,37 @@ def _compute_hybrid_totals(
                 working[tp_col_name] = parent_series
                 groupby_rows[temporal_idx] = tp_col_name
 
-                def _append_temporal_row_parent_entries(
-                    grouped_obj: Any,
-                    col_key_builder: Any,
+                def _vec_row_parent_entries(
+                    group_cols: list[str],
+                    col_key_transform: Any = None,
                 ) -> None:
-                    for key_tuple, group_df in grouped_obj:
-                        parts = (
-                            list(key_tuple)
-                            if isinstance(key_tuple, tuple)
-                            else [key_tuple]
+                    """Vectorised row-parent aggregation into temporal_row_parent_entries."""
+                    wk_trp, named_trp, avg_trp, omap_trp = _build_sidecar_named_agg(
+                        group_cols, sidecar_fields, working, null_handling
+                    )
+                    agg_trp = (
+                        wk_trp.groupby(
+                            group_cols, dropna=False, observed=True, sort=False
                         )
-                        parts = [str(p) for p in parts]
+                        .agg(**named_trp)
+                        .reset_index()
+                    )
+                    agg_trp = _apply_avg_cols(agg_trp, avg_trp)
+                    out_cols_trp = [omap_trp[vf] for vf in sidecar_fields]
+                    for rec in agg_trp[group_cols + out_cols_trp].to_dict("records"):
+                        parts = [str(rec[c]) for c in group_cols]
                         row_key = parts[: len(rows)]
                         row_key[temporal_idx] = (
                             f"tp:{row_field}:{row_key[temporal_idx]}"
                         )
-                        col_key = col_key_builder(parts[len(rows) :])
-                        vals_trp: dict[str, int | float | None] = {}
-                        for field, agg in sidecar_fields.items():
-                            v = _sidecar_agg_func(
-                                agg, group_df[field], field, null_handling
-                            )
-                            vals_trp[field] = _normalize_sidecar_value(v)
+                        raw_col = parts[len(rows) :]
+                        col_key = (
+                            col_key_transform(raw_col) if col_key_transform else raw_col
+                        )
+                        vals_trp = {
+                            vf: _normalize_sidecar_value(rec[omap_trp[vf]])
+                            for vf in sidecar_fields
+                        }
                         temporal_row_parent_entries.append(
                             {
                                 "row": row_key,
@@ -1922,24 +2107,11 @@ def _compute_hybrid_totals(
                             }
                         )
 
-                grouped_trp = working.groupby(
-                    groupby_rows + columns, dropna=False, observed=True, sort=False
-                )
-                _append_temporal_row_parent_entries(
-                    grouped_trp, lambda col_parts: col_parts
-                )
+                _vec_row_parent_entries(groupby_rows + columns)
 
                 if len(columns) >= 2:
                     for depth in range(1, len(columns)):
-                        grouped_trp_prefix = working.groupby(
-                            groupby_rows + columns[:depth],
-                            dropna=False,
-                            observed=True,
-                            sort=False,
-                        )
-                        _append_temporal_row_parent_entries(
-                            grouped_trp_prefix, lambda col_parts: col_parts
-                        )
+                        _vec_row_parent_entries(groupby_rows + columns[:depth])
 
                 for col_temporal_idx, col_field in enumerate(columns):
                     col_type = (column_types or {}).get(col_field)
@@ -1970,15 +2142,11 @@ def _compute_hybrid_totals(
                         col_tp_name = f"__trp_col_{col_field}_{col_parent_grain}__"
                         working[col_tp_name] = parent_col_series
                         groupby_cols[col_temporal_idx] = col_tp_name
-                        grouped_trp_temporal_col = working.groupby(
+                        _vec_row_parent_entries(
                             groupby_rows + groupby_cols,
-                            dropna=False,
-                            observed=True,
-                            sort=False,
-                        )
-                        _append_temporal_row_parent_entries(
-                            grouped_trp_temporal_col,
-                            lambda col_parts, _idx=col_temporal_idx, _field=col_field: [
+                            col_key_transform=lambda col_parts,
+                            _idx=col_temporal_idx,
+                            _field=col_field: [
                                 *col_parts[:_idx],
                                 f"tp:{_field}:{col_parts[_idx]}",
                                 *col_parts[_idx + 1 :],
@@ -1986,24 +2154,28 @@ def _compute_hybrid_totals(
                         )
                         working.drop(columns=[col_tp_name], inplace=True)
 
-                grouped_trp_total = working.groupby(
-                    groupby_rows, dropna=False, observed=True, sort=False
+                # Temporal row-parent grand totals (no column dimension)
+                wk_trpg, named_trpg, avg_trpg, omap_trpg = _build_sidecar_named_agg(
+                    groupby_rows, sidecar_fields, working, null_handling
                 )
-                for key_tuple, group_df in grouped_trp_total:
-                    parts = (
-                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
+                agg_trpg = (
+                    wk_trpg.groupby(
+                        groupby_rows, dropna=False, observed=True, sort=False
                     )
-                    parts = [str(p) for p in parts]
-                    row_key_g = list(parts)
+                    .agg(**named_trpg)
+                    .reset_index()
+                )
+                agg_trpg = _apply_avg_cols(agg_trpg, avg_trpg)
+                out_cols_trpg = [omap_trpg[vf] for vf in sidecar_fields]
+                for rec in agg_trpg[groupby_rows + out_cols_trpg].to_dict("records"):
+                    row_key_g = [str(rec[c]) for c in groupby_rows]
                     row_key_g[temporal_idx] = (
                         f"tp:{row_field}:{row_key_g[temporal_idx]}"
                     )
-                    vals_trp_g: dict[str, int | float | None] = {}
-                    for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(
-                            agg, group_df[field], field, null_handling
-                        )
-                        vals_trp_g[field] = _normalize_sidecar_value(v)
+                    vals_trp_g = {
+                        vf: _normalize_sidecar_value(rec[omap_trpg[vf]])
+                        for vf in sidecar_fields
+                    }
                     temporal_row_parent_grand_entries.append(
                         {
                             "row": row_key_g,
@@ -2028,54 +2200,66 @@ def _compute_hybrid_totals(
             row_prefix = rows[:depth]
 
             if columns:
-                grouped_sub = working.groupby(
-                    row_prefix + columns, dropna=False, observed=True, sort=False
+                grp_sub = row_prefix + columns
+                wk_sub, named_sub, avg_sub, omap_sub = _build_sidecar_named_agg(
+                    grp_sub, sidecar_fields, working, null_handling
                 )
-                for key_tuple, group_df in grouped_sub:
-                    parts = (
-                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
-                    )
-                    parts = [str(p) for p in parts]
+                agg_sub = (
+                    wk_sub.groupby(grp_sub, dropna=False, observed=True, sort=False)
+                    .agg(**named_sub)
+                    .reset_index()
+                )
+                agg_sub = _apply_avg_cols(agg_sub, avg_sub)
+                out_cols_sub = [omap_sub[vf] for vf in sidecar_fields]
+                for rec in agg_sub[grp_sub + out_cols_sub].to_dict("records"):
+                    parts = [str(rec[c]) for c in grp_sub]
                     rp = parts[:depth]
                     ck = parts[depth:]
-                    vals_sub: dict[str, int | float | None] = {}
-                    for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(
-                            agg, group_df[field], field, null_handling
-                        )
-                        vals_sub[field] = _normalize_sidecar_value(v)
+                    vals_sub = {
+                        vf: _normalize_sidecar_value(rec[omap_sub[vf]])
+                        for vf in sidecar_fields
+                    }
                     subtotal_entries.append({"key": rp, "col": ck, "values": vals_sub})
 
-            grouped_row_total = working.groupby(
-                row_prefix, dropna=False, observed=True, sort=False
+            wk_rt, named_rt, avg_rt, omap_rt = _build_sidecar_named_agg(
+                row_prefix, sidecar_fields, working, null_handling
             )
-            for key_tuple, group_df in grouped_row_total:
-                parts = list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
-                parts = [str(p) for p in parts]
-                vals_rt: dict[str, int | float | None] = {}
-                for field, agg in sidecar_fields.items():
-                    v = _sidecar_agg_func(agg, group_df[field], field, null_handling)
-                    vals_rt[field] = _normalize_sidecar_value(v)
-                subtotal_entries.append({"key": parts, "col": [], "values": vals_rt})
+            agg_rt = (
+                wk_rt.groupby(row_prefix, dropna=False, observed=True, sort=False)
+                .agg(**named_rt)
+                .reset_index()
+            )
+            agg_rt = _apply_avg_cols(agg_rt, avg_rt)
+            out_cols_rt = [omap_rt[vf] for vf in sidecar_fields]
+            for rec in agg_rt[row_prefix + out_cols_rt].to_dict("records"):
+                parts_rt = [str(rec[c]) for c in row_prefix]
+                vals_rt = {
+                    vf: _normalize_sidecar_value(rec[omap_rt[vf]])
+                    for vf in sidecar_fields
+                }
+                subtotal_entries.append({"key": parts_rt, "col": [], "values": vals_rt})
 
             if len(columns) >= 2:
                 col_prefix = columns[:1]
-                grouped_cross = working.groupby(
-                    row_prefix + col_prefix, dropna=False, observed=True, sort=False
+                grp_cross = row_prefix + col_prefix
+                wk_cross, named_cross, avg_cross, omap_cross = _build_sidecar_named_agg(
+                    grp_cross, sidecar_fields, working, null_handling
                 )
-                for key_tuple, group_df in grouped_cross:
-                    parts_c = (
-                        list(key_tuple) if isinstance(key_tuple, tuple) else [key_tuple]
-                    )
-                    parts_c = [str(p) for p in parts_c]
+                agg_cross = (
+                    wk_cross.groupby(grp_cross, dropna=False, observed=True, sort=False)
+                    .agg(**named_cross)
+                    .reset_index()
+                )
+                agg_cross = _apply_avg_cols(agg_cross, avg_cross)
+                out_cols_cross = [omap_cross[vf] for vf in sidecar_fields]
+                for rec in agg_cross[grp_cross + out_cols_cross].to_dict("records"):
+                    parts_c = [str(rec[c]) for c in grp_cross]
                     rp_c = parts_c[:depth]
                     cp_c = parts_c[depth:]
-                    vals_cross: dict[str, int | float | None] = {}
-                    for field, agg in sidecar_fields.items():
-                        v = _sidecar_agg_func(
-                            agg, group_df[field], field, null_handling
-                        )
-                        vals_cross[field] = _normalize_sidecar_value(v)
+                    vals_cross = {
+                        vf: _normalize_sidecar_value(rec[omap_cross[vf]])
+                        for vf in sidecar_fields
+                    }
                     cross_subtotal_entries.append(
                         {"key": rp_c, "col_prefix": cp_c, "values": vals_cross}
                     )
@@ -3727,8 +3911,18 @@ def st_pivot_table(
     # reruns, but let explicit Python config changes take precedence.
     config_to_send = _resolve_config_to_send(st.session_state, key, initial_config)
 
+    # Retrieve (or create) the per-pivot nunique() cache from session_state.
+    # Cache is keyed by a best-effort DataFrame fingerprint + field name.
+    # False hits are safe — they only affect the threshold estimation, not output.
+    _nc_key = f"_pivot_nc_{key}"
+    if _nc_key not in st.session_state:
+        st.session_state[_nc_key] = {}
+    _nc = st.session_state[_nc_key]
+    # Cap cache size to prevent unbounded growth across long-running sessions.
+    if len(_nc) > 200:
+        _nc.clear()
     use_threshold_hybrid, threshold_reason = _should_use_threshold_hybrid(
-        filtered_data, config_to_send, execution_mode
+        filtered_data, config_to_send, execution_mode, _nunique_cache=_nc
     )
     if use_threshold_hybrid:
         drill_note = (
