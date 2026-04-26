@@ -1012,6 +1012,50 @@
   background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
 }
 
+/* Badge-button trigger for InlineDisplayPicker */
+.chipShowAsBadgeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  padding: 0 4px;
+  min-width: 14px;
+  height: 14px;
+  font-size: 0.68em;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 7px;
+  border: none;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+/* Raw/inactive state — neutral gray chip, signals default/no transformation */
+.chipShowAsBadgeBtnRaw {
+  color: color-mix(in srgb, var(--st-text-color) 55%, transparent);
+  background: color-mix(in srgb, var(--st-text-color) 10%, transparent);
+}
+.chipShowAsBadgeBtnRaw:hover {
+  color: var(--st-text-color);
+  background: color-mix(in srgb, var(--st-text-color) 18%, transparent);
+}
+
+/* Active state — primary color, signals a transformation is applied */
+.chipShowAsBadgeBtnActive {
+  color: var(--st-primary-color);
+  background: color-mix(in srgb, var(--st-primary-color) 12%, transparent);
+}
+.chipShowAsBadgeBtnActive:hover {
+  background: color-mix(in srgb, var(--st-primary-color) 24%, transparent);
+}
+
+.chipShowAsBadgeBtn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline-offset: 1px;
+}
+
 /* --- Apply / Cancel footer --- */
 
 .footer {

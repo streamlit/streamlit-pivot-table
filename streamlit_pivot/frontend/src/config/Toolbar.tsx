@@ -81,6 +81,7 @@ import {
 import SettingsPanel, {
   canDropFieldToZone,
   InlineAggPicker,
+  InlineDisplayPicker,
   cleanupConfigAfterFieldChanges,
 } from "./SettingsPanel";
 import styles from "./Toolbar.module.css";
@@ -406,6 +407,19 @@ const Toolbar: FC<ToolbarProps> = ({
           config.values,
         ),
       });
+    },
+    [config, emitIfChanged],
+  );
+
+  const handleValueShowAsChange = useCallback(
+    (field: string, mode: ShowValuesAs) => {
+      const next = { ...(config.show_values_as ?? {}) };
+      if (mode === "raw") {
+        delete next[field];
+      } else {
+        next[field] = mode;
+      }
+      emitIfChanged({ ...config, show_values_as: next });
     },
     [config, emitIfChanged],
   );
@@ -822,6 +836,7 @@ const Toolbar: FC<ToolbarProps> = ({
             syntheticMeasures={syntheticMeasures}
             renderedMeasures={valueOrder}
             onAggregationChange={handleValueAggChange}
+            onShowValuesAsChange={handleValueShowAsChange}
             onRemove={(field) => handleRemoveField("values", field)}
             onRemoveSynthetic={handleRemoveSynthetic}
             aggPortalTarget={toolbarRef.current}
@@ -1106,16 +1121,6 @@ const Toolbar: FC<ToolbarProps> = ({
 // ZoneCard — read-only zone display with cross-zone DnD chips
 // ---------------------------------------------------------------------------
 
-const SHOW_AS_BADGE_LABELS: Record<string, string> = {
-  pct_of_total: "% of Grand Total",
-  pct_of_row: "% of Row Total",
-  pct_of_col: "% of Column Total",
-  diff_from_prev: "vs previous period",
-  pct_diff_from_prev: "% vs previous period",
-  diff_from_prev_year: "vs prior year",
-  pct_diff_from_prev_year: "% vs prior year",
-};
-
 interface ZoneCardProps {
   label: string;
   testId: string;
@@ -1136,6 +1141,7 @@ interface ZoneCardProps {
   isDropHighlighted?: boolean;
   activeId?: string | null;
   onAggregationChange?: (field: string, agg: AggregationType) => void;
+  onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
   onRemove?: (field: string) => void;
   onRemoveSynthetic?: (syntheticId: string) => void;
   aggPortalTarget?: HTMLElement | null;
@@ -1161,6 +1167,7 @@ const ZoneCard: FC<ZoneCardProps> = ({
   isDropHighlighted,
   activeId,
   onAggregationChange,
+  onShowValuesAsChange,
   onRemove,
   onRemoveSynthetic,
   aggPortalTarget,
@@ -1265,7 +1272,6 @@ const ZoneCard: FC<ZoneCardProps> = ({
                   (filters[col].exclude && filters[col].exclude.length > 0));
               const currentShowAs = showValuesAs?.[col] ?? "raw";
               const currentAggregation = aggregation?.[col] ?? "sum";
-              const showAsBadge = currentShowAs !== "raw";
               return (
                 <SortableFieldChip
                   key={`fld:${col}`}
@@ -1280,12 +1286,6 @@ const ZoneCard: FC<ZoneCardProps> = ({
                   aggregationLabel={
                     isValues ? AGG_CHIP_LABELS[currentAggregation] : undefined
                   }
-                  showAsBadge={showAsBadge}
-                  showAsBadgeTitle={
-                    showAsBadge
-                      ? (SHOW_AS_BADGE_LABELS[currentShowAs] ?? currentShowAs)
-                      : undefined
-                  }
                   hasFilter={!!hasFilter}
                   onRemove={disabled ? undefined : onRemove}
                   aggregationControl={
@@ -1297,6 +1297,17 @@ const ZoneCard: FC<ZoneCardProps> = ({
                         portalTarget={aggPortalTarget}
                         testIdPrefix={aggTestIdPrefix}
                         triggerVariant="chevron"
+                      />
+                    ) : undefined
+                  }
+                  displayControl={
+                    isValues && !disabled && onShowValuesAsChange ? (
+                      <InlineDisplayPicker
+                        field={col}
+                        value={currentShowAs}
+                        onChange={onShowValuesAsChange}
+                        portalTarget={aggPortalTarget}
+                        testIdPrefix="toolbar-values-display"
                       />
                     ) : undefined
                   }

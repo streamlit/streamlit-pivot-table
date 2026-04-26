@@ -58,6 +58,7 @@ import {
   type DimensionFilter,
   type PivotConfigV1,
   type RowLayout,
+  type ShowValuesAs,
   type SyntheticMeasureConfig,
   showRowTotals as resolveShowRowTotals,
   showColumnTotals as resolveShowColumnTotals,
@@ -842,6 +843,24 @@ const DraggableAvailableChip: FC<DraggableAvailableChipProps> = ({
   );
 };
 
+// ---------------------------------------------------------------------------
+// Shared singleton: ensures only one inline picker is open at a time.
+// ---------------------------------------------------------------------------
+let _activePicker: (() => void) | null = null;
+
+function claimPickerFocus(closeSelf: () => void): void {
+  if (_activePicker && _activePicker !== closeSelf) {
+    _activePicker(); // close the currently open picker
+  }
+  _activePicker = closeSelf;
+}
+
+function releasePickerFocus(closeSelf: () => void): void {
+  if (_activePicker === closeSelf) {
+    _activePicker = null;
+  }
+}
+
 // -- Inline aggregation picker for value chips --
 
 export interface InlineAggPickerProps {
@@ -865,6 +884,7 @@ export const InlineAggPicker: FC<InlineAggPickerProps> = ({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
+  const closeSelfAgg = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
     if (!open) return;
@@ -876,6 +896,7 @@ export const InlineAggPicker: FC<InlineAggPickerProps> = ({
         !triggerRef.current.contains(e.target as Node)
       ) {
         setOpen(false);
+        releasePickerFocus(closeSelfAgg);
       }
     };
     const updatePosition = () => {
@@ -892,18 +913,24 @@ export const InlineAggPicker: FC<InlineAggPickerProps> = ({
       window.removeEventListener("scroll", updatePosition, true);
       window.removeEventListener("resize", updatePosition);
     };
-  }, [open]);
+  }, [open, closeSelfAgg]);
 
   const handleOpen = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (!open && triggerRef.current) {
-        const rect = triggerRef.current.getBoundingClientRect();
-        setPos({ top: rect.bottom + 2, left: rect.left });
+      if (!open) {
+        claimPickerFocus(closeSelfAgg);
+        if (triggerRef.current) {
+          const rect = triggerRef.current.getBoundingClientRect();
+          setPos({ top: rect.bottom + 2, left: rect.left });
+        }
+        setOpen(true);
+      } else {
+        releasePickerFocus(closeSelfAgg);
+        setOpen(false);
       }
-      setOpen((v) => !v);
     },
-    [open],
+    [open, closeSelfAgg],
   );
 
   const handleTriggerMouseDown = useCallback((e: React.MouseEvent) => {
@@ -914,8 +941,9 @@ export const InlineAggPicker: FC<InlineAggPickerProps> = ({
     (opt: AggregationType) => {
       onChange(field, opt);
       setOpen(false);
+      releasePickerFocus(closeSelfAgg);
     },
-    [field, onChange],
+    [field, onChange, closeSelfAgg],
   );
 
   const dropdown = open ? (
@@ -1019,6 +1047,179 @@ export const InlineAggPicker: FC<InlineAggPickerProps> = ({
             {AGG_LABELS[value]}
           </>
         )}
+      </button>
+      {portalTarget ? createPortal(dropdown, portalTarget) : dropdown}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// InlineDisplayPicker — badge button on value chips to pick Show Values As mode
+// ---------------------------------------------------------------------------
+
+const DISPLAY_MODE_OPTIONS: { value: ShowValuesAs; label: string }[] = [
+  { value: "raw", label: "Raw values" },
+  { value: "pct_of_total", label: "% of grand total" },
+  { value: "pct_of_row", label: "% of row total" },
+  { value: "pct_of_col", label: "% of column total" },
+  { value: "running_total", label: "Running total" },
+  { value: "pct_running_total", label: "% running total" },
+  { value: "rank", label: "Rank" },
+  { value: "pct_of_parent", label: "% of parent total" },
+  { value: "index", label: "Index" },
+];
+
+export interface InlineDisplayPickerProps {
+  field: string;
+  value: ShowValuesAs;
+  onChange: (field: string, mode: ShowValuesAs) => void;
+  portalTarget?: HTMLElement | null;
+  testIdPrefix?: string;
+}
+
+export const InlineDisplayPicker: FC<InlineDisplayPickerProps> = ({
+  field,
+  value,
+  onChange,
+  portalTarget,
+  testIdPrefix = "display-picker",
+}): ReactElement => {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const closeSelfDisplay = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+        releasePickerFocus(closeSelfDisplay);
+      }
+    };
+    const updatePosition = () => {
+      if (triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        setPos({ top: rect.bottom + 2, left: rect.left });
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, closeSelfDisplay]);
+
+  const handleOpen = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!open) {
+        claimPickerFocus(closeSelfDisplay);
+        if (triggerRef.current) {
+          const rect = triggerRef.current.getBoundingClientRect();
+          setPos({ top: rect.bottom + 2, left: rect.left });
+        }
+        setOpen(true);
+      } else {
+        releasePickerFocus(closeSelfDisplay);
+        setOpen(false);
+      }
+    },
+    [open, closeSelfDisplay],
+  );
+
+  const handleTriggerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
+  const selectMode = useCallback(
+    (opt: ShowValuesAs) => {
+      onChange(field, opt);
+      setOpen(false);
+      releasePickerFocus(closeSelfDisplay);
+    },
+    [field, onChange, closeSelfDisplay],
+  );
+
+  const dropdown = open ? (
+    <div
+      ref={dropdownRef}
+      className={styles.aggPanel}
+      style={{ position: "fixed", top: pos.top, left: pos.left }}
+      onMouseDown={(e) => e.stopPropagation()}
+      data-testid={`${testIdPrefix}-panel-${field}`}
+    >
+      {DISPLAY_MODE_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          className={`${styles.aggOption} ${opt.value === value ? styles.aggOptionActive : ""}`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectMode(opt.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              selectMode(opt.value);
+            }
+          }}
+        >
+          <span className={styles.aggIcon}>
+            {opt.value === "raw" ? "#" : "%"}
+          </span>
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  return (
+    <div className={styles.aggPicker}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`${styles.chipShowAsBadgeBtn} ${value === "raw" ? styles.chipShowAsBadgeBtnRaw : styles.chipShowAsBadgeBtnActive}`}
+        onMouseDown={handleTriggerMouseDown}
+        onClick={handleOpen}
+        aria-label={`Display mode for ${field}`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        data-testid={`${testIdPrefix}-${field}`}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && open) {
+            e.preventDefault();
+            e.stopPropagation();
+            setOpen(false);
+            releasePickerFocus(closeSelfDisplay);
+          } else if (
+            e.key === "ArrowDown" ||
+            e.key === "Enter" ||
+            e.key === " "
+          ) {
+            if (!open) {
+              e.preventDefault();
+              claimPickerFocus(closeSelfDisplay);
+              if (triggerRef.current) {
+                const rect = triggerRef.current.getBoundingClientRect();
+                setPos({ top: rect.bottom + 2, left: rect.left });
+              }
+              setOpen(true);
+            }
+          }
+        }}
+      >
+        {value === "raw" ? "#" : "%"}
       </button>
       {portalTarget ? createPortal(dropdown, portalTarget) : dropdown}
     </div>
@@ -1499,6 +1700,9 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   const [localAgg, setLocalAgg] = useState<AggregationConfig>(
     config.aggregation,
   );
+  const [localShowAs, setLocalShowAs] = useState<Record<string, ShowValuesAs>>(
+    config.show_values_as ?? {},
+  );
   const [localSynthetics, setLocalSynthetics] = useState<
     SyntheticMeasureConfig[]
   >(config.synthetic_measures ?? []);
@@ -1556,6 +1760,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       setLocalCols(config.columns);
       setLocalVals(config.values);
       setLocalAgg(config.aggregation);
+      setLocalShowAs(config.show_values_as ?? {});
       setLocalSynthetics(config.synthetic_measures ?? []);
       setLocalValueOrder(config.value_order);
       setLocalShowRowTotals(config.show_row_totals ?? config.show_totals);
@@ -1698,6 +1903,12 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
         const nextVals = localVals.filter((f) => f !== field);
         setLocalVals(nextVals);
         setLocalAgg((agg) => normalizeAggregationConfig(agg, nextVals));
+        setLocalShowAs((prev) => {
+          if (!prev[field]) return prev;
+          const next = { ...prev };
+          delete next[field];
+          return next;
+        });
       } else if (zone === "filters") {
         removeFromFilterZone(field);
       }
@@ -1768,6 +1979,12 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
           delete next[field];
           return normalizeAggregationConfig(next, nextVals);
         });
+        setLocalShowAs((prev) => {
+          if (!prev[field]) return prev;
+          const next = { ...prev };
+          delete next[field];
+          return next;
+        });
       }
       if (toZone === "values") {
         const nextVals = [...localVals, field];
@@ -1792,6 +2009,22 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       );
     },
     [localVals],
+  );
+
+  // -- Display mode change --
+  const handleShowAsChange = useCallback(
+    (field: string, mode: ShowValuesAs) => {
+      setLocalShowAs((prev) => {
+        const next = { ...prev };
+        if (mode === "raw") {
+          delete next[field];
+        } else {
+          next[field] = mode;
+        }
+        return next;
+      });
+    },
+    [],
   );
 
   // -- Zone chip menu items (source-aware) --
@@ -2412,6 +2645,8 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       columns: localCols,
       values: localVals,
       aggregation: localAgg,
+      show_values_as:
+        Object.keys(localShowAs).length > 0 ? localShowAs : undefined,
       synthetic_measures:
         localSynthetics.length > 0 ? localSynthetics : undefined,
       show_row_totals: localShowRowTotals,
@@ -2604,6 +2839,11 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     if (!arrEq(localFilterFields, config.filter_fields ?? [])) return true;
     if (JSON.stringify(localFilters) !== JSON.stringify(config.filters ?? {}))
       return true;
+    if (
+      JSON.stringify(localShowAs) !==
+      JSON.stringify(config.show_values_as ?? {})
+    )
+      return true;
     return false;
   }, [
     config,
@@ -2621,6 +2861,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localStickyHeaders,
     localFilterFields,
     localFilters,
+    localShowAs,
   ]);
 
   // -- Panel open/close animation --
@@ -2980,13 +3221,22 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
                       }
                       aggregationControl={
                         !frozenColumns?.has(field) ? (
-                          <InlineAggPicker
-                            field={field}
-                            value={localAgg?.[field] ?? "sum"}
-                            onChange={handleAggChange}
-                            portalTarget={containerRef.current}
-                            triggerVariant="chevron"
-                          />
+                          <>
+                            <InlineDisplayPicker
+                              field={field}
+                              value={localShowAs[field] ?? "raw"}
+                              onChange={handleShowAsChange}
+                              portalTarget={containerRef.current}
+                              testIdPrefix="settings-display"
+                            />
+                            <InlineAggPicker
+                              field={field}
+                              value={localAgg?.[field] ?? "sum"}
+                              onChange={handleAggChange}
+                              portalTarget={containerRef.current}
+                              triggerVariant="chevron"
+                            />
+                          </>
                         ) : undefined
                       }
                       onRemove={(f) => removeFromZone(f, "values")}

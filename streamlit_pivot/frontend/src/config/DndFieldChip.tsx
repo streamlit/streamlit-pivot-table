@@ -51,6 +51,8 @@ export interface FieldChipProps {
   hasFilter?: boolean;
   onRemove?: (field: string) => void;
   aggregationControl?: ReactNode;
+  /** Replaces the static % badge with an interactive display-mode picker */
+  displayControl?: ReactNode;
 }
 
 const GripDotsIcon: FC = () => (
@@ -84,6 +86,7 @@ function ChipContent({
   hasFilter,
   onRemove,
   aggregationControl,
+  displayControl,
   showDragHandle,
 }: FieldChipProps & { showDragHandle?: boolean }): ReactElement {
   return (
@@ -104,15 +107,16 @@ function ChipContent({
           </span>
         )}
       </span>
-      {showAsBadge && (
-        <span
-          className={styles.chipShowAsBadge}
-          title={showAsBadgeTitle}
-          data-testid={`${testId}-show-as-badge-${field}`}
-        >
-          %
-        </span>
-      )}
+      {displayControl ??
+        (showAsBadge && (
+          <span
+            className={styles.chipShowAsBadge}
+            title={showAsBadgeTitle}
+            data-testid={`${testId}-show-as-badge-${field}`}
+          >
+            %
+          </span>
+        ))}
       {hasFilter && (
         <span
           className={styles.chipFilterDot}
