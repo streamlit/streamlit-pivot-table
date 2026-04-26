@@ -63,6 +63,43 @@ class SortConfig(TypedDict, total=False):
     dimension: str  # optional: scope sort to this dimension level and below
 
 
+class TopNFilter(TypedDict):
+    """Required fields for a Top N / Bottom N row or column filter.
+
+    Use ``TopNFilterFull`` in the public API to allow the optional ``axis`` key.
+    """
+
+    field: str  # dimension field whose members are ranked and trimmed
+    n: int  # keep top/bottom N members per parent group
+    by: str  # value (measure) field used to rank members
+    direction: str  # "top" | "bottom"
+
+
+class TopNFilterFull(TopNFilter, total=False):
+    """``TopNFilter`` with the optional ``axis`` field."""
+
+    axis: str  # "rows" | "columns" (default "rows")
+
+
+class ValueFilter(TypedDict):
+    """Required fields for a value-predicate filter on dimension members.
+
+    Use ``ValueFilterFull`` in the public API to allow optional keys.
+    """
+
+    field: str  # dimension field whose members are suppressed when predicate fails
+    by: str  # measure field evaluated against the predicate (at grand-total column)
+    operator: str  # "gt" | "gte" | "lt" | "lte" | "eq" | "neq" | "between"
+    value: float
+
+
+class ValueFilterFull(ValueFilter, total=False):
+    """``ValueFilter`` with optional ``value2`` (for "between") and ``axis``."""
+
+    value2: float  # upper bound for "between"
+    axis: str  # "rows" | "columns" (default "rows")
+
+
 class RegionStyle(TypedDict, total=False):
     """Style properties for a single visual region of the pivot table.
 
@@ -385,6 +422,8 @@ class PivotConfig(TypedDict, total=False):
     filters: dict[str, dict[str, list[Any]]]
     filter_fields: list[str]
     show_sections: bool
+    top_n_filters: list[TopNFilterFull]
+    value_filters: list[ValueFilterFull]
 
 
 VALID_AGGREGATIONS = frozenset(
@@ -401,6 +440,12 @@ VALID_AGGREGATIONS = frozenset(
         "last",
     )
 )
+VALID_TOP_N_DIRECTIONS = frozenset(("top", "bottom"))
+VALID_VALUE_FILTER_OPERATORS = frozenset(
+    ("gt", "gte", "lt", "lte", "eq", "neq", "between")
+)
+VALID_FILTER_AXES = frozenset(("rows", "columns"))
+
 VALID_SHOW_VALUES_AS = frozenset(
     (
         "raw",
@@ -2781,6 +2826,8 @@ def _default_config(
     filters: dict[str, dict[str, list[Any]]] | None = None,
     filter_fields: list[str] | None = None,
     show_sections: bool | None = None,
+    top_n_filters: list[TopNFilterFull] | None = None,
+    value_filters: list[ValueFilterFull] | None = None,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -2886,6 +2933,10 @@ def _default_config(
         cfg["filter_fields"] = effective_filter_fields
     if show_sections is not None:
         cfg["show_sections"] = show_sections
+    if top_n_filters:
+        cfg["top_n_filters"] = top_n_filters
+    if value_filters:
+        cfg["value_filters"] = value_filters
     return cfg
 
 
@@ -3037,6 +3088,9 @@ def st_pivot_table(
     filters: dict[str, dict[str, list[Any]]] | None = None,
     filter_fields: list[str] | None = None,
     show_sections: bool | None = None,
+    # 0.5.0: analytical filtering
+    top_n_filters: list[TopNFilterFull] | None = None,
+    value_filters: list[ValueFilterFull] | None = None,
     # Format hints from Streamlit column_config / dimension_format
     column_config: dict[str, Any] | None = None,
     dimension_format: str | dict[str, str] | None = None,
@@ -3207,10 +3261,38 @@ def st_pivot_table(
     show_values_as : dict[str, str] or None
         Per-field display mode. Maps value field names to one of
         ``"raw"``, ``"pct_of_total"``, ``"pct_of_row"``, ``"pct_of_col"``,
-        ``"diff_from_prev"``, ``"pct_diff_from_prev"``,
-        ``"diff_from_prev_year"``, or ``"pct_diff_from_prev_year"``.
+        ``"running_total"``, ``"pct_running_total"``, ``"rank"``,
+        ``"pct_of_parent"``, ``"index"``, ``"diff_from_prev"``,
+        ``"pct_diff_from_prev"``, ``"diff_from_prev_year"``, or
+        ``"pct_diff_from_prev_year"``.
         Period-comparison modes require at least one grain-enabled temporal
         dimension on rows or columns. Omitted fields default to ``"raw"``.
+    top_n_filters : list[TopNFilterFull] or None
+        Top N / Bottom N filters applied to row or column dimension members.
+        Each filter is a dict with required keys ``field`` (the dimension to
+        trim), ``n`` (how many members to keep), ``by`` (the measure to rank
+        by), and ``direction`` (``"top"`` or ``"bottom"``), plus an optional
+        ``axis`` (``"rows"`` or ``"columns"``, default ``"rows"``).
+        Filtering is **per-parent**: for a two-level hierarchy ``[Region,
+        Product]``, "Top 3 Products by Revenue" keeps the 3 highest-revenue
+        products **within each Region** independently. Ranking always uses the
+        grand-total column context (contextual col_key scoping is deferred to
+        0.6.0). Grand totals and subtotals are **not** recalculated — they
+        reflect the full unfiltered dataset. Members with a null aggregated
+        measure are ranked last / excluded before the top-N cutoff.
+    value_filters : list[ValueFilterFull] or None
+        Predicate filters that suppress dimension members based on their
+        aggregated measure value at the grand-total column context. Each
+        filter is a dict with required keys ``field`` (dimension to filter),
+        ``by`` (measure to evaluate), ``operator`` (``"gt"``, ``"gte"``,
+        ``"lt"``, ``"lte"``, ``"eq"``, ``"neq"``, or ``"between"``), and
+        ``value`` (threshold). ``"between"`` additionally requires
+        ``value2`` (upper bound, inclusive). Optional ``axis``
+        (``"rows"`` or ``"columns"``, default ``"rows"``).
+        Like Top N, evaluation is **per-parent**: for ``[Region, Product]``,
+        "Revenue > 500" is tested independently within each Region. Members
+        with a null measure value are treated as failing the predicate and
+        excluded. Grand totals and subtotals always reflect unfiltered data.
     conditional_formatting : list[dict] or None
         List of conditional formatting rules applied to value cells.
         Each rule is a dict with ``"type"`` (``"color_scale"``,
@@ -3674,6 +3756,60 @@ def st_pivot_table(
     )
     normalized_aggregation = _normalize_aggregation_config(aggregation, _all_agg_fields)
 
+    # --- Semantic filter validation (requires resolved dims + measures) ---
+    # NOTE: structural type-checking runs later (Phase 3); this block runs
+    # only after confirming each filter is a dict with the required string
+    # keys, so we use .get() with defaults to avoid AttributeError/KeyError
+    # on malformed inputs — those raise TypeError/ValueError in Phase 3.
+    _synth_ids = [m.get("id") for m in (normalized_synthetic_measures or [])]
+    _available_measures = list(resolved_values or []) + [
+        sid for sid in _synth_ids if sid
+    ]
+    _row_dims = resolved_rows or []
+    _col_dims = resolved_columns or []
+
+    if top_n_filters is not None and isinstance(top_n_filters, list):
+        for i, f in enumerate(top_n_filters):
+            if not isinstance(f, dict):
+                continue  # structural error — Phase 3 will catch it
+            field = f.get("field")
+            by = f.get("by")
+            if not isinstance(field, str) or not isinstance(by, str):
+                continue  # structural error — Phase 3 will catch it
+            axis = f.get("axis", "rows")
+            dim_list = _row_dims if axis == "rows" else _col_dims
+            if field not in dim_list:
+                raise ValueError(
+                    f"top_n_filters[{i}]['field'] {field!r} is not in the {axis} "
+                    f"dimension list {dim_list}"
+                )
+            if by not in _available_measures:
+                raise ValueError(
+                    f"top_n_filters[{i}]['by'] {by!r} is not in the available "
+                    f"measures {_available_measures}"
+                )
+
+    if value_filters is not None and isinstance(value_filters, list):
+        for i, f in enumerate(value_filters):
+            if not isinstance(f, dict):
+                continue  # structural error — Phase 3 will catch it
+            field = f.get("field")
+            by = f.get("by")
+            if not isinstance(field, str) or not isinstance(by, str):
+                continue  # structural error — Phase 3 will catch it
+            axis = f.get("axis", "rows")
+            dim_list = _row_dims if axis == "rows" else _col_dims
+            if field not in dim_list:
+                raise ValueError(
+                    f"value_filters[{i}]['field'] {field!r} is not in the {axis} "
+                    f"dimension list {dim_list}"
+                )
+            if by not in _available_measures:
+                raise ValueError(
+                    f"value_filters[{i}]['by'] {by!r} is not in the available "
+                    f"measures {_available_measures}"
+                )
+
     # --- Phase 3 validation ---
     if not isinstance(show_subtotals, (bool, list)):
         raise TypeError(
@@ -3703,6 +3839,74 @@ def st_pivot_table(
             if v not in VALID_SHOW_VALUES_AS:
                 raise ValueError(
                     f"show_values_as[{k!r}] must be one of {sorted(VALID_SHOW_VALUES_AS)}, got {v!r}"
+                )
+
+    if top_n_filters is not None:
+        if not isinstance(top_n_filters, list):
+            raise TypeError(
+                f"top_n_filters must be a list or None, got {type(top_n_filters).__name__}"
+            )
+        for i, f in enumerate(top_n_filters):
+            if not isinstance(f, dict):
+                raise TypeError(f"top_n_filters[{i}] must be a dict")
+            if not isinstance(f.get("field"), str):
+                raise TypeError(f"top_n_filters[{i}]['field'] must be a string")
+            if not isinstance(f.get("by"), str):
+                raise TypeError(f"top_n_filters[{i}]['by'] must be a string")
+            if f.get("direction") not in VALID_TOP_N_DIRECTIONS:
+                raise ValueError(
+                    f"top_n_filters[{i}]['direction'] must be one of "
+                    f"{sorted(VALID_TOP_N_DIRECTIONS)}, got {f.get('direction')!r}"
+                )
+            n = f.get("n")
+            if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+                raise TypeError(
+                    f"top_n_filters[{i}]['n'] must be a positive integer, got {n!r}"
+                )
+            axis = f.get("axis", "rows")
+            if axis not in VALID_FILTER_AXES:
+                raise ValueError(
+                    f"top_n_filters[{i}]['axis'] must be one of "
+                    f"{sorted(VALID_FILTER_AXES)}, got {axis!r}"
+                )
+
+    if value_filters is not None:
+        if not isinstance(value_filters, list):
+            raise TypeError(
+                f"value_filters must be a list or None, got {type(value_filters).__name__}"
+            )
+        for i, f in enumerate(value_filters):
+            if not isinstance(f, dict):
+                raise TypeError(f"value_filters[{i}] must be a dict")
+            if not isinstance(f.get("field"), str):
+                raise TypeError(f"value_filters[{i}]['field'] must be a string")
+            if not isinstance(f.get("by"), str):
+                raise TypeError(f"value_filters[{i}]['by'] must be a string")
+            if f.get("operator") not in VALID_VALUE_FILTER_OPERATORS:
+                raise ValueError(
+                    f"value_filters[{i}]['operator'] must be one of "
+                    f"{sorted(VALID_VALUE_FILTER_OPERATORS)}, got {f.get('operator')!r}"
+                )
+            val = f.get("value")
+            if not isinstance(val, (int, float)) or isinstance(val, bool):
+                raise TypeError(
+                    f"value_filters[{i}]['value'] must be a number, got {val!r}"
+                )
+            if f.get("operator") == "between":
+                val2 = f.get("value2")
+                if val2 is None:
+                    raise ValueError(
+                        f"value_filters[{i}]: operator 'between' requires 'value2'"
+                    )
+                if not isinstance(val2, (int, float)) or isinstance(val2, bool):
+                    raise TypeError(
+                        f"value_filters[{i}]['value2'] must be a number, got {val2!r}"
+                    )
+            axis = f.get("axis", "rows")
+            if axis not in VALID_FILTER_AXES:
+                raise ValueError(
+                    f"value_filters[{i}]['axis'] must be one of "
+                    f"{sorted(VALID_FILTER_AXES)}, got {axis!r}"
                 )
 
     if conditional_formatting is not None:
@@ -3940,6 +4144,8 @@ def st_pivot_table(
         filters=filters,
         filter_fields=filter_fields,
         show_sections=show_sections,
+        top_n_filters=top_n_filters,
+        value_filters=value_filters,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal

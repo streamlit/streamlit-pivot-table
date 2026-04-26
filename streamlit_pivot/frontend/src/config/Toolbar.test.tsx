@@ -25,7 +25,11 @@ import {
   within,
 } from "@testing-library/react";
 import Toolbar, { applyDragMove } from "./Toolbar";
-import { canDropFieldToZone, resolveDragEnd } from "./SettingsPanel";
+import {
+  canDropFieldToZone,
+  cleanupConfigAfterFieldChanges,
+  resolveDragEnd,
+} from "./SettingsPanel";
 import { PivotData, type DataRecord } from "../engine/PivotData";
 import { makeConfig } from "../test-utils";
 
@@ -3565,5 +3569,370 @@ describe("Toolbar - sections collapse/expand", () => {
     expect(onChange).toHaveBeenCalled();
     const called = onChange.mock.calls[0][0];
     expect(called.show_sections).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyDragMove – analytical filter cleanup
+// ---------------------------------------------------------------------------
+
+describe("applyDragMove – analytical filter cleanup", () => {
+  it("drops top_n_filter whose by field is dragged out of values", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      values: ["revenue", "profit"],
+      top_n_filters: [
+        {
+          field: "region",
+          n: 5,
+          by: "revenue",
+          direction: "top",
+          axis: "rows",
+        },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.top_n_filters).toBeUndefined();
+  });
+
+  it("keeps top_n_filter whose by field is unaffected by drag", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      values: ["revenue", "profit"],
+      top_n_filters: [
+        { field: "region", n: 5, by: "profit", direction: "top", axis: "rows" },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "rows",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.top_n_filters).toHaveLength(1);
+    expect(result!.top_n_filters![0].by).toBe("profit");
+  });
+
+  it("drops value_filter whose by field is dragged out of values", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      values: ["revenue"],
+      value_filters: [
+        {
+          field: "region",
+          by: "revenue",
+          operator: "gt",
+          value: 1000,
+          axis: "rows",
+        },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "columns",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.value_filters).toBeUndefined();
+  });
+
+  it("drops row top_n_filter when that row dimension is dragged out", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      values: ["revenue"],
+      top_n_filters: [
+        {
+          field: "region",
+          n: 3,
+          by: "revenue",
+          direction: "top",
+          axis: "rows",
+        },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "region",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.top_n_filters).toBeUndefined();
+  });
+
+  it("keeps row top_n_filter when a different row dimension is dragged out", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      values: ["revenue"],
+      top_n_filters: [
+        {
+          field: "region",
+          n: 3,
+          by: "revenue",
+          direction: "top",
+          axis: "rows",
+        },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "rows",
+      targetZone: "columns",
+      field: "category",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.top_n_filters).toHaveLength(1);
+  });
+
+  it("drops column value_filter when that column dimension is dragged out", () => {
+    const cfg = makeConfig({
+      rows: ["region"],
+      columns: ["quarter"],
+      values: ["revenue"],
+      value_filters: [
+        {
+          field: "quarter",
+          by: "revenue",
+          operator: "gte",
+          value: 500,
+          axis: "columns",
+        },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "columns",
+      targetZone: "rows",
+      field: "quarter",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    expect(result!.value_filters).toBeUndefined();
+  });
+
+  it("preserves unrelated filters when only one of multiple is stale", () => {
+    const cfg = makeConfig({
+      rows: ["region", "category"],
+      values: ["revenue", "profit"],
+      top_n_filters: [
+        {
+          field: "region",
+          n: 5,
+          by: "revenue",
+          direction: "top",
+          axis: "rows",
+        },
+        {
+          field: "category",
+          n: 3,
+          by: "profit",
+          direction: "bottom",
+          axis: "rows",
+        },
+      ],
+    });
+    const result = applyDragMove({
+      sourceZone: "values",
+      targetZone: "columns",
+      field: "revenue",
+      config: cfg,
+      numericColumns: NUMERIC_COLUMNS,
+    });
+    // Only the filter using "revenue" as by should be dropped
+    expect(result!.top_n_filters).toHaveLength(1);
+    expect(result!.top_n_filters![0].by).toBe("profit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cleanupConfigAfterFieldChanges – analytical filter cleanup
+// ---------------------------------------------------------------------------
+
+describe("cleanupConfigAfterFieldChanges – analytical filter cleanup", () => {
+  const base = makeConfig({
+    rows: ["region", "category"],
+    columns: ["quarter"],
+    values: ["revenue", "profit"],
+  });
+
+  it("prunes top_n_filter when its by measure is removed from values", () => {
+    const next = { ...base, values: ["profit"] };
+    const result = cleanupConfigAfterFieldChanges(
+      {
+        ...base,
+        top_n_filters: [
+          {
+            field: "region",
+            n: 5,
+            by: "revenue",
+            direction: "top" as const,
+            axis: "rows" as const,
+          },
+        ],
+      },
+      {
+        ...next,
+        top_n_filters: [
+          {
+            field: "region",
+            n: 5,
+            by: "revenue",
+            direction: "top" as const,
+            axis: "rows" as const,
+          },
+        ],
+      },
+    );
+    expect(result.top_n_filters).toBeUndefined();
+  });
+
+  it("prunes value_filter when its by measure is removed from values", () => {
+    const next = { ...base, values: ["profit"] };
+    const result = cleanupConfigAfterFieldChanges(
+      {
+        ...base,
+        value_filters: [
+          {
+            field: "region",
+            by: "revenue",
+            operator: "gt" as const,
+            value: 1000,
+            axis: "rows" as const,
+          },
+        ],
+      },
+      {
+        ...next,
+        value_filters: [
+          {
+            field: "region",
+            by: "revenue",
+            operator: "gt" as const,
+            value: 1000,
+            axis: "rows" as const,
+          },
+        ],
+      },
+    );
+    expect(result.value_filters).toBeUndefined();
+  });
+
+  it("prunes top_n_filter when its row dimension is removed from rows", () => {
+    const old = {
+      ...base,
+      top_n_filters: [
+        {
+          field: "category",
+          n: 3,
+          by: "revenue",
+          direction: "top" as const,
+          axis: "rows" as const,
+        },
+      ],
+    };
+    const next = { ...old, rows: ["region"] };
+    const result = cleanupConfigAfterFieldChanges(old, next);
+    expect(result.top_n_filters).toBeUndefined();
+  });
+
+  it("prunes value_filter when its column dimension is removed from columns", () => {
+    const old = {
+      ...base,
+      value_filters: [
+        {
+          field: "quarter",
+          by: "revenue",
+          operator: "lte" as const,
+          value: 5000,
+          axis: "columns" as const,
+        },
+      ],
+    };
+    const next = { ...old, columns: [] };
+    const result = cleanupConfigAfterFieldChanges(old, next);
+    expect(result.value_filters).toBeUndefined();
+  });
+
+  it("keeps analytical filters that are still fully valid after field changes", () => {
+    const old = {
+      ...base,
+      top_n_filters: [
+        {
+          field: "region",
+          n: 5,
+          by: "revenue",
+          direction: "top" as const,
+          axis: "rows" as const,
+        },
+      ],
+    };
+    // Remove "category" from rows — "region" filter should survive
+    const next = { ...old, rows: ["region"] };
+    const result = cleanupConfigAfterFieldChanges(old, next);
+    expect(result.top_n_filters).toHaveLength(1);
+    expect(result.top_n_filters![0].field).toBe("region");
+  });
+
+  it("prunes top_n_filter whose by references a removed synthetic measure", () => {
+    const synthetic = {
+      id: "margin",
+      label: "Margin",
+      operation: "formula" as const,
+      numerator: "revenue",
+      denominator: "profit",
+      formula: "revenue / profit",
+      format: "0.0%",
+    };
+    const old = {
+      ...base,
+      synthetic_measures: [synthetic],
+      top_n_filters: [
+        {
+          field: "region",
+          n: 5,
+          by: "margin",
+          direction: "top" as const,
+          axis: "rows" as const,
+        },
+      ],
+    };
+    const next = { ...old, synthetic_measures: undefined };
+    const result = cleanupConfigAfterFieldChanges(old, next);
+    expect(result.top_n_filters).toBeUndefined();
+  });
+
+  it("prunes value_filter whose by references a removed synthetic measure", () => {
+    const synthetic = {
+      id: "margin",
+      label: "Margin",
+      operation: "formula" as const,
+      numerator: "revenue",
+      denominator: "profit",
+      formula: "revenue / profit",
+      format: "0.0%",
+    };
+    const old = {
+      ...base,
+      synthetic_measures: [synthetic],
+      value_filters: [
+        {
+          field: "region",
+          by: "margin",
+          operator: "gt" as const,
+          value: 0.2,
+          axis: "rows" as const,
+        },
+      ],
+    };
+    const next = { ...old, synthetic_measures: undefined };
+    const result = cleanupConfigAfterFieldChanges(old, next);
+    expect(result.value_filters).toBeUndefined();
   });
 });

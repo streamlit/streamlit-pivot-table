@@ -767,6 +767,234 @@ def test_style_composition_value_overridden_by_later_none(pivot_module):
     assert result.get("stripe_color") is None
 
 
+# ---------------------------------------------------------------------------
+# 0.5.0 — top_n_filters and value_filters validation
+# ---------------------------------------------------------------------------
+
+
+def test_top_n_filters_valid_passthrough(pivot_module, sample_df, mount_recorder):
+    """Valid top_n_filters are accepted and passed to the config."""
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue"],
+        top_n_filters=[
+            {"field": "Region", "n": 2, "by": "Revenue", "direction": "top"}
+        ],
+    )
+    cfg = calls[0]["data"]["config"]
+    assert cfg["top_n_filters"] == [
+        {"field": "Region", "n": 2, "by": "Revenue", "direction": "top"}
+    ]
+
+
+def test_top_n_filters_with_axis_column(pivot_module, sample_df, mount_recorder):
+    """top_n_filters with axis='columns' is accepted for column dimensions."""
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue"],
+        top_n_filters=[
+            {
+                "field": "Category",
+                "n": 1,
+                "by": "Revenue",
+                "direction": "bottom",
+                "axis": "columns",
+            }
+        ],
+    )
+    cfg = calls[0]["data"]["config"]
+    assert cfg["top_n_filters"][0]["axis"] == "columns"
+
+
+def test_top_n_filters_invalid_direction_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="direction.*must be one of"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            top_n_filters=[
+                {"field": "Region", "n": 3, "by": "Revenue", "direction": "middle"}
+            ],
+        )
+
+
+def test_top_n_filters_invalid_n_raises(pivot_module, sample_df):
+    with pytest.raises(TypeError, match=r"top_n_filters\[0\]\['n'\].*positive integer"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            top_n_filters=[
+                {"field": "Region", "n": 0, "by": "Revenue", "direction": "top"}
+            ],
+        )
+
+
+def test_top_n_filters_field_not_in_rows_raises(pivot_module, sample_df):
+    with pytest.raises(
+        ValueError, match=r"top_n_filters\[0\]\['field'\].*not in the rows"
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            top_n_filters=[
+                {"field": "Category", "n": 2, "by": "Revenue", "direction": "top"}
+            ],
+        )
+
+
+def test_top_n_filters_by_not_in_values_raises(pivot_module, sample_df):
+    with pytest.raises(
+        ValueError, match=r"top_n_filters\[0\]\['by'\].*not in the available"
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            top_n_filters=[
+                {"field": "Region", "n": 2, "by": "DoesNotExist", "direction": "top"}
+            ],
+        )
+
+
+def test_value_filters_valid_passthrough(pivot_module, sample_df, mount_recorder):
+    """Valid value_filters are accepted and passed to the config."""
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue"],
+        value_filters=[
+            {"field": "Region", "by": "Revenue", "operator": "gt", "value": 100}
+        ],
+    )
+    cfg = calls[0]["data"]["config"]
+    assert cfg["value_filters"][0]["operator"] == "gt"
+
+
+def test_value_filters_between_requires_value2(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="'between' requires 'value2'"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            value_filters=[
+                {
+                    "field": "Region",
+                    "by": "Revenue",
+                    "operator": "between",
+                    "value": 100,
+                    # value2 intentionally missing
+                }
+            ],
+        )
+
+
+def test_value_filters_invalid_operator_raises(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="operator.*must be one of"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            value_filters=[
+                {
+                    "field": "Region",
+                    "by": "Revenue",
+                    "operator": "not_an_op",
+                    "value": 0,
+                }
+            ],
+        )
+
+
+def test_value_filters_field_not_in_rows_raises(pivot_module, sample_df):
+    with pytest.raises(
+        ValueError, match=r"value_filters\[0\]\['field'\].*not in the rows"
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            value_filters=[
+                {"field": "Category", "by": "Revenue", "operator": "gt", "value": 0}
+            ],
+        )
+
+
+def test_value_filters_by_not_in_values_raises(pivot_module, sample_df):
+    with pytest.raises(
+        ValueError, match=r"value_filters\[0\]\['by'\].*not in the available"
+    ):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            value_filters=[
+                {"field": "Region", "by": "NoSuchMeasure", "operator": "gt", "value": 0}
+            ],
+        )
+
+
+def test_filters_do_not_alter_sidecar_fingerprint(pivot_module, sample_df):
+    """top_n_filters and value_filters must NOT change the hybrid sidecar fingerprint."""
+    base_fp = pivot_module._build_sidecar_fingerprint(
+        {
+            "rows": ["Region"],
+            "columns": ["Category"],
+            "values": ["Revenue"],
+            "aggregation": {"Revenue": "sum"},
+        },
+        None,
+    )
+    # Adding top_n_filters to a config dict does NOT affect the fingerprint since
+    # _build_sidecar_fingerprint uses explicit key inclusion and does not list these keys.
+    filtered_fp = pivot_module._build_sidecar_fingerprint(
+        {
+            "rows": ["Region"],
+            "columns": ["Category"],
+            "values": ["Revenue"],
+            "aggregation": {"Revenue": "sum"},
+            "top_n_filters": [
+                {"field": "Region", "n": 2, "by": "Revenue", "direction": "top"}
+            ],
+            "value_filters": [
+                {"field": "Region", "by": "Revenue", "operator": "gt", "value": 100}
+            ],
+        },
+        None,
+    )
+    assert (
+        base_fp == filtered_fp
+    ), "top_n_filters / value_filters must not alter the sidecar fingerprint"
+
+
 def test_style_data_cell_by_measure_with_null_values_no_crash(
     pivot_module, mount_recorder
 ):

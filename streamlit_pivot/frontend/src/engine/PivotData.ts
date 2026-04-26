@@ -37,6 +37,8 @@ import {
   type PivotConfigV1,
   type SyntheticMeasureConfig,
   type SortConfig,
+  type TopNFilter,
+  type ValueFilter,
 } from "./types";
 import {
   compileFormula,
@@ -174,6 +176,182 @@ export function mixedCompare(a: string, b: string): number {
   if (aIsNum) return -1;
   if (bIsNum) return 1;
   return a.localeCompare(b);
+}
+
+// ---------------------------------------------------------------------------
+// 0.5.0 Filtering helpers — Top N / Bottom N and Value Filters
+// ---------------------------------------------------------------------------
+
+/**
+ * Retrieve the aggregated measure value for a given key at grand-total context.
+ *
+ * Row axis:
+ *   - Full leaf keys (length === numRowDims): getRowTotal (sum across all cols)
+ *   - Partial prefix keys: getSubtotalAggregator(key, [], byField)
+ *
+ * Column axis:
+ *   - Full leaf keys (length === numColDims): getColTotal (sum across all rows)
+ *   - Partial prefix keys: sum all matching full leaf col keys from _colTotalAggs
+ *     (equivalent to a column subtotal at grand-total row context)
+ *
+ * Returns null when the key is not found or the value is non-numeric / missing.
+ */
+function _getMeasureValue(
+  data: PivotData,
+  key: string[],
+  byField: string,
+  axis: "rows" | "columns",
+): number | null {
+  let rawVal: unknown;
+
+  if (axis === "rows") {
+    const numRowDims = data["_config"].rows.length;
+    const agg =
+      key.length >= numRowDims
+        ? data.getRowTotal(key, byField)
+        : data.getSubtotalAggregator(key, [], byField);
+    rawVal = agg.value();
+  } else {
+    const numColDims = data["_config"].columns.length;
+    if (key.length >= numColDims) {
+      // Full leaf column key — use the pre-built column total aggregator.
+      rawVal = data.getColTotal(key, byField).value();
+    } else {
+      // Partial column key (parent level in multi-level column dimension).
+      // Use getColGroupGrandSubtotal() which is pre-computed from raw records
+      // and is correct for non-additive aggregators (e.g. distinct count, median).
+      rawVal = data.getColGroupGrandSubtotal(key, byField).value();
+    }
+  }
+
+  if (
+    rawVal === null ||
+    rawVal === undefined ||
+    typeof rawVal !== "number" ||
+    isNaN(rawVal)
+  )
+    return null;
+  return rawVal;
+}
+
+/**
+ * Apply Top N / Bottom N filters to a sorted key list.
+ *
+ * Filtering is **per-parent**: keys are grouped by their parent prefix
+ * (segments 0..dimIdx-1). Within each group the **unique members** at
+ * dimension `dimIdx` are scored independently, so a winning member keeps
+ * ALL of its descendant leaf rows (not just the first N leaf rows).
+ *
+ * Members with null measure values are excluded from the ranking and never
+ * consume Top N / Bottom N slots (they are always dropped).
+ *
+ * The relative sort order of kept leaf keys is preserved.
+ */
+function _applyTopNFilters(
+  data: PivotData,
+  keys: string[][],
+  filters: TopNFilter[],
+  dimList: string[],
+  axis: "rows" | "columns",
+): string[][] {
+  if (!filters.length) return keys;
+
+  let result = keys;
+  for (const f of filters) {
+    const dimIdx = dimList.indexOf(f.field);
+    if (dimIdx < 0) continue; // field not in this axis — skip
+
+    // Group all leaf keys by their parent prefix (segments 0..dimIdx-1).
+    const groups = new Map<string, string[][]>();
+    for (const key of result) {
+      const parentKey = makeKeyString(key.slice(0, dimIdx));
+      if (!groups.has(parentKey)) groups.set(parentKey, []);
+      groups.get(parentKey)!.push(key);
+    }
+
+    const kept: string[][] = [];
+    for (const group of groups.values()) {
+      // Build a map of unique member values at dimIdx → score.
+      // We score the member once (using any leaf key that shares that member)
+      // rather than once per leaf row, fixing the "multi-slot consumption" bug.
+      const memberScores = new Map<string, number | null>();
+      for (const key of group) {
+        const member = key[dimIdx]!;
+        if (!memberScores.has(member)) {
+          memberScores.set(
+            member,
+            _getMeasureValue(data, key.slice(0, dimIdx + 1), f.by, axis),
+          );
+        }
+      }
+
+      // Keep only members with non-null scores, then rank.
+      const nonNull = [...memberScores.entries()]
+        .filter((entry): entry is [string, number] => entry[1] !== null)
+        .sort(([, a], [, b]) => b - a); // descending (highest first)
+
+      const topSlice =
+        f.direction === "top"
+          ? nonNull.slice(0, f.n) // top N highest
+          : nonNull.slice(-f.n); // bottom N lowest (nulls already excluded)
+
+      const winnerMembers = new Set(topSlice.map(([member]) => member));
+
+      // Re-emit leaf keys in original sort order for winning members only.
+      for (const key of group) {
+        if (winnerMembers.has(key[dimIdx]!)) kept.push(key);
+      }
+    }
+    result = kept;
+  }
+  return result;
+}
+
+/**
+ * Apply value-predicate filters to a sorted key list.
+ *
+ * Filtering is **per-parent**: for each member the predicate is evaluated
+ * against its aggregated `by` measure at grand-total column context.
+ * Members with null measure values fail the predicate and are excluded.
+ */
+function _applyValueFilters(
+  data: PivotData,
+  keys: string[][],
+  filters: ValueFilter[],
+  dimList: string[],
+  axis: "rows" | "columns",
+): string[][] {
+  if (!filters.length) return keys;
+
+  let result = keys;
+  for (const f of filters) {
+    const dimIdx = dimList.indexOf(f.field);
+    if (dimIdx < 0) continue;
+
+    result = result.filter((key) => {
+      const val = _getMeasureValue(data, key.slice(0, dimIdx + 1), f.by, axis);
+      if (val === null) return false; // null fails all predicates
+      switch (f.operator) {
+        case "gt":
+          return val > f.value;
+        case "gte":
+          return val >= f.value;
+        case "lt":
+          return val < f.value;
+        case "lte":
+          return val <= f.value;
+        case "eq":
+          return val === f.value;
+        case "neq":
+          return val !== f.value;
+        case "between":
+          return val >= f.value && val <= (f.value2 ?? f.value);
+        default:
+          return true;
+      }
+    });
+  }
+  return result;
 }
 
 /**
@@ -959,7 +1137,33 @@ export class PivotData {
         this._rowValueGetter(this._config.row_sort),
         subtotalGetter,
       );
-      this._sortedRowKeys = [...this._rowKeySet.values()].sort(cmp);
+      let sorted = [...this._rowKeySet.values()].sort(cmp);
+
+      // Apply Top N and value filters (display-only; totals are unaffected).
+      const rowTopN = (this._config.top_n_filters ?? []).filter(
+        (f) => (f.axis ?? "rows") === "rows",
+      );
+      const rowValueFilters = (this._config.value_filters ?? []).filter(
+        (f) => (f.axis ?? "rows") === "rows",
+      );
+      if (rowTopN.length > 0)
+        sorted = _applyTopNFilters(
+          this,
+          sorted,
+          rowTopN,
+          this._config.rows,
+          "rows",
+        );
+      if (rowValueFilters.length > 0)
+        sorted = _applyValueFilters(
+          this,
+          sorted,
+          rowValueFilters,
+          this._config.rows,
+          "rows",
+        );
+
+      this._sortedRowKeys = sorted;
     }
     return this._sortedRowKeys;
   }
@@ -971,7 +1175,33 @@ export class PivotData {
         this._config.columns,
         this._colValueGetter(this._config.col_sort),
       );
-      this._sortedColKeys = [...this._colKeySet.values()].sort(cmp);
+      let sorted = [...this._colKeySet.values()].sort(cmp);
+
+      // Apply Top N and value filters on the column axis.
+      const colTopN = (this._config.top_n_filters ?? []).filter(
+        (f) => f.axis === "columns",
+      );
+      const colValueFilters = (this._config.value_filters ?? []).filter(
+        (f) => f.axis === "columns",
+      );
+      if (colTopN.length > 0)
+        sorted = _applyTopNFilters(
+          this,
+          sorted,
+          colTopN,
+          this._config.columns,
+          "columns",
+        );
+      if (colValueFilters.length > 0)
+        sorted = _applyValueFilters(
+          this,
+          sorted,
+          colValueFilters,
+          this._config.columns,
+          "columns",
+        );
+
+      this._sortedColKeys = sorted;
     }
     return this._sortedColKeys;
   }

@@ -46,6 +46,7 @@ DATA_SCRIPT = Path(__file__).parent / "pivot_table_data_app.py"
 GOLDEN_SCRIPT = Path(__file__).parent / "pivot_table_golden_app.py"
 COLUMN_CONFIG_SCRIPT = Path(__file__).parent / "pivot_table_column_config_app.py"
 STYLING_SCRIPT = Path(__file__).parent / "pivot_table_styling_app.py"
+FILTERS_SCRIPT = Path(__file__).parent / "pivot_table_filters_app.py"
 
 PIVOT_KEYS = [
     "test_pivot",
@@ -203,6 +204,16 @@ APP_CONFIGS = {
     "pivot_table_styling_test.py": {
         "script": STYLING_SCRIPT,
         "pivot_keys": STYLING_PIVOT_KEYS,
+    },
+    "pivot_table_filters_test.py": {
+        "script": FILTERS_SCRIPT,
+        "pivot_keys": [
+            "test_pivot_top_n",
+            "test_pivot_bottom_n",
+            "test_pivot_value_filter",
+            "test_pivot_top_n_interactive",
+            "test_pivot_value_filter_interactive",
+        ],
     },
 }
 

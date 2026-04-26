@@ -641,6 +641,184 @@ st_pivot_table(
 section_show_values_as_analytical()
 
 # ---------------------------------------------------------------------------
+# Section 5c: Top N / Value Filters (0.5.0)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("5c. Top N / Bottom N and Value Filters (0.5.0)")
+
+
+@st.cache_data
+def _section_filters_data():
+    import pandas as pd
+    import numpy as np
+
+    rng = np.random.default_rng(42)
+    regions = ["North", "South", "East", "West", "Central"]
+    products = [
+        "Widget A",
+        "Widget B",
+        "Widget C",
+        "Gadget X",
+        "Gadget Y",
+        "Gadget Z",
+        "Tool 1",
+        "Tool 2",
+        "Tool 3",
+        "Tool 4",
+    ]
+    quarters = ["Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"]
+    rows = []
+    for region in regions:
+        for product in products:
+            for quarter in quarters:
+                revenue = int(rng.integers(50_000, 500_000))
+                rows.append(
+                    {
+                        "Region": region,
+                        "Product": product,
+                        "Quarter": quarter,
+                        "Revenue": revenue,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def section_top_n_value_filters():
+    df = _section_filters_data()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(
+            """
+**Top N / Bottom N** filters hide dimension members outside the top (or bottom) N
+ranked by a measure. Ranking is **per-parent**: for a two-level hierarchy like
+`[Region, Product]`, "Top 3 Products by Revenue" keeps the 3 highest-revenue
+products **within each Region** independently.
+
+The `top_n_filters` parameter accepts a list of dicts with keys:
+- `field` — dimension to filter
+- `n` — how many members to keep
+- `direction` — `"top"` or `"bottom"`
+- `by` — measure to rank by
+- `axis` — `"rows"` or `"columns"` (default `"rows"`)
+
+> ⚠️ Grand totals and subtotals always reflect **all data**, not just visible
+> members. This is a deliberate product choice (simpler, avoids re-aggregation
+> cost). The table shows a footnote to communicate this.
+
+**Interactive**: open any row-dimension header menu to set a Top N or value
+filter without code.
+            """
+        )
+    with col2:
+        st.markdown(
+            """
+**Value Filters** suppress dimension members whose aggregated measure fails a
+predicate at the grand-total column context. Evaluation is also **per-parent**.
+
+The `value_filters` parameter accepts dicts with:
+- `field` — dimension to filter
+- `by` — measure to evaluate
+- `operator` — `"gt"`, `"gte"`, `"lt"`, `"lte"`, `"eq"`, `"neq"`, `"between"`
+- `value` — threshold (lower bound for `"between"`)
+- `value2` — upper bound (required for `"between"`)
+- `axis` — `"rows"` or `"columns"` (default `"rows"`)
+
+Members with a **null** aggregated measure fail all predicates and are excluded.
+
+**Hint**: these filters are also accessible via the column header ⋮ menu
+("Top / Bottom N" and "Filter by value" sections) — no code required.
+            """
+        )
+
+    st.markdown("##### Top 3 Products by Revenue per Region")
+    st.caption(
+        "50 products × 5 regions; only the top 3 revenue products per region are shown. "
+        "Grand totals include all products."
+    )
+    from streamlit_pivot import st_pivot_table
+
+    st_pivot_table(
+        df,
+        key="demo_top3_products",
+        rows=["Region", "Product"],
+        columns=["Quarter"],
+        values=["Revenue"],
+        number_format={"Revenue": "$,.0f"},
+        top_n_filters=[
+            {"field": "Product", "n": 3, "by": "Revenue", "direction": "top"}
+        ],
+    )
+
+    st.markdown("##### Revenue > $1M (annual total) — Value Filter")
+    st.caption(
+        "Products whose total annual Revenue ≤ $1M are hidden within each Region."
+    )
+    st_pivot_table(
+        df,
+        key="demo_value_filter_revenue",
+        rows=["Region", "Product"],
+        columns=["Quarter"],
+        values=["Revenue"],
+        number_format={"Revenue": "$,.0f"},
+        value_filters=[
+            {"field": "Product", "by": "Revenue", "operator": "gt", "value": 1_000_000}
+        ],
+    )
+
+    st.markdown("##### Bottom 2 Products per Region")
+    st.caption(
+        "Bottom 2 products by revenue within each region — useful for identifying "
+        "underperformers."
+    )
+    st_pivot_table(
+        df,
+        key="demo_bottom2_products",
+        rows=["Region", "Product"],
+        columns=["Quarter"],
+        values=["Revenue"],
+        number_format={"Revenue": "$,.0f"},
+        top_n_filters=[
+            {"field": "Product", "n": 2, "by": "Revenue", "direction": "bottom"}
+        ],
+    )
+
+    with st.expander("Code", expanded=False):
+        st.code(
+            """\
+from streamlit_pivot import st_pivot_table
+
+# Top 3 Products by Revenue per Region
+st_pivot_table(
+    df,
+    key="top3",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    top_n_filters=[
+        {"field": "Product", "n": 3, "by": "Revenue", "direction": "top"}
+    ],
+)
+
+# Products with Revenue > $1M (per-region grand-total column context)
+st_pivot_table(
+    df,
+    key="gt1m",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    value_filters=[
+        {"field": "Product", "by": "Revenue", "operator": "gt", "value": 1_000_000}
+    ],
+)
+""",
+            language="python",
+        )
+
+
+section_top_n_value_filters()
+
+# ---------------------------------------------------------------------------
 # Section 6: Conditional Formatting
 # ---------------------------------------------------------------------------
 st.divider()

@@ -31,6 +31,8 @@ import type {
   PivotConfigV1,
   ShowValuesAs,
   SortConfig,
+  TopNFilter,
+  ValueFilter,
 } from "../engine/types";
 import {
   DATE_GRAIN_LABELS,
@@ -88,6 +90,14 @@ export interface HeaderMenuProps {
   onDateDrill?: (direction: "up" | "down") => void;
   /** Whether period-comparison display modes should be shown. */
   supportsPeriodComparison?: boolean;
+  /** Active Top N filter for this dimension (undefined = no active filter). */
+  topNFilter?: TopNFilter;
+  /** Callback to set/clear the Top N filter for this dimension. */
+  onTopNFilterChange?: (filter: TopNFilter | undefined) => void;
+  /** Active value filter for this dimension (undefined = no active filter). */
+  valueFilter?: ValueFilter;
+  /** Callback to set/clear the value filter for this dimension. */
+  onValueFilterChange?: (filter: ValueFilter | undefined) => void;
   onClose: () => void;
 }
 
@@ -127,8 +137,36 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
   onDateGrainChange,
   onDateDrill,
   supportsPeriodComparison = false,
+  topNFilter,
+  onTopNFilterChange,
+  valueFilter,
+  onValueFilterChange,
   onClose,
 }): ReactElement => {
+  // Derive filter axis ("rows"/"columns") from the existing "row"/"col" axis prop.
+  const filterAxis: "rows" | "columns" = axis === "col" ? "columns" : "rows";
+
+  // Local state for Top N inputs (pre-populated from active filter, or defaults).
+  const [topNDirection, setTopNDirection] = useState<"top" | "bottom">(
+    topNFilter?.direction ?? "top",
+  );
+  const [topNValue, setTopNValue] = useState<string>(
+    topNFilter?.n !== undefined ? String(topNFilter.n) : "10",
+  );
+  const [topNBy, setTopNBy] = useState<string>(topNFilter?.by ?? "");
+
+  // Local state for value filter inputs.
+  const [vfBy, setVfBy] = useState<string>(valueFilter?.by ?? "");
+  const [vfOperator, setVfOperator] = useState<ValueFilter["operator"]>(
+    valueFilter?.operator ?? "gt",
+  );
+  const [vfValue, setVfValue] = useState<string>(
+    valueFilter?.value !== undefined ? String(valueFilter.value) : "",
+  );
+  const [vfValue2, setVfValue2] = useState<string>(
+    valueFilter?.value2 !== undefined ? String(valueFilter.value2) : "",
+  );
+
   const showSort = !!onSortChange;
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -138,6 +176,61 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
     },
     [dimension, onFilterChange],
   );
+
+  const applyTopN = useCallback(() => {
+    if (!onTopNFilterChange) return;
+    const n = parseInt(topNValue, 10);
+    if (!topNBy || isNaN(n) || n < 1) return;
+    onTopNFilterChange({
+      field: dimension,
+      n,
+      by: topNBy,
+      direction: topNDirection,
+      axis: filterAxis,
+    });
+  }, [
+    onTopNFilterChange,
+    dimension,
+    topNValue,
+    topNBy,
+    topNDirection,
+    filterAxis,
+  ]);
+
+  const clearTopN = useCallback(() => {
+    onTopNFilterChange?.(undefined);
+  }, [onTopNFilterChange]);
+
+  const applyValueFilter = useCallback(() => {
+    if (!onValueFilterChange) return;
+    const val = parseFloat(vfValue);
+    if (!vfBy || isNaN(val)) return;
+    const filter: ValueFilter = {
+      field: dimension,
+      by: vfBy,
+      operator: vfOperator,
+      value: val,
+      axis: filterAxis,
+    };
+    if (vfOperator === "between") {
+      const val2 = parseFloat(vfValue2);
+      if (isNaN(val2)) return;
+      filter.value2 = val2;
+    }
+    onValueFilterChange(filter);
+  }, [
+    onValueFilterChange,
+    dimension,
+    vfBy,
+    vfOperator,
+    vfValue,
+    vfValue2,
+    filterAxis,
+  ]);
+
+  const clearValueFilter = useCallback(() => {
+    onValueFilterChange?.(undefined);
+  }, [onValueFilterChange]);
 
   useClickOutside(containerRef, onClose, true);
 
@@ -718,10 +811,256 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
         </>
       )}
 
+      {/* Top N / Bottom N section (dimension headers only, when value fields available) */}
+      {onTopNFilterChange && valueFields && valueFields.length > 0 && (
+        <>
+          <div
+            className={styles.sortSection}
+            data-testid="header-menu-top-n"
+            role="group"
+            aria-label={`Top N filter for ${dimension}`}
+          >
+            <span className={styles.menuSectionLabel}>Top / Bottom N</span>
+            {/* Caption sits directly under heading as a section subtitle */}
+            <span className={styles.analyticCaption}>
+              Totals always reflect full data, not just visible members.
+            </span>
+
+            {/* Row 1: direction toggle + N count, with deliberate gap between them */}
+            <div className={styles.analyticControls} style={{ gap: 8 }}>
+              {/* Top / Bottom as a connected pill toggle */}
+              <div className={styles.toggleGroup}>
+                {(["top", "bottom"] as const).map((dir) => (
+                  <button
+                    key={dir}
+                    type="button"
+                    className={`${styles.toggleBtn}${topNDirection === dir ? ` ${styles.toggleBtnActive}` : ""}`}
+                    onClick={() => setTopNDirection(dir)}
+                    data-menu-nav
+                    tabIndex={-1}
+                    data-testid={`header-top-n-dir-${dir}`}
+                  >
+                    {dir === "top" ? "Top" : "Bottom"}
+                  </button>
+                ))}
+              </div>
+              {/* N count — fixed compact width so it doesn't dominate the row */}
+              <input
+                type="number"
+                className={styles.analyticInput}
+                style={{ width: 85, flex: "0 0 auto" }}
+                min={1}
+                value={topNValue}
+                onChange={(e) => setTopNValue(e.target.value)}
+                placeholder="N"
+                data-menu-nav
+                tabIndex={-1}
+                data-testid="header-top-n-count"
+              />
+            </div>
+            {/* Row 2: "by" label + measure field selector, with visual breathing room */}
+            <div
+              className={styles.analyticControls}
+              style={{ marginTop: 6, gap: 8 }}
+            >
+              <span className={styles.analyticConnector}>by</span>
+              <div
+                className={styles.analyticSelectWrap}
+                style={{ flex: "0 1 auto", minWidth: 80 }}
+              >
+                <select
+                  className={`${styles.analyticSelect}${topNBy === "" ? ` ${styles.isPlaceholder}` : ""}`}
+                  value={topNBy}
+                  onChange={(e) => setTopNBy(e.target.value)}
+                  data-menu-nav
+                  tabIndex={-1}
+                  data-testid="header-top-n-by"
+                >
+                  <option value="">Select field</option>
+                  {valueFields.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Apply + Clear always visible; Clear disabled when no filter is active */}
+            <div className={styles.analyticApplyRow}>
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={clearTopN}
+                disabled={!topNFilter}
+                data-menu-nav
+                tabIndex={-1}
+                data-testid="header-top-n-clear"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={applyTopN}
+                data-menu-nav
+                tabIndex={-1}
+                data-testid="header-top-n-apply"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Value filter section (dimension headers only, when value fields available) */}
+      {onValueFilterChange && valueFields && valueFields.length > 0 && (
+        <>
+          <div className={styles.divider} />
+          <div
+            className={styles.sortSection}
+            data-testid="header-menu-value-filter"
+            role="group"
+            aria-label={`Value filter for ${dimension}`}
+          >
+            <span className={styles.menuSectionLabel}>Filter by value</span>
+            {/* Caption sits directly under heading as a section subtitle */}
+            <span className={styles.analyticCaption}>
+              Totals always reflect full data, not just visible members.
+            </span>
+
+            {/* Measure field selector — full width */}
+            <div className={styles.analyticControls}>
+              <div
+                className={styles.analyticSelectWrap}
+                style={{ flex: 1, minWidth: 0 }}
+              >
+                <select
+                  className={`${styles.analyticSelect}${vfBy === "" ? ` ${styles.isPlaceholder}` : ""}`}
+                  value={vfBy}
+                  onChange={(e) => setVfBy(e.target.value)}
+                  data-menu-nav
+                  tabIndex={-1}
+                  data-testid="header-value-filter-by"
+                >
+                  <option value="">field…</option>
+                  {valueFields.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Operator strip — all 7 operators visible as labeled buttons */}
+            <div
+              className={styles.opGroup}
+              role="group"
+              aria-label="Comparison operator"
+              data-testid="header-value-filter-operator-group"
+            >
+              {(
+                [
+                  ["gt", ">", "Greater than"],
+                  ["gte", "≥", "Greater than or equal"],
+                  ["lt", "<", "Less than"],
+                  ["lte", "≤", "Less than or equal"],
+                  ["eq", "=", "Equal"],
+                  ["neq", "≠", "Not equal"],
+                  ["between", "btw", "Between two values"],
+                ] as [ValueFilter["operator"], string, string][]
+              ).map(([op, label, tooltip]) => (
+                <span
+                  key={op}
+                  className={styles.tooltipWrap}
+                  data-tooltip={tooltip}
+                >
+                  <button
+                    type="button"
+                    className={`${styles.opBtn}${vfOperator === op ? ` ${styles.opBtnActive}` : ""}`}
+                    onClick={() => setVfOperator(op)}
+                    aria-label={tooltip}
+                    data-menu-nav
+                    tabIndex={-1}
+                    data-testid={`header-value-filter-op-${op}`}
+                  >
+                    {label}
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            {/* Value input(s) */}
+            <div className={styles.analyticValueRow}>
+              <input
+                type="number"
+                className={styles.analyticInput}
+                style={{ flex: 1, minWidth: 0 }}
+                value={vfValue}
+                onChange={(e) => setVfValue(e.target.value)}
+                placeholder={vfOperator === "between" ? "lower" : "value"}
+                data-menu-nav
+                tabIndex={-1}
+                data-testid="header-value-filter-value"
+              />
+              {vfOperator === "between" && (
+                <>
+                  <span className={styles.analyticConnector}>–</span>
+                  <input
+                    type="number"
+                    className={styles.analyticInput}
+                    style={{ flex: 1, minWidth: 0 }}
+                    value={vfValue2}
+                    onChange={(e) => setVfValue2(e.target.value)}
+                    placeholder="upper"
+                    data-menu-nav
+                    tabIndex={-1}
+                    data-testid="header-value-filter-value2"
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Apply + Clear always visible; Clear disabled when no filter is active */}
+            <div className={styles.analyticApplyRow}>
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={clearValueFilter}
+                disabled={!valueFilter}
+                data-menu-nav
+                tabIndex={-1}
+                data-testid="header-value-filter-clear"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={applyValueFilter}
+                data-menu-nav
+                tabIndex={-1}
+                data-testid="header-value-filter-apply"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Divider between analytical filters and Filter Values checklist (only when both present) */}
+      {showFilter &&
+        onValueFilterChange &&
+        valueFields &&
+        valueFields.length > 0 && <div className={styles.divider} />}
+
       {/* Filter section */}
       {showFilter && (
         <div className={styles.filterSection} data-testid="header-menu-filter">
-          <span className={styles.menuSectionLabel}>Values</span>
+          <span className={styles.menuSectionLabel}>Filter Values</span>
           <input
             type="text"
             className={styles.searchInput}

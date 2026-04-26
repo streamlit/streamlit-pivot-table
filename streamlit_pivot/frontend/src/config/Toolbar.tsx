@@ -338,6 +338,19 @@ export function applyDragMove({
         })
         .filter((rule) => rule.apply_to.length > 0);
     }
+    // Prune analytical filters whose "by" measure was dragged out of values.
+    if (updated.top_n_filters) {
+      updated.top_n_filters = updated.top_n_filters.filter(
+        (f) => f.by !== field,
+      );
+      if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+    }
+    if (updated.value_filters) {
+      updated.value_filters = updated.value_filters.filter(
+        (f) => f.by !== field,
+      );
+      if (updated.value_filters.length === 0) delete updated.value_filters;
+    }
   }
 
   if (sourceZone === "rows") {
@@ -351,6 +364,19 @@ export function applyDragMove({
       );
       updated.show_subtotals = pruned.length > 0 ? pruned : false;
     }
+    // Prune analytical filters on the row dimension that was dragged out.
+    if (updated.top_n_filters) {
+      updated.top_n_filters = updated.top_n_filters.filter(
+        (f) => !((f.axis ?? "rows") === "rows" && f.field === field),
+      );
+      if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+    }
+    if (updated.value_filters) {
+      updated.value_filters = updated.value_filters.filter(
+        (f) => !((f.axis ?? "rows") === "rows" && f.field === field),
+      );
+      if (updated.value_filters.length === 0) delete updated.value_filters;
+    }
   }
 
   if (sourceZone === "columns") {
@@ -358,6 +384,19 @@ export function applyDragMove({
       delete updated.col_sort;
     }
     delete updated.collapsed_col_groups;
+    // Prune analytical filters on the column dimension that was dragged out.
+    if (updated.top_n_filters) {
+      updated.top_n_filters = updated.top_n_filters.filter(
+        (f) => !(f.axis === "columns" && f.field === field),
+      );
+      if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+    }
+    if (updated.value_filters) {
+      updated.value_filters = updated.value_filters.filter(
+        (f) => !(f.axis === "columns" && f.field === field),
+      );
+      if (updated.value_filters.length === 0) delete updated.value_filters;
+    }
   }
 
   return updated;
@@ -449,10 +488,24 @@ const Toolbar: FC<ToolbarProps> = ({
       const current = config.synthetic_measures ?? [];
       const next = current.filter((m) => m.id !== syntheticId);
       if (next.length === current.length) return;
-      emitIfChanged({
+      const updated: typeof config = {
         ...config,
         synthetic_measures: next.length > 0 ? next : undefined,
-      });
+      };
+      // Prune analytical filters whose "by" references the removed synthetic measure.
+      if (updated.top_n_filters) {
+        updated.top_n_filters = updated.top_n_filters.filter(
+          (f) => f.by !== syntheticId,
+        );
+        if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+      }
+      if (updated.value_filters) {
+        updated.value_filters = updated.value_filters.filter(
+          (f) => f.by !== syntheticId,
+        );
+        if (updated.value_filters.length === 0) delete updated.value_filters;
+      }
+      emitIfChanged(updated);
     },
     [config, emitIfChanged],
   );

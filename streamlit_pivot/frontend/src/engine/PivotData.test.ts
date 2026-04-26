@@ -2786,3 +2786,200 @@ describe("PivotData - formula performance", () => {
     expect(overhead).toBeLessThan(5.0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0.5.0 — Top N and Value Filter tests
+// ---------------------------------------------------------------------------
+
+const FILTER_DATA: DataRecord[] = [
+  { region: "US", product: "Alpha", revenue: 500 },
+  { region: "US", product: "Beta", revenue: 200 },
+  { region: "US", product: "Gamma", revenue: 800 },
+  { region: "EU", product: "Alpha", revenue: 300 },
+  { region: "EU", product: "Beta", revenue: 700 },
+  { region: "EU", product: "Gamma", revenue: 100 },
+];
+
+// Helper: config without column dimension (so grand-total column = colKey [])
+function makeFilterConfig(
+  overrides: Partial<TestConfigOverrides> = {},
+): PivotConfigV1 {
+  return makeConfig({
+    rows: ["region", "product"],
+    columns: ["category"], // Use a column that exists in FILTER_DATA_WITH_COL
+    values: ["revenue"],
+    ...overrides,
+  });
+}
+
+// Extended test data that includes a column dimension
+const FILTER_DATA_WITH_COL: DataRecord[] = [
+  { region: "US", product: "Alpha", category: "A", revenue: 500 },
+  { region: "US", product: "Beta", category: "A", revenue: 200 },
+  { region: "US", product: "Gamma", category: "A", revenue: 800 },
+  { region: "EU", product: "Alpha", category: "A", revenue: 300 },
+  { region: "EU", product: "Beta", category: "A", revenue: 700 },
+  { region: "EU", product: "Gamma", category: "A", revenue: 100 },
+];
+
+describe("PivotData — Top N filters", () => {
+  it("top_n_filters: top 2 products by revenue per region", () => {
+    const config = makeFilterConfig({
+      top_n_filters: [
+        { field: "product", n: 2, by: "revenue", direction: "top" },
+      ],
+    });
+    const pd = new PivotData(FILTER_DATA_WITH_COL, config);
+    const rowKeys = pd.getRowKeys();
+
+    // EU: top 2 are Beta (700) and Alpha (300) → Gamma (100) excluded
+    const euRows = rowKeys.filter((k) => k[0] === "EU").map((k) => k[1]);
+    expect(euRows).toContain("Beta");
+    expect(euRows).toContain("Alpha");
+    expect(euRows).not.toContain("Gamma");
+
+    // US: top 2 are Gamma (800) and Alpha (500) → Beta (200) excluded
+    const usRows = rowKeys.filter((k) => k[0] === "US").map((k) => k[1]);
+    expect(usRows).toContain("Gamma");
+    expect(usRows).toContain("Alpha");
+    expect(usRows).not.toContain("Beta");
+  });
+
+  it("top_n_filters: bottom 1 product by revenue per region", () => {
+    const config = makeFilterConfig({
+      top_n_filters: [
+        { field: "product", n: 1, by: "revenue", direction: "bottom" },
+      ],
+    });
+    const pd = new PivotData(FILTER_DATA_WITH_COL, config);
+    const rowKeys = pd.getRowKeys();
+
+    // EU bottom 1: Gamma (100)
+    const euRows = rowKeys.filter((k) => k[0] === "EU").map((k) => k[1]);
+    expect(euRows).toEqual(["Gamma"]);
+
+    // US bottom 1: Beta (200)
+    const usRows = rowKeys.filter((k) => k[0] === "US").map((k) => k[1]);
+    expect(usRows).toEqual(["Beta"]);
+  });
+
+  it("top_n_filters: parent subtotals are unaffected by filtering", () => {
+    const config = makeConfig({
+      rows: ["region", "product"],
+      columns: ["year"],
+      values: ["revenue"],
+      top_n_filters: [
+        { field: "product", n: 1, by: "revenue", direction: "top" },
+      ],
+    });
+    const dataWithYear: DataRecord[] = [
+      { region: "US", product: "Alpha", year: "2024", revenue: 500 },
+      { region: "US", product: "Beta", year: "2024", revenue: 200 },
+      { region: "US", product: "Gamma", year: "2024", revenue: 800 },
+    ];
+    const pd = new PivotData(dataWithYear, config);
+    // Only top 1 (Gamma) visible in rows, but US subtotal still = 1500
+    const usRows = pd
+      .getRowKeys()
+      .filter((k) => k[0] === "US")
+      .map((k) => k[1]);
+    expect(usRows).toEqual(["Gamma"]);
+    // The subtotal aggregator for US (all columns) reads from full unfiltered data
+    expect(pd.getSubtotalAggregator(["US"], [], "revenue").value()).toBe(1500);
+  });
+
+  it("top_n_filters: single-level dimension uses grand total ranking", () => {
+    const config = makeFilterConfig({
+      rows: ["region"],
+      top_n_filters: [
+        { field: "region", n: 1, by: "revenue", direction: "top" },
+      ],
+    });
+    // US total = 1500, EU total = 1100 → top 1 = US
+    const pd = new PivotData(FILTER_DATA_WITH_COL, config);
+    expect(pd.getRowKeys()).toEqual([["US"]]);
+  });
+});
+
+describe("PivotData — Value filters", () => {
+  it("value_filters: revenue > 400 excludes low-revenue products per region", () => {
+    const config = makeFilterConfig({
+      value_filters: [
+        { field: "product", by: "revenue", operator: "gt", value: 400 },
+      ],
+    });
+    const pd = new PivotData(FILTER_DATA_WITH_COL, config);
+    const rowKeys = pd.getRowKeys();
+
+    // US: Alpha (500) ✓, Gamma (800) ✓, Beta (200) ✗
+    const usRows = rowKeys.filter((k) => k[0] === "US").map((k) => k[1]);
+    expect(usRows).toContain("Alpha");
+    expect(usRows).toContain("Gamma");
+    expect(usRows).not.toContain("Beta");
+
+    // EU: Beta (700) ✓, Alpha (300) ✗, Gamma (100) ✗
+    const euRows = rowKeys.filter((k) => k[0] === "EU").map((k) => k[1]);
+    expect(euRows).toEqual(["Beta"]);
+  });
+
+  it("value_filters: between operator keeps members in range", () => {
+    const config = makeFilterConfig({
+      value_filters: [
+        {
+          field: "product",
+          by: "revenue",
+          operator: "between",
+          value: 200,
+          value2: 600,
+        },
+      ],
+    });
+    const pd = new PivotData(FILTER_DATA_WITH_COL, config);
+    const rowKeys = pd.getRowKeys();
+
+    // US: Alpha (500) ✓, Beta (200) ✓, Gamma (800) ✗
+    const usRows = rowKeys.filter((k) => k[0] === "US").map((k) => k[1]);
+    expect(usRows).toContain("Alpha");
+    expect(usRows).toContain("Beta");
+    expect(usRows).not.toContain("Gamma");
+  });
+
+  it("value_filters: parent subtotals are unaffected by filtering", () => {
+    const dataWithYear: DataRecord[] = [
+      { region: "US", product: "Alpha", year: "2024", revenue: 500 },
+      { region: "US", product: "Beta", year: "2024", revenue: 200 },
+    ];
+    const config = makeConfig({
+      rows: ["region", "product"],
+      columns: ["year"],
+      values: ["revenue"],
+      value_filters: [
+        { field: "product", by: "revenue", operator: "gt", value: 9999 },
+      ],
+    });
+    const pd = new PivotData(dataWithYear, config);
+    // All product rows hidden by impossible predicate, but US subtotal still = 700
+    const usRows = pd.getRowKeys().filter((k) => k[0] === "US");
+    expect(usRows).toHaveLength(0);
+    expect(pd.getSubtotalAggregator(["US"], [], "revenue").value()).toBe(700);
+  });
+
+  it("value_filters: fields with null measure fail predicate and are excluded", () => {
+    const dataWithNull: DataRecord[] = [
+      { region: "US", product: "Alpha", category: "A", revenue: 500 },
+      { region: "US", product: "Beta", category: "A", revenue: null },
+    ];
+    const config = makeFilterConfig({
+      value_filters: [
+        { field: "product", by: "revenue", operator: "gte", value: 0 },
+      ],
+    });
+    const pd = new PivotData(dataWithNull, config);
+    const usRows = pd
+      .getRowKeys()
+      .filter((k) => k[0] === "US")
+      .map((k) => k[1]);
+    expect(usRows).toContain("Alpha");
+    expect(usRows).not.toContain("Beta");
+  });
+});

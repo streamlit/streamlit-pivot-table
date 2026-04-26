@@ -55,6 +55,8 @@ import {
   type PivotConfigV1,
   type ShowValuesAs,
   type SortConfig,
+  type TopNFilter,
+  type ValueFilter,
 } from "../engine/types";
 import { renderCellContent } from "./cellRenderer";
 import {
@@ -282,6 +284,24 @@ export function computeColSlots(
 export interface TableRendererProps {
   pivotData: PivotData;
   config: PivotConfigV1;
+  /**
+   * 0.5.0: callback to set/clear a Top N filter.
+   * `filter` is the new filter (or undefined to clear), `field` is the dimension field.
+   */
+  onTopNFilterChange?: (
+    filter: TopNFilter | undefined,
+    field: string,
+    axis: "rows" | "columns",
+  ) => void;
+  /**
+   * 0.5.0: callback to set/clear a value filter.
+   * `filter` is the new filter (or undefined to clear), `field` is the dimension field.
+   */
+  onValueFilterChange?: (
+    filter: ValueFilter | undefined,
+    field: string,
+    axis: "rows" | "columns",
+  ) => void;
   onCellClick?: (payload: CellClickPayload) => void;
   maxColumns?: number;
   maxRows?: number;
@@ -3717,6 +3737,8 @@ const TableRenderer: FC<TableRendererProps> = ({
   onFilterChange,
   onConfigChange,
   onShowValuesAsChange,
+  onTopNFilterChange,
+  onValueFilterChange,
   onCollapseChange,
   adaptiveDateGrains,
   menuLimit,
@@ -4342,6 +4364,29 @@ const TableRenderer: FC<TableRendererProps> = ({
     adaptiveDateGrains,
   });
 
+  // Top N / Value Filter forwarding callbacks (0.5.0).
+  // menuTarget.dimension and axis are captured here so the parent always knows
+  // which field is being set/cleared even when filter is undefined (clear action).
+  const handleMenuTopNFilterChange = useCallback(
+    (filter: TopNFilter | undefined) => {
+      if (!menuTarget || !onTopNFilterChange) return;
+      const axis: "rows" | "columns" =
+        menuTarget.axis === "col" ? "columns" : "rows";
+      onTopNFilterChange(filter, menuTarget.dimension, axis);
+    },
+    [onTopNFilterChange, menuTarget],
+  );
+
+  const handleMenuValueFilterChange = useCallback(
+    (filter: ValueFilter | undefined) => {
+      if (!menuTarget || !onValueFilterChange) return;
+      const axis: "rows" | "columns" =
+        menuTarget.axis === "col" ? "columns" : "rows";
+      onValueFilterChange(filter, menuTarget.dimension, axis);
+    },
+    [onValueFilterChange, menuTarget],
+  );
+
   // Close the header menu on any scroll so the popover does not float
   // detached from its anchor cell. The scroll event does not bubble, so we
   // listen in the capture phase at the document root to catch scroll on the
@@ -4677,6 +4722,30 @@ const TableRenderer: FC<TableRendererProps> = ({
             onDateGrainChange={menuOnDateGrainChange}
             onDateDrill={menuOnDateDrill}
             supportsPeriodComparison={menuSupportsPeriodComparison}
+            topNFilter={
+              menuTarget.axis !== "value"
+                ? (config.top_n_filters ?? []).find(
+                    (f) => f.field === menuTarget.dimension,
+                  )
+                : undefined
+            }
+            onTopNFilterChange={
+              menuTarget.axis !== "value" && onTopNFilterChange
+                ? handleMenuTopNFilterChange
+                : undefined
+            }
+            valueFilter={
+              menuTarget.axis !== "value"
+                ? (config.value_filters ?? []).find(
+                    (f) => f.field === menuTarget.dimension,
+                  )
+                : undefined
+            }
+            onValueFilterChange={
+              menuTarget.axis !== "value" && onValueFilterChange
+                ? handleMenuValueFilterChange
+                : undefined
+            }
             onClose={handleCloseMenu}
           />
         </div>

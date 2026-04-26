@@ -620,3 +620,204 @@ describe("HeaderMenu - menuLimit & overflow", () => {
     expect(screen.getByText("and 10 more...")).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0.5.0 — Top N / Value Filter sections
+// ---------------------------------------------------------------------------
+
+describe("HeaderMenu - Top N / Bottom N section", () => {
+  const topNProps = {
+    ...baseProps,
+    dimension: "Region",
+    axis: "row" as const,
+    valueFields: ["Revenue", "Profit"],
+    onTopNFilterChange: vi.fn(),
+  };
+
+  it("renders Top N section when valueFields and onTopNFilterChange are provided", () => {
+    render(<HeaderMenu {...topNProps} />);
+    expect(screen.getByTestId("header-menu-top-n")).toBeInTheDocument();
+    // Direction is now two segmented buttons instead of a <select>
+    expect(screen.getByTestId("header-top-n-dir-top")).toBeInTheDocument();
+    expect(screen.getByTestId("header-top-n-dir-bottom")).toBeInTheDocument();
+    expect(screen.getByTestId("header-top-n-count")).toBeInTheDocument();
+    expect(screen.getByTestId("header-top-n-by")).toBeInTheDocument();
+    // Clear is always present, disabled when no filter active
+    expect(screen.getByTestId("header-top-n-clear")).toBeInTheDocument();
+    expect(screen.getByTestId("header-top-n-clear")).toBeDisabled();
+  });
+
+  it("does not render Top N section when onTopNFilterChange is absent", () => {
+    render(<HeaderMenu {...baseProps} valueFields={["Revenue"]} />);
+    expect(screen.queryByTestId("header-menu-top-n")).not.toBeInTheDocument();
+  });
+
+  it("does not render Top N section when valueFields is empty", () => {
+    render(<HeaderMenu {...topNProps} valueFields={[]} />);
+    expect(screen.queryByTestId("header-menu-top-n")).not.toBeInTheDocument();
+  });
+
+  it("Apply button calls onTopNFilterChange with correct filter object", () => {
+    const onTopNFilterChange = vi.fn();
+    render(
+      <HeaderMenu
+        {...topNProps}
+        onTopNFilterChange={onTopNFilterChange}
+        topNFilter={undefined}
+      />,
+    );
+
+    // Direction is now a segmented button — click the "Bottom" button
+    fireEvent.click(screen.getByTestId("header-top-n-dir-bottom"));
+    fireEvent.change(screen.getByTestId("header-top-n-count"), {
+      target: { value: "5" },
+    });
+    fireEvent.change(screen.getByTestId("header-top-n-by"), {
+      target: { value: "Profit" },
+    });
+    fireEvent.click(screen.getByTestId("header-top-n-apply"));
+
+    expect(onTopNFilterChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        field: "Region",
+        n: 5,
+        by: "Profit",
+        direction: "bottom",
+      }),
+    );
+  });
+
+  it("Clear button is enabled when topNFilter is active, disabled otherwise", () => {
+    const { rerender } = render(
+      <HeaderMenu {...topNProps} topNFilter={undefined} />,
+    );
+    expect(screen.getByTestId("header-top-n-clear")).toBeDisabled();
+
+    rerender(
+      <HeaderMenu
+        {...topNProps}
+        topNFilter={{ field: "Region", n: 3, by: "Revenue", direction: "top" }}
+      />,
+    );
+    expect(screen.getByTestId("header-top-n-clear")).not.toBeDisabled();
+  });
+
+  it("Clear button calls onTopNFilterChange(undefined)", () => {
+    const onTopNFilterChange = vi.fn();
+    render(
+      <HeaderMenu
+        {...topNProps}
+        onTopNFilterChange={onTopNFilterChange}
+        topNFilter={{ field: "Region", n: 3, by: "Revenue", direction: "top" }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("header-top-n-clear"));
+    expect(onTopNFilterChange).toHaveBeenCalledWith(undefined);
+  });
+});
+
+describe("HeaderMenu - Value Filter section", () => {
+  const vfProps = {
+    ...baseProps,
+    dimension: "Region",
+    axis: "row" as const,
+    valueFields: ["Revenue", "Profit"],
+    onValueFilterChange: vi.fn(),
+  };
+
+  it("renders value filter section when valueFields and onValueFilterChange are provided", () => {
+    render(<HeaderMenu {...vfProps} />);
+    expect(screen.getByTestId("header-menu-value-filter")).toBeInTheDocument();
+    expect(screen.getByTestId("header-value-filter-by")).toBeInTheDocument();
+    // Operator is now a button group — check the group container and one known button
+    expect(
+      screen.getByTestId("header-value-filter-operator-group"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("header-value-filter-op-gt")).toBeInTheDocument();
+    expect(screen.getByTestId("header-value-filter-value")).toBeInTheDocument();
+  });
+
+  it("does not render value filter section when onValueFilterChange is absent", () => {
+    render(<HeaderMenu {...baseProps} valueFields={["Revenue"]} />);
+    expect(
+      screen.queryByTestId("header-menu-value-filter"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Apply calls onValueFilterChange with correct filter", () => {
+    const onValueFilterChange = vi.fn();
+    render(
+      <HeaderMenu {...vfProps} onValueFilterChange={onValueFilterChange} />,
+    );
+
+    fireEvent.change(screen.getByTestId("header-value-filter-by"), {
+      target: { value: "Revenue" },
+    });
+    // Operator is now a button group — click the ≥ (gte) button
+    fireEvent.click(screen.getByTestId("header-value-filter-op-gte"));
+    fireEvent.change(screen.getByTestId("header-value-filter-value"), {
+      target: { value: "1000" },
+    });
+    fireEvent.click(screen.getByTestId("header-value-filter-apply"));
+
+    expect(onValueFilterChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        field: "Region",
+        by: "Revenue",
+        operator: "gte",
+        value: 1000,
+      }),
+    );
+  });
+
+  it("between operator shows second value input", () => {
+    render(<HeaderMenu {...vfProps} />);
+    expect(
+      screen.queryByTestId("header-value-filter-value2"),
+    ).not.toBeInTheDocument();
+
+    // Click the "btw" (between) operator button
+    fireEvent.click(screen.getByTestId("header-value-filter-op-between"));
+    expect(
+      screen.getByTestId("header-value-filter-value2"),
+    ).toBeInTheDocument();
+  });
+
+  it("Clear button is enabled when valueFilter is active, disabled otherwise", () => {
+    const { rerender } = render(
+      <HeaderMenu {...vfProps} valueFilter={undefined} />,
+    );
+    expect(screen.getByTestId("header-value-filter-clear")).toBeDisabled();
+
+    rerender(
+      <HeaderMenu
+        {...vfProps}
+        valueFilter={{
+          field: "Region",
+          by: "Revenue",
+          operator: "gt",
+          value: 500,
+        }}
+      />,
+    );
+    expect(screen.getByTestId("header-value-filter-clear")).not.toBeDisabled();
+  });
+
+  it("Clear button calls onValueFilterChange(undefined)", () => {
+    const onValueFilterChange = vi.fn();
+    render(
+      <HeaderMenu
+        {...vfProps}
+        onValueFilterChange={onValueFilterChange}
+        valueFilter={{
+          field: "Region",
+          by: "Revenue",
+          operator: "gt",
+          value: 500,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("header-value-filter-clear"));
+    expect(onValueFilterChange).toHaveBeenCalledWith(undefined);
+  });
+});

@@ -18,9 +18,15 @@
 .headerMenu {
   min-width: 210px;
   max-width: 280px;
-  max-height: 420px;
-  display: flex;
-  flex-direction: column;
+  max-height: 440px;
+  /* Block layout so every child stacks at its natural height and the container
+     scrolls when total content exceeds max-height. Flex layout fights scrolling
+     because flex children shrink to fit rather than overflowing. */
+  display: block;
+  overflow-y: auto;
+  /* clip (not hidden) prevents absolutely-positioned children like tooltips
+     from causing a horizontal scrollbar while keeping y-scrolling intact. */
+  overflow-x: clip;
   padding: 0 0 6px;
   background: var(--st-background-color);
   border: 1px solid var(--st-border-color);
@@ -38,6 +44,10 @@
   background: var(--st-secondary-background-color);
   border-radius: calc(var(--st-base-radius) - 1px) calc(var(--st-base-radius) - 1px) 0 0;
   margin-bottom: 4px;
+  /* Stays pinned at top when the menu body scrolls */
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 /* ---- Sort section ---- */
@@ -221,8 +231,7 @@
   display: flex;
   flex-direction: column;
   padding: 2px 6px;
-  min-height: 0;
-  flex: 1;
+  /* flex: 1 / min-height: 0 removed — parent is now display:block, not flex */
   overflow: hidden;
 }
 
@@ -274,6 +283,11 @@
   outline: none;
 }
 
+.actionButton:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
 .itemList {
   overflow-y: auto;
   flex: 1;
@@ -318,6 +332,255 @@
 
 .filterItem input[type="checkbox"]:focus-visible {
   outline: none;
+}
+
+/* ---- Analytic filter sections (Top N / Bottom N, Filter by Value) ---- */
+
+/* Inline row of controls (direction, count, "by", field) */
+.analyticControls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 8px;
+}
+
+/* "by" / "and" connectors between inputs */
+.analyticConnector {
+  font-size: 0.85em;
+  color: color-mix(in srgb, var(--st-text-color) 55%, transparent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Wrapper gives us a consistent block for the custom-arrow select */
+.analyticSelectWrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+/* Custom chevron drawn entirely in CSS — inherits currentColor so it
+   adapts to both light and dark Streamlit themes automatically. */
+.analyticSelectWrap::after {
+  content: "";
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.45;
+}
+
+.analyticSelect {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 2px 16px 2px 7px; /* right padding leaves room for chevron */
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 1em;
+  cursor: pointer;
+  outline: none;
+}
+
+.analyticSelect:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+}
+
+.analyticSelect.isPlaceholder {
+  color: color-mix(in srgb, var(--st-text-color) 42%, transparent);
+  font-style: italic;
+}
+
+/* Number input shared by Top N count and value filter values */
+.analyticInput {
+  padding: 2px 7px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 1em;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.analyticInput:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+}
+
+/* Always-visible styled spinners */
+.analyticInput[type="number"]::-webkit-inner-spin-button,
+.analyticInput[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+  cursor: pointer;
+  border-radius: 0 calc(var(--st-base-radius) - 3px) calc(var(--st-base-radius) - 3px) 0;
+}
+
+.analyticInput::placeholder {
+  color: color-mix(in srgb, var(--st-text-color) 36%, transparent);
+  font-style: italic;
+}
+
+/* ---- Segmented toggle (Top / Bottom) ---- */
+/* Two joined buttons with no gap — looks like a pill/toggle */
+.toggleGroup {
+  display: inline-flex;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.toggleBtn {
+  padding: 3px 9px;
+  border: none;
+  border-right: 1px solid var(--st-border-color);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 0.85em;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.toggleBtn:last-child {
+  border-right: none;
+}
+
+.toggleBtn:hover {
+  background: color-mix(in srgb, var(--st-text-color) 7%, transparent);
+}
+
+.toggleBtnActive {
+  background: color-mix(in srgb, var(--st-primary-color) 12%, var(--st-background-color));
+  color: var(--st-primary-color);
+  font-weight: 600;
+}
+
+/* ---- Operator button group (Filter by Value) ---- */
+/* Each tooltipWrap inside the group must expand equally so buttons spread */
+.opGroup > .tooltipWrap {
+  flex: 1;
+  display: flex;
+}
+
+.opGroup > .tooltipWrap > .opBtn {
+  flex: 1;
+}
+
+/* 7 operator buttons in a single strip — scannable without opening a dropdown */
+.opGroup {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px 0;
+}
+
+.opBtn {
+  flex: 1;
+  padding: 3px 2px;
+  border: 1px solid var(--st-border-color);
+  border-radius: calc(var(--st-base-radius) - 2px);
+  background: var(--st-background-color);
+  color: var(--st-text-color);
+  font-family: var(--st-font);
+  font-size: 1em;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.opBtn:hover {
+  background: color-mix(in srgb, var(--st-text-color) 7%, transparent);
+}
+
+.opBtn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+  outline: none;
+}
+
+.opBtnActive {
+  background: color-mix(in srgb, var(--st-primary-color) 12%, var(--st-background-color));
+  border-color: var(--st-primary-color);
+  color: var(--st-primary-color);
+  font-weight: 600;
+}
+
+/* Tooltip wrapper — matches Toolbar.module.css tooltipWrap exactly */
+.tooltipWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltipWrap::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: var(--st-base-radius);
+  background: var(--st-text-color);
+  color: var(--st-background-color);
+  font-family: var(--st-font);
+  font-size: 0.72em;
+  font-weight: 500;
+  /* Size to content first, then cap so very long labels can't overflow the menu */
+  width: max-content;
+  max-width: 140px;
+  white-space: normal;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms 400ms;
+  z-index: 30;
+}
+
+/* Last button in the operator strip — anchor tooltip to right edge
+   so it doesn't overflow the right side of the menu */
+.opGroup > .tooltipWrap:last-child::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.tooltipWrap:hover::after {
+  opacity: 1;
+}
+
+/* Value inputs row */
+.analyticValueRow {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 8px 0;
+}
+
+/* Right-aligned Apply / Clear row — mirrors .actionRow spacing */
+.analyticApplyRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 4px 4px 2px 0px;
+}
+
+/* Muted subtitle shown directly under the section heading */
+.analyticCaption {
+  font-size: 0.72em;
+  color: color-mix(in srgb, var(--st-text-color) 48%, transparent);
+  padding: 1px 8px 5px;
+  line-height: 1.3;
 }
 
 .moreIndicator {

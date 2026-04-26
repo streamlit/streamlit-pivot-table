@@ -115,6 +115,36 @@ export interface PivotStyle {
   data_cell_by_measure?: Record<string, RegionStyle>;
 }
 
+// ---------------------------------------------------------------------------
+// 0.5.0: Top N / Bottom N and Value Filters
+// ---------------------------------------------------------------------------
+
+export interface TopNFilter {
+  /** Dimension field whose members are ranked and trimmed per parent group. */
+  field: string;
+  /** How many members to keep per parent group. */
+  n: number;
+  direction: "top" | "bottom";
+  /** Measure field used to rank dimension members (at grand-total column context). */
+  by: string;
+  /** Axis to filter. Default "rows". */
+  axis?: "rows" | "columns";
+}
+
+export interface ValueFilter {
+  /** Dimension field whose members are suppressed when the predicate fails. */
+  field: string;
+  /** Measure field evaluated against the predicate (at grand-total column context). */
+  by: string;
+  operator: "gt" | "gte" | "lt" | "lte" | "eq" | "neq" | "between";
+  /** Threshold value. For "between" this is the lower bound (inclusive). */
+  value: number;
+  /** Upper bound for "between" (inclusive). Required when operator is "between". */
+  value2?: number;
+  /** Axis to filter. Default "rows". */
+  axis?: "rows" | "columns";
+}
+
 export interface PivotConfigV1 {
   version: 1;
   rows: string[];
@@ -182,6 +212,19 @@ export interface PivotConfigV1 {
   /** Whether the toolbar sections (Rows/Columns/Values cards + FilterBar) are expanded.
    *  Defaults to true (expanded). Set to false to collapse to a compact one-line summary. */
   show_sections?: boolean;
+  /**
+   * 0.5.0: Top N / Bottom N filters applied to row or column dimension members.
+   * Evaluated per-parent after member (include/exclude) filters.
+   * Grand totals and subtotals always reflect the full unfiltered dataset.
+   */
+  top_n_filters?: TopNFilter[];
+  /**
+   * 0.5.0: Value-predicate filters that suppress dimension members based on
+   * their aggregated measure value at grand-total column context.
+   * Evaluated per-parent after member (include/exclude) filters.
+   * Grand totals and subtotals always reflect the full unfiltered dataset.
+   */
+  value_filters?: ValueFilter[];
   /**
    * Per-field display-label override. Populated from column_config.label.
    * Display-only: does NOT rewrite canonical field ids in rows/columns/values.
@@ -1029,6 +1072,50 @@ export function validatePivotConfigRuntime(
       "period comparison show_values_as modes require a grouped date/datetime field on rows or columns",
     );
   }
+
+  // Validate analytical filter field/by references against the config's declared
+  // dimensions and measures. Catches stale or imported configs with dangling refs
+  // before PivotData silently scores them as null.
+  if (
+    (config.top_n_filters && config.top_n_filters.length > 0) ||
+    (config.value_filters && config.value_filters.length > 0)
+  ) {
+    const syntheticIds = new Set(
+      (config.synthetic_measures ?? []).map((m) => m.id),
+    );
+    const allMeasures = new Set([...config.values, ...syntheticIds]);
+
+    for (const [i, f] of (config.top_n_filters ?? []).entries()) {
+      const axis = f.axis ?? "rows";
+      const dimList = axis === "columns" ? config.columns : config.rows;
+      if (!dimList.includes(f.field)) {
+        throw new Error(
+          `top_n_filters[${i}].field "${f.field}" is not present in ${axis} dimensions`,
+        );
+      }
+      if (!allMeasures.has(f.by)) {
+        throw new Error(
+          `top_n_filters[${i}].by "${f.by}" is not a declared measure or synthetic measure`,
+        );
+      }
+    }
+
+    for (const [i, f] of (config.value_filters ?? []).entries()) {
+      const axis = f.axis ?? "rows";
+      const dimList = axis === "columns" ? config.columns : config.rows;
+      if (!dimList.includes(f.field)) {
+        throw new Error(
+          `value_filters[${i}].field "${f.field}" is not present in ${axis} dimensions`,
+        );
+      }
+      if (!allMeasures.has(f.by)) {
+        throw new Error(
+          `value_filters[${i}].by "${f.by}" is not a declared measure or synthetic measure`,
+        );
+      }
+    }
+  }
+
   return config;
 }
 
@@ -1467,6 +1554,74 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     result.filter_fields = o.filter_fields as string[];
   if (typeof o.show_sections === "boolean")
     result.show_sections = o.show_sections;
+
+  // top_n_filters and value_filters: structural checks only here (types, enum values).
+  // Semantic validation (field/by references against declared dims/measures) is done
+  // by validatePivotConfigRuntime() and by Python at call time.
+  if (Array.isArray(o.top_n_filters)) {
+    const VALID_DIRECTIONS = new Set<string>(["top", "bottom"]);
+    const VALID_AXES = new Set<string>(["rows", "columns"]);
+    const filters = o.top_n_filters as Record<string, unknown>[];
+    for (let i = 0; i < filters.length; i++) {
+      const f = filters[i];
+      if (typeof f !== "object" || f === null)
+        throw new Error(`'top_n_filters[${i}]' must be an object`);
+      if (typeof f.field !== "string")
+        throw new Error(`'top_n_filters[${i}].field' must be a string`);
+      if (typeof f.by !== "string")
+        throw new Error(`'top_n_filters[${i}].by' must be a string`);
+      if (!VALID_DIRECTIONS.has(f.direction as string))
+        throw new Error(
+          `'top_n_filters[${i}].direction' must be "top" or "bottom"`,
+        );
+      if (
+        typeof f.n !== "number" ||
+        !Number.isInteger(f.n) ||
+        (f.n as number) < 1
+      )
+        throw new Error(`'top_n_filters[${i}].n' must be a positive integer`);
+      if (f.axis !== undefined && !VALID_AXES.has(f.axis as string))
+        throw new Error(
+          `'top_n_filters[${i}].axis' must be "rows" or "columns"`,
+        );
+    }
+    result.top_n_filters = filters as unknown as TopNFilter[];
+  }
+
+  if (Array.isArray(o.value_filters)) {
+    const VALID_OPS = new Set<string>([
+      "gt",
+      "gte",
+      "lt",
+      "lte",
+      "eq",
+      "neq",
+      "between",
+    ]);
+    const VALID_AXES = new Set<string>(["rows", "columns"]);
+    const filters = o.value_filters as Record<string, unknown>[];
+    for (let i = 0; i < filters.length; i++) {
+      const f = filters[i];
+      if (typeof f !== "object" || f === null)
+        throw new Error(`'value_filters[${i}]' must be an object`);
+      if (typeof f.field !== "string")
+        throw new Error(`'value_filters[${i}].field' must be a string`);
+      if (typeof f.by !== "string")
+        throw new Error(`'value_filters[${i}].by' must be a string`);
+      if (!VALID_OPS.has(f.operator as string))
+        throw new Error(
+          `'value_filters[${i}].operator' must be one of: ${[...VALID_OPS].join(", ")}`,
+        );
+      if (typeof f.value !== "number")
+        throw new Error(`'value_filters[${i}].value' must be a number`);
+      if (f.axis !== undefined && !VALID_AXES.has(f.axis as string))
+        throw new Error(
+          `'value_filters[${i}].axis' must be "rows" or "columns"`,
+        );
+    }
+    result.value_filters = filters as unknown as ValueFilter[];
+  }
+
   return result;
 }
 

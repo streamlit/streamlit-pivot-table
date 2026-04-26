@@ -1,13 +1,13 @@
 ---
 name: streamlit-pivot
-description: "Build Streamlit apps with st_pivot_table — a BI-focused pivot table component supporting multi-dimensional pivoting, subtotals, conditional formatting, Excel/CSV/TSV export, drill-down, drag-and-drop, date hierarchies with period-over-period comparisons, synthetic measures (including formula measures), and server-side pre-aggregation for large datasets. Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot / st_pivot_table, needs interactive data summarization, or wants to deploy to Streamlit Community Cloud or Streamlit in Snowflake (SiS) on SPCS (installed from PyPI via PYPI_ACCESS_INTEGRATION). Triggers: pivot table, streamlit_pivot, st_pivot_table, pivot, crosstab, data summarization, SiS, SiS on SPCS, Snowflake streamlit, PYPI_ACCESS_INTEGRATION, Streamlit Community Cloud."
+description: "Build Streamlit apps with st_pivot_table — a BI-focused pivot table component supporting multi-dimensional pivoting, subtotals, conditional formatting, Excel/CSV/TSV export, drill-down, drag-and-drop, date hierarchies with period-over-period comparisons, synthetic measures (including formula measures), Top N / Bottom N and value-predicate analytical filters (0.5.0+), show-values-as analytical display modes (running total, rank, % of parent, index), and server-side pre-aggregation for large datasets. Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot / st_pivot_table, needs interactive data summarization, Top N filter, value filter, running total, rank, or wants to deploy to Streamlit Community Cloud or Streamlit in Snowflake (SiS) on SPCS (installed from PyPI via PYPI_ACCESS_INTEGRATION). Triggers: pivot table, streamlit_pivot, st_pivot_table, pivot, crosstab, data summarization, top N, top n filter, value filter, running total, rank, SiS, SiS on SPCS, Snowflake streamlit, PYPI_ACCESS_INTEGRATION, Streamlit Community Cloud."
 ---
 
 # Streamlit Pivot Table Component
 
 `streamlit-pivot` provides `st_pivot_table` — a BI-focused pivot table component built with Streamlit Components V2, React, and TypeScript. It supports multi-dimensional pivoting, interactive sorting/filtering, subtotals with collapse/expand, conditional formatting, Excel/CSV/TSV/clipboard export, drill-down detail panels, drag-and-drop field configuration, synthetic (derived) measures with a formula engine, date/time hierarchies with period-over-period comparisons, hierarchical row layouts, column resize, fullscreen mode, and server-side pre-aggregation for large datasets.
 
-**Current version:** 0.3.0
+**Current version:** 0.4.0
 **Requirements:** Python >= 3.10, Streamlit >= 1.51
 
 ## When to Use
@@ -200,6 +200,8 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `dimension_format` | `str \| dict[str, str] \| None` | `None` | Same, for row/column dimension labels. |
 | `column_alignment` | `dict[str, str] \| None` | `None` | `"left"` / `"center"` / `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
+| `top_n_filters` | `list[dict] \| None` | `None` | Top N / Bottom N filters per parent group. See [Analytical Filters](#analytical-filters-top-n--value-filters). |
+| `value_filters` | `list[dict] \| None` | `None` | Predicate filters by aggregated measure. See [Analytical Filters](#analytical-filters-top-n--value-filters). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Color scales, data bars, thresholds. |
 | `style` | `str \| PivotStyle \| list \| None` | `None` | Region-based table styling. Pass a preset name, a `PivotStyle` dict, or a list that composes presets + overrides. See [Styling](#styling-1). |
 | `column_config` | `dict[str, Any] \| None` | `None` | Streamlit-style per-column display config. Keys: `format`, `type`, `label`, `help`, `width` (`"small"`/`"medium"`/`"large"`/int px ∈ [20, 2000]), `pinned` (config-UI lock only, not sticky), `alignment` (`"left"`/`"center"`/`"right"`; unions with `column_alignment` kwarg, explicit kwarg wins). Row-dim cell renderers via `type`: `"link"` (+ optional `display_text`), `"image"`, `"checkbox"`, `"text"` with `max_chars`. Both dict literals and `st.column_config.*` objects are accepted. |
@@ -490,6 +492,65 @@ st_pivot_table(
 - `type="image"` — `src = <raw value>`. Uses `loading="lazy"` and a `max-height` guard so images don't blow out row height. In `row_layout="hierarchy"`, the breadcrumb variant applies a tighter 1em cap. **Src allowlist:** `http:` / `https:` / schemeless URLs plus raster `data:image/<mime>` (png, jpeg, gif, webp, avif, bmp, ico); everything else — notably `data:image/svg+xml` and non-image `data:` — falls back to plain text.
 - `type="checkbox"` — truthy → ☑, falsy → ☐. Accepts booleans, `"true"/"false"/"yes"/"no"/"1"/"0"` (case-insensitive), and the numbers `0` / `1`. Unrecognized values fall back to plain text.
 - `type="text"` + `max_chars` — truncates to `max_chars` UTF-16 code units (matches JS `String.length` / Streamlit's `TextColumn`) with an ellipsis; full text is preserved in the cell's `title` attribute. Truncation applies on every row, including Totals. Invalid `max_chars` (non-positive, non-integer, bool) warns once and is skipped.
+
+### Analytical Filters: Top N / Value Filters
+
+*(0.5.0+)* Both filter types are **display-only** — they hide rows/columns in the rendered table but **do not re-aggregate** totals or subtotals. They apply after sorting, per-parent group.
+
+#### Top N / Bottom N — `top_n_filters`
+
+```python
+top_n_filters=[
+    {
+        "field": "Product",      # dimension to rank (must be in rows or columns)
+        "n": 5,                  # how many members to keep (positive int)
+        "by": "Revenue",         # measure to rank by (must be in values)
+        "direction": "top",      # "top" (default) or "bottom"
+        "axis": "rows",          # "rows" (default) or "columns"
+    }
+]
+```
+
+- Multiple filters are allowed; each applies independently to its named `field`.
+- Ranking is within each **parent group** — e.g., top 5 Products within each Region.
+- Ties are broken by the natural sort order of member names.
+
+#### Value Predicate — `value_filters`
+
+```python
+value_filters=[
+    {
+        "field": "Product",        # dimension member to evaluate
+        "by": "Revenue",           # measure to evaluate
+        "operator": "gte",         # see operator table below
+        "value": 1000,             # primary threshold
+        "value2": None,            # secondary threshold (required for "between")
+        "axis": "rows",            # "rows" (default) or "columns"
+    }
+]
+```
+
+| Operator | Meaning |
+|---|---|
+| `"eq"` | equals |
+| `"neq"` | not equals |
+| `"gt"` | greater than |
+| `"gte"` | greater than or equal |
+| `"lt"` | less than |
+| `"lte"` | less than or equal |
+| `"between"` | `value ≤ measure ≤ value2` (requires `value2`) |
+
+#### Interactive usage
+
+Both filter types can also be configured interactively via the **column header menu** (click any dimension header → "Top / Bottom N" or "Filter by value"). The current config is reflected in the Settings Panel and returned by `st_pivot_table` in `result["config"]`.
+
+#### Key constraints
+
+- `field` must be a dimension already in `rows` / `columns`.
+- `by` must be a measure already in `values`.
+- `n` (Top N) must be a positive integer.
+- `between` requires both `value` and `value2`.
+- Filters excluded from `_build_sidecar_fingerprint` — changing them never triggers a server re-aggregate in hybrid mode.
 
 ### Conditional Formatting
 
@@ -1321,11 +1382,13 @@ Before telling the user "replicated," walk through this checklist. If any item i
 | **Rank (Smallest to Largest / Largest to Smallest)** | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "rank"}` (competition rank, largest first). |
 | **Index** (Excel's Show Values As → Index) | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "index"}`. |
 | **Icon sets** (Excel's green/yellow/red arrows, etc.) | No | Closest approximation: a `color_scale` with `mid_value` anchored at a neutral point, or multiple `threshold` rules with emoji-free colored backgrounds. |
-| **Top N / Bottom N / Above Average conditional formatting** | No | Compute the cutoff in Pandas (`df["Revenue"].nlargest(10).min()` or `df["Revenue"].mean()`) and pass it as a `threshold` rule. |
+| **Top N / Bottom N filter** | **Yes (0.5.0+)** | Use `top_n_filters=[{"field": "Product", "n": 10, "by": "Revenue", "direction": "top"}]`. Ranking is per-parent; totals reflect full data. |
+| **Value filter (e.g. Revenue > X)** | **Yes (0.5.0+)** | Use `value_filters=[{"field": "Product", "by": "Revenue", "operator": "gt", "value": 1000}]`. Per-parent evaluation; totals reflect full data. |
+| **Top N / Bottom N / Above Average conditional formatting** | Partial | Top N / Bottom N now available as `top_n_filters`. Above Average: compute the cutoff in Pandas and pass as a `threshold` rule. |
 | **Values laid out on rows** (measures on the row axis) | No | `st_pivot_table` always renders measures on the value axis inside the column hierarchy. If the source tool has measures on rows, reshape by swapping `rows` and `columns`. |
 | **Per-cell manual formatting** (Excel clicking one cell and overriding) | No | Not supported. Apply rules by field (`number_format`) or by value range (`conditional_formatting`) instead. |
 | **Grand-total placement (top vs bottom / left vs right)** | Not configurable | Grand totals render at the bottom of rows and the right of columns. |
-| **Filter on measure values** (Excel's "Value Filters: Greater Than…") | No | `source_filters` is set-membership only. Pre-filter the DataFrame in Pandas before passing it in. |
+| **Filter on measure values** (Excel's "Value Filters: Greater Than…") | **Yes (0.5.0+)** | Use `value_filters`. See the "Value filter" row above for full syntax. |
 | **Calculated items** (Excel's calculated-item feature, distinct from calculated fields) | No | Not supported. Express the logic as a `formula` synthetic measure if it reduces to aggregates, otherwise reshape source data. |
 
 ### Format-pane controls → `PivotStyle` fields
@@ -1403,6 +1466,26 @@ st_pivot_table(
     date_grains={"order_date": "month"},
     show_values_as={"Revenue": "pct_diff_from_prev_year"},
     number_format={"Revenue": "$,.0f"},
+)
+```
+
+**Top N per parent + value filter (0.5.0+)**
+
+```python
+st_pivot_table(
+    df,
+    key="topn",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue", "Units"],
+    # Keep only the top 5 Products by Revenue within each Region
+    top_n_filters=[
+        {"field": "Product", "n": 5, "by": "Revenue", "direction": "top", "axis": "rows"}
+    ],
+    # Also hide Products with Revenue < 1 000
+    value_filters=[
+        {"field": "Product", "by": "Revenue", "operator": "gte", "value": 1000, "axis": "rows"}
+    ],
 )
 ```
 

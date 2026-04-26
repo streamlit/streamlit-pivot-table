@@ -88,6 +88,8 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `dimension_format` | `str \| dict[str, str] \| None` | `None` | Number format pattern(s) applied to row/column dimension labels (e.g. to render a numeric `Year` as `2024` instead of `2,024.00`). A single string applies to every numeric dimension; a dict maps field names to patterns. Use `"__all__"` as a key for a default. |
 | `column_alignment` | `dict[str, str] \| None` | `None` | Per-field text alignment: `"left"`, `"center"`, or `"right"`. |
 | `show_values_as` | `dict[str, str] \| None` | `None` | Per-field display mode. See [Show Values As](#show-values-as). |
+| `top_n_filters` | `list[TopNFilterFull] \| None` | `None` | Top N / Bottom N filters on row or column members. Per-parent ranking. Totals always reflect full data. See [Analytical Filters](#analytical-filters-top-n--value-filters). |
+| `value_filters` | `list[ValueFilterFull] \| None` | `None` | Predicate filters that suppress members by aggregated measure. Per-parent evaluation. Totals always reflect full data. See [Analytical Filters](#analytical-filters-top-n--value-filters). |
 | `conditional_formatting` | `list[dict] \| None` | `None` | Visual formatting rules. See [Conditional Formatting](#conditional-formatting). |
 | `style` | `str \| PivotStyle \| list \| None` | `None` | Region-based table styling. Pass a preset name, a `PivotStyle` dict, or a list that composes presets + overrides. See [Styling](#styling). |
 | `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column display configuration, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Supported keys: `format`, `type`, `label`, `help`, `width` (`"small"` / `"medium"` / `"large"` / integer px), `pinned` (locks the field in the config UI; does not create a sticky column), `alignment` (`"left"` / `"center"` / `"right"`, unions with the `column_alignment` kwarg; explicit kwarg wins), and row-dim cell renderers via `type`: `"link"` (with optional `display_text`), `"image"`, `"checkbox"`, and `"text"` with `max_chars`. Explicit `number_format` / `dimension_format` / `column_alignment` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
@@ -600,6 +602,95 @@ st_pivot_table(
 ```
 
 **Precedence.** For format fields: `explicit number_format / dimension_format` > `column_config` > `Styler`. For alignment: `explicit column_alignment` > `column_config.alignment` > default (right-aligned measures, left-aligned dimensions). The lower-priority sources only fill gaps — any field already present in an explicit format or alignment dict keeps the caller-supplied value. `label`, `help`, and `width` are `column_config`-driven only (no legacy kwargs). `pinned` **unions** with `frozen_columns` / `hidden_from_drag_drop`.
+
+### Analytical Filters: Top N / Value Filters
+
+_(0.5.0)_ Two new display-only filter types let you focus on the most (or least) relevant dimension members without re-aggregating totals.
+
+**Key semantics:**
+
+- Filtering is **per-parent**: for a two-level hierarchy `[Region, Product]`, "Top 3 Products" keeps the 3 highest-revenue products **within each Region** independently.
+- Ranking always uses the **grand-total column context** (sum across all column values). Contextual column scoping (`col_key`) is deferred to 0.6.0.
+- Grand totals and subtotals are **not recalculated** — they always reflect the full unfiltered dataset. This is a deliberate product choice (simpler, avoids re-aggregation cost). The UI surfaces a note: *"Totals include all data, not just visible members."*
+- Top N and value filters run **after** existing dimension member (include/exclude) filters.
+- Members with a **null** aggregated measure are ranked last / excluded before the top-N cutoff and treated as failing all value filter predicates.
+
+**`top_n_filters`**
+
+```python
+top_n_filters: list[TopNFilterFull] | None = None
+```
+
+Each filter dict may contain:
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `field` | `str` | ✓ | Dimension field to filter |
+| `n` | `int` | ✓ | How many members to keep per parent group (must be ≥ 1) |
+| `direction` | `"top"` \| `"bottom"` | ✓ | Keep highest or lowest N members |
+| `by` | `str` | ✓ | Measure to rank by |
+| `axis` | `"rows"` \| `"columns"` | — | Which axis to filter (default `"rows"`) |
+
+```python
+# Top 3 products by revenue within each region
+st_pivot_table(
+    df, key="top3",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    top_n_filters=[
+        {"field": "Product", "n": 3, "by": "Revenue", "direction": "top"}
+    ],
+)
+```
+
+**`value_filters`**
+
+```python
+value_filters: list[ValueFilterFull] | None = None
+```
+
+Each filter dict may contain:
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `field` | `str` | ✓ | Dimension field whose members are suppressed when predicate fails |
+| `by` | `str` | ✓ | Measure to evaluate the predicate against |
+| `operator` | `str` | ✓ | `"gt"`, `"gte"`, `"lt"`, `"lte"`, `"eq"`, `"neq"`, `"between"` |
+| `value` | `float` | ✓ | Threshold (lower bound for `"between"`) |
+| `value2` | `float` | — | Upper bound — required when `operator="between"` |
+| `axis` | `"rows"` \| `"columns"` | — | Which axis to filter (default `"rows"`) |
+
+```python
+# Products with annual revenue > $1M within each region
+st_pivot_table(
+    df, key="gt1m",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    value_filters=[
+        {"field": "Product", "by": "Revenue", "operator": "gt", "value": 1_000_000}
+    ],
+)
+
+# Revenue between $200K and $500K
+st_pivot_table(
+    df, key="between",
+    rows=["Region", "Product"],
+    columns=["Quarter"],
+    values=["Revenue"],
+    value_filters=[
+        {
+            "field": "Product", "by": "Revenue",
+            "operator": "between", "value": 200_000, "value2": 500_000,
+        }
+    ],
+)
+```
+
+**Interactive**: these filters are also accessible via the column header ⋮ menu — look for the **"Top / Bottom N"** and **"Filter by value"** sections on any row or column dimension header. Active filters are summarised in the Settings Panel (read-only; edit them from the header menu).
+
+---
 
 ### Conditional Formatting
 

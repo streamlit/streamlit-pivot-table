@@ -252,15 +252,29 @@ const PivotRoot: FC<PivotRootProps> = ({
     | Record<string, DateGrain>
     | undefined;
 
-  const currentConfig = useMemo(
-    () =>
-      validatePivotConfigRuntime(
+  const currentConfig = useMemo((): PivotConfigV1 => {
+    try {
+      return validatePivotConfigRuntime(
         rawCurrentConfig,
         mergedColumnTypes,
         typedAdaptiveGrains,
-      ),
-    [rawCurrentConfig, mergedColumnTypes, typedAdaptiveGrains],
-  );
+      );
+    } catch {
+      // validatePivotConfigRuntime throws for two reasons:
+      //   1. Period comparison show_values_as on a non-temporal axis — hard error,
+      //      re-throw so the caller sees a clear message.
+      //   2. Stale analytical filter field/by refs — strip them and retry so that
+      //      an externally-restored or imported config never hard-crashes the UI.
+      const safe: PivotConfigV1 = { ...rawCurrentConfig };
+      delete safe.top_n_filters;
+      delete safe.value_filters;
+      return validatePivotConfigRuntime(
+        safe,
+        mergedColumnTypes,
+        typedAdaptiveGrains,
+      );
+    }
+  }, [rawCurrentConfig, mergedColumnTypes, typedAdaptiveGrains]);
 
   const initialConfigRef = useRef<PivotConfigV1>(currentConfig);
   const initialConfig = initialConfigRef.current;
@@ -727,6 +741,44 @@ const PivotRoot: FC<PivotRootProps> = ({
     [],
   );
 
+  const handleTopNFilterChange = useCallback(
+    (
+      filter: import("./engine/types").TopNFilter | undefined,
+      field: string,
+      axis: "rows" | "columns",
+    ) => {
+      const existing = currentConfig.top_n_filters ?? [];
+      const rest = existing.filter(
+        (f) => !(f.field === field && (f.axis ?? "rows") === axis),
+      );
+      const updated = filter ? [...rest, filter] : rest;
+      handleConfigChange({
+        ...currentConfig,
+        top_n_filters: updated.length > 0 ? updated : undefined,
+      });
+    },
+    [currentConfig, handleConfigChange],
+  );
+
+  const handleValueFilterChange = useCallback(
+    (
+      filter: import("./engine/types").ValueFilter | undefined,
+      field: string,
+      axis: "rows" | "columns",
+    ) => {
+      const existing = currentConfig.value_filters ?? [];
+      const rest = existing.filter(
+        (f) => !(f.field === field && (f.axis ?? "rows") === axis),
+      );
+      const updated = filter ? [...rest, filter] : rest;
+      handleConfigChange({
+        ...currentConfig,
+        value_filters: updated.length > 0 ? updated : undefined,
+      });
+    },
+    [currentConfig, handleConfigChange],
+  );
+
   const handleShowValuesAsChange = useCallback(
     (field: string, mode: ShowValuesAs) => {
       if (isSyntheticMeasure(currentConfig, field)) return;
@@ -979,6 +1031,14 @@ const PivotRoot: FC<PivotRootProps> = ({
                 onShowValuesAsChange={
                   currentConfig.interactive
                     ? handleShowValuesAsChange
+                    : undefined
+                }
+                onTopNFilterChange={
+                  currentConfig.interactive ? handleTopNFilterChange : undefined
+                }
+                onValueFilterChange={
+                  currentConfig.interactive
+                    ? handleValueFilterChange
                     : undefined
                 }
                 onCollapseChange={

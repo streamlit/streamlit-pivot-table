@@ -242,6 +242,34 @@ export function cleanupConfigAfterFieldChanges(
     allAggFields,
   );
 
+  // Synthetic measures removed — prune analytical filters whose "by" references
+  // a removed synthetic ID. Must run before the values-removed loop so both raw
+  // and synthetic by-refs are cleaned up in a single pass.
+  const oldSyntheticIds = new Set(
+    (oldConfig.synthetic_measures ?? []).map((m) => m.id),
+  );
+  const newSyntheticIds = new Set(
+    (updated.synthetic_measures ?? []).map((m) => m.id),
+  );
+  const removedSyntheticIds = [...oldSyntheticIds].filter(
+    (id) => !newSyntheticIds.has(id),
+  );
+  if (removedSyntheticIds.length > 0) {
+    const removedSet = new Set(removedSyntheticIds);
+    if (updated.top_n_filters) {
+      updated.top_n_filters = updated.top_n_filters.filter(
+        (f) => !removedSet.has(f.by),
+      );
+      if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+    }
+    if (updated.value_filters) {
+      updated.value_filters = updated.value_filters.filter(
+        (f) => !removedSet.has(f.by),
+      );
+      if (updated.value_filters.length === 0) delete updated.value_filters;
+    }
+  }
+
   // Fields removed from values
   const oldValues = new Set(oldConfig.values);
   const newValues = new Set(updated.values);
@@ -283,6 +311,19 @@ export function cleanupConfigAfterFieldChanges(
         })
         .filter((rule) => rule.apply_to.length > 0);
     }
+    // Prune analytical filters whose "by" measure was removed.
+    if (updated.top_n_filters) {
+      updated.top_n_filters = updated.top_n_filters.filter(
+        (f) => f.by !== field,
+      );
+      if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+    }
+    if (updated.value_filters) {
+      updated.value_filters = updated.value_filters.filter(
+        (f) => f.by !== field,
+      );
+      if (updated.value_filters.length === 0) delete updated.value_filters;
+    }
   }
 
   // Fields removed from rows
@@ -294,6 +335,22 @@ export function cleanupConfigAfterFieldChanges(
     for (const field of removedFromRows) {
       if (updated.row_sort?.dimension === field) {
         delete updated.row_sort;
+      }
+    }
+    // Prune analytical filters on removed row dimension fields.
+    if (removedFromRows.length > 0) {
+      const removedRowSet = new Set(removedFromRows);
+      if (updated.top_n_filters) {
+        updated.top_n_filters = updated.top_n_filters.filter(
+          (f) => !((f.axis ?? "rows") === "rows" && removedRowSet.has(f.field)),
+        );
+        if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+      }
+      if (updated.value_filters) {
+        updated.value_filters = updated.value_filters.filter(
+          (f) => !((f.axis ?? "rows") === "rows" && removedRowSet.has(f.field)),
+        );
+        if (updated.value_filters.length === 0) delete updated.value_filters;
       }
     }
 
@@ -319,6 +376,22 @@ export function cleanupConfigAfterFieldChanges(
     for (const field of removedFromCols) {
       if (updated.col_sort?.dimension === field) {
         delete updated.col_sort;
+      }
+    }
+    // Prune analytical filters on removed column dimension fields.
+    if (removedFromCols.length > 0) {
+      const removedColSet = new Set(removedFromCols);
+      if (updated.top_n_filters) {
+        updated.top_n_filters = updated.top_n_filters.filter(
+          (f) => !(f.axis === "columns" && removedColSet.has(f.field)),
+        );
+        if (updated.top_n_filters.length === 0) delete updated.top_n_filters;
+      }
+      if (updated.value_filters) {
+        updated.value_filters = updated.value_filters.filter(
+          (f) => !(f.axis === "columns" && removedColSet.has(f.field)),
+        );
+        if (updated.value_filters.length === 0) delete updated.value_filters;
       }
     }
     delete updated.collapsed_col_groups;
@@ -3555,6 +3628,63 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
             </label>
           )}
         </div>
+
+        {/* Read-only display of active analytical filters (set via column header menus). */}
+        {((config.top_n_filters ?? []).length > 0 ||
+          (config.value_filters ?? []).length > 0) && (
+          <div data-testid="settings-analytical-filters">
+            <span className={styles.sectionTitle}>Analytical Filters</span>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--st-text-color)",
+                opacity: 0.6,
+                marginBottom: 4,
+                marginTop: 2,
+              }}
+            >
+              Set via column header menus. Totals include all data.
+            </div>
+            {(config.top_n_filters ?? []).map((f, i) => (
+              <div
+                key={`topn-${i}`}
+                style={{
+                  fontSize: 11,
+                  padding: "2px 6px",
+                  marginBottom: 2,
+                  borderRadius: 4,
+                  background:
+                    "color-mix(in srgb, var(--st-primary-color) 10%, transparent)",
+                  color: "var(--st-primary-color)",
+                }}
+              >
+                {f.direction === "top" ? "Top" : "Bottom"} {f.n} {f.field} by{" "}
+                {f.by}
+                {f.axis === "columns" ? " (cols)" : ""}
+              </div>
+            ))}
+            {(config.value_filters ?? []).map((f, i) => (
+              <div
+                key={`vf-${i}`}
+                style={{
+                  fontSize: 11,
+                  padding: "2px 6px",
+                  marginBottom: 2,
+                  borderRadius: 4,
+                  background:
+                    "color-mix(in srgb, var(--st-primary-color) 10%, transparent)",
+                  color: "var(--st-primary-color)",
+                }}
+              >
+                {f.field} · {f.by} {f.operator} {f.value}
+                {f.operator === "between" && f.value2 !== undefined
+                  ? ` – ${f.value2}`
+                  : ""}
+                {f.axis === "columns" ? " (cols)" : ""}
+              </div>
+            ))}
+          </div>
+        )}
 
         {!synState.editing && (
           <div className={styles.footer}>
