@@ -458,6 +458,9 @@ _DEFAULT_AUTO_DATE_GRAIN = "month"
 # fixes the low-cardinality large-dataset bug where the compound AND condition
 # in the legacy heuristic would fall back to client_only and ship ~100MB payloads.
 _HARD_HYBRID_CEILING = 500_000
+# Payload threshold (MB) for the second auto-selection check.  Uses shallow
+# memory_usage (deep=False) so it is O(columns) even on string DataFrames.
+_PAYLOAD_MB_THRESHOLD = 50
 
 
 def _get_temporal_hierarchy_levels(grain: str) -> list[str]:
@@ -633,11 +636,11 @@ def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
     if overlap:
         names = ", ".join(sorted(overlap))
         return False, (
-            f"client_only required: field(s) [{names}] appear in both "
-            "rows/columns and values/synthetic-sources — hybrid pre-aggregation "
-            "would produce duplicate column names"
+            f"incompatible:dim_value_overlap — field(s) [{names}] appear in both "
+            "rows/columns and values/synthetic-sources; hybrid pre-aggregation "
+            "would produce duplicate column names after reset_index()"
         )
-    return True, "config is compatible with threshold_hybrid"
+    return True, "compatible — config has no dim/value field overlap"
 
 
 def _should_use_threshold_hybrid(
@@ -646,31 +649,62 @@ def _should_use_threshold_hybrid(
     execution_mode: str,
     _nunique_cache: dict | None = None,
 ) -> tuple[bool, str]:
-    compatible, reason = _can_use_threshold_hybrid(config)
+    """Decide whether to use server-side pre-aggregation (threshold_hybrid mode).
+
+    Returns ``(use_hybrid, reason)`` where ``reason`` always starts with one of
+    the following machine-readable prefixes for debuggability:
+
+    * ``forced:client_only``      — caller explicitly requested client_only
+    * ``forced:threshold_hybrid`` — caller explicitly requested threshold_hybrid
+    * ``incompatible:*``          — config cannot safely use hybrid (dim/value clash)
+    * ``auto:row_ceiling``        — dataset rows ≥ _HARD_HYBRID_CEILING
+    * ``auto:payload``            — estimated Arrow payload ≥ _PAYLOAD_MB_THRESHOLD MB
+    * ``auto:pivot_shape``        — visible cells or pivot groups exceed budget
+    * ``auto:client_only``        — dataset stays within all budgets
+    """
+    compatible, compat_reason = _can_use_threshold_hybrid(config)
+
+    # ── Explicit mode overrides ──────────────────────────────────────────────
     if execution_mode == "client_only":
-        return False, "execution_mode forced client_only"
+        return (
+            False,
+            "forced:client_only — execution_mode explicitly set to client_only",
+        )
     if execution_mode == "threshold_hybrid":
         if not compatible:
-            return False, reason
+            # Incompatibility takes precedence even over explicit threshold_hybrid.
+            return False, compat_reason
         return True, (
-            "Server pre-aggregation is enabled because execution_mode is "
-            "'threshold_hybrid' (automatic row-count thresholds are not applied)."
+            "forced:threshold_hybrid — execution_mode explicitly set to threshold_hybrid "
+            "(automatic row-count and payload thresholds are not applied)"
         )
-    if not compatible:
-        return False, reason
 
-    # Hard ceiling: always pre-aggregate when the dataset is very large,
-    # regardless of cardinality.  This prevents low-cardinality large datasets
-    # (e.g. 1M rows × 5 distinct values) from being sent as full Arrow payloads
-    # in client_only mode.  Placed after compatibility and explicit-mode guards
-    # so those remain authoritative; placed before _estimate_group_count to skip
-    # the O(N) nunique() calls for datasets that always need hybrid.
+    # ── Compatibility guard (auto mode only) ─────────────────────────────────
+    if not compatible:
+        return False, compat_reason
+
+    # ── Check 1: row ceiling (O(1)) ──────────────────────────────────────────
+    # Always pre-aggregate when the dataset is very large regardless of
+    # cardinality.  Placed before the O(N) nunique() calls below.
     if len(df) >= _HARD_HYBRID_CEILING:
         return True, (
-            f"auto-selected threshold_hybrid: dataset exceeds {_HARD_HYBRID_CEILING:,} row ceiling "
-            "regardless of cardinality"
+            f"auto:row_ceiling — dataset has {len(df):,} rows which meets or exceeds "
+            f"the {_HARD_HYBRID_CEILING:,}-row ceiling; pre-aggregating regardless of cardinality"
         )
 
+    # ── Check 2: payload size (O(columns)) ───────────────────────────────────
+    # Estimate the Arrow payload that would be shipped to the frontend.
+    # deep=False is used so this is O(columns) even on string DataFrames;
+    # it counts numpy array overhead for object columns, not string content.
+    estimated_mb = df.memory_usage(deep=False).sum() / 1_000_000
+    if estimated_mb >= _PAYLOAD_MB_THRESHOLD:
+        return True, (
+            f"auto:payload — estimated Arrow payload is {estimated_mb:.1f} MB "
+            f"(≥ {_PAYLOAD_MB_THRESHOLD} MB threshold); pre-aggregating to reduce transfer cost"
+        )
+
+    # ── Check 3: pivot shape budget (O(N) via nunique) ───────────────────────
+    # Only reached when row count and payload are both within budget.
     row_groups = _estimate_group_count(
         df, config.get("rows", []), _nunique_cache=_nunique_cache
     )
@@ -680,22 +714,17 @@ def _should_use_threshold_hybrid(
     rendered_values = max(1, len(config.get("values", [])))
     visible_cells = row_groups * min(col_groups, 200) * rendered_values
     estimated_pivot_groups = row_groups * col_groups
-    high_cardinality = estimated_pivot_groups > 10_000
-    row_threshold = 100_000 if high_cardinality else 250_000
-    if len(df) >= row_threshold and (
-        visible_cells > 5_000 or col_groups > 200 or row_groups > 5_000
-    ):
-        card_note = (
-            "high estimated pivot cardinality"
-            if high_cardinality
-            else "moderate estimated pivot cardinality"
-        )
+    if visible_cells > 5_000 or estimated_pivot_groups > 10_000:
         return True, (
-            f"auto-selected threshold_hybrid: dataset has at least {row_threshold:,} "
-            f"rows with {card_note}, and the estimated pivot shape exceeds the "
-            "client-side comfort budget."
+            f"auto:pivot_shape — estimated pivot shape ({row_groups:,} row groups × "
+            f"{col_groups:,} col groups = {estimated_pivot_groups:,} groups, "
+            f"{visible_cells:,} visible cells) exceeds client-side comfort budget"
         )
-    return False, "auto-selected client_only because the dataset stays within budget"
+
+    return False, (
+        f"auto:client_only — dataset ({len(df):,} rows, {estimated_mb:.1f} MB, "
+        f"{estimated_pivot_groups:,} pivot groups) stays within all budgets"
+    )
 
 
 def _prepare_threshold_hybrid_frame(

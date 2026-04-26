@@ -530,11 +530,18 @@ Click any data or total cell to open an inline panel of source records (up to 50
 
 | Mode | Value | Description |
 |------|-------|-------------|
-| Auto | `"auto"` | Client-side unless the dataset exceeds row/cardinality thresholds (default). |
+| Auto | `"auto"` | Client-side unless any of three independent thresholds are exceeded (default). |
 | Client Only | `"client_only"` | Always send raw rows to the frontend. |
 | Threshold Hybrid | `"threshold_hybrid"` | Force server-side pre-aggregation when compatible. |
 
-Auto-hybrid activates at ~100K rows (high-cardinality) or ~250K rows (moderate) when the estimated pivot shape exceeds the client budget. All 10 aggregations are supported in hybrid mode; non-decomposable aggregations use a server-computed sidecar for correct totals. Synthetic measures (including formulas) evaluate client-side, even in hybrid mode.
+**Auto-hybrid thresholds (0.5.0+):** Three independent checks, evaluated in order:
+1. **Row ceiling** — ≥ 500,000 rows → always pre-aggregate
+2. **Payload size** — estimated Arrow payload ≥ 50 MB → pre-aggregate to reduce transfer cost
+3. **Pivot shape** — visible cells > 5,000 or pivot groups > 10,000 → pre-aggregate
+
+All checks produce machine-readable reason codes (`auto:row_ceiling`, `auto:payload`, `auto:pivot_shape`, `auto:client_only`) in the `executionReason` metric. Forced and incompatible modes produce `forced:*` and `incompatible:*` prefixes respectively.
+
+All 10 aggregations are supported in hybrid mode; non-decomposable aggregations use a server-computed sidecar for correct totals. Synthetic measures (including formulas) evaluate client-side, even in hybrid mode.
 
 ### Locked Mode
 

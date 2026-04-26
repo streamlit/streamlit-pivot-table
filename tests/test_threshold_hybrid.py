@@ -291,7 +291,10 @@ def test_should_use_threshold_hybrid_auto_100k_high_cardinality(pivot_module):
     }
     use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
     assert use is True
-    assert "100,000" in reason or "100000" in reason
+    # New heuristic: high-cardinality datasets with >10K groups trigger via pivot_shape
+    assert reason.startswith("auto:pivot_shape") or reason.startswith(
+        "auto:row_ceiling"
+    ), reason
 
 
 @pytest.mark.parametrize(
@@ -1953,3 +1956,107 @@ def test_ceiling_below_df_size_is_noop(pivot_module, monkeypatch):
     use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
     # Should fall through to the normal cardinality check, not the ceiling
     assert "ceiling" not in reason
+
+
+# ── Commit 1: Payload-aware heuristic redesign tests ─────────────────────────
+
+
+def _make_cfg(rows=None, cols=None, values=None):
+    """Helper: minimal auto-mode config."""
+    return {
+        "rows": rows or ["region"],
+        "columns": cols or [],
+        "values": values or ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+
+
+def test_payload_mb_triggers_hybrid(pivot_module, monkeypatch):
+    """A DataFrame above the payload threshold (monkeypatched to 1 MB) triggers hybrid."""
+    monkeypatch.setattr(pivot_module, "_PAYLOAD_MB_THRESHOLD", 1)
+    # ~100 float64 columns × 1_500 rows = 100 * 1500 * 8 = 1.2 MB shallow memory
+    df = pd.DataFrame(
+        {f"col_{i}": np.random.default_rng(0).random(1_500) for i in range(100)}
+    )
+    df["region"] = "A"
+    df["revenue"] = df["col_0"]
+    cfg = _make_cfg()
+    use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    assert use is True
+    assert reason.startswith("auto:payload"), reason
+
+
+def test_payload_mb_below_threshold_client_only(pivot_module, monkeypatch):
+    """A small DataFrame below the monkeypatched payload threshold stays client_only."""
+    monkeypatch.setattr(
+        pivot_module, "_PAYLOAD_MB_THRESHOLD", 1_000
+    )  # 1 GB — never triggered
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+    df = pd.DataFrame({"region": ["A", "B"] * 5, "revenue": [1.0] * 10})
+    cfg = _make_cfg()
+    use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    assert use is False
+    assert reason.startswith("auto:client_only"), reason
+
+
+def test_pivot_shape_triggers_hybrid(pivot_module, monkeypatch):
+    """A dataset with >5000 visible cells (but under row ceiling and payload) triggers hybrid."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+    monkeypatch.setattr(pivot_module, "_PAYLOAD_MB_THRESHOLD", 1_000)
+    # 100 distinct row groups × 100 distinct col groups × 1 value = 10_000 groups
+    # visible_cells = 100 * min(100, 200) * 1 = 10_000 > 5_000
+    n_rows = 100
+    n_cols = 100
+    regions = [f"R{i}" for i in range(n_rows)]
+    years = [f"Y{j}" for j in range(n_cols)]
+    df = pd.DataFrame(
+        {
+            "region": regions * n_cols,
+            "year": [y for y in years for _ in range(n_rows)],
+            "revenue": 1.0,
+        }
+    )
+    cfg = {
+        "rows": ["region"],
+        "columns": ["year"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+    use, reason = pivot_module._should_use_threshold_hybrid(df, cfg, "auto")
+    assert use is True
+    assert reason.startswith("auto:pivot_shape"), reason
+
+
+def test_reason_code_prefixes(pivot_module, monkeypatch):
+    """Every return path produces a reason string with the expected prefix."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 1_000_000)
+    monkeypatch.setattr(pivot_module, "_PAYLOAD_MB_THRESHOLD", 1_000)
+
+    small_df = pd.DataFrame({"region": ["A", "B"], "revenue": [1.0, 2.0]})
+    basic_cfg = _make_cfg()
+    overlap_cfg = {
+        "rows": ["revenue"],
+        "columns": ["region"],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+    ceiling_df = pd.DataFrame({"region": ["A"] * 1_000_001, "revenue": 1.0})
+
+    cases = [
+        # (df, cfg, mode, expected_prefix)
+        (small_df, basic_cfg, "client_only", "forced:client_only"),
+        (small_df, basic_cfg, "threshold_hybrid", "forced:threshold_hybrid"),
+        (small_df, overlap_cfg, "threshold_hybrid", "incompatible:"),
+        (small_df, overlap_cfg, "auto", "incompatible:"),
+        (ceiling_df, basic_cfg, "auto", "auto:row_ceiling"),
+        (small_df, basic_cfg, "auto", "auto:client_only"),
+    ]
+
+    for df, cfg, mode, expected_prefix in cases:
+        _, reason = pivot_module._should_use_threshold_hybrid(df, cfg, mode)
+        assert reason.startswith(
+            expected_prefix
+        ), f"mode={mode!r}: expected prefix {expected_prefix!r}, got {reason!r}"

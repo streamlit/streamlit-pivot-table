@@ -915,7 +915,7 @@ Controls how pivot aggregation is performed for large datasets. By default (`"au
 
 | Mode | Value | Description |
 |------|-------|-------------|
-| Auto | `"auto"` | Client-side unless the dataset exceeds row/cardinality thresholds (default) |
+| Auto | `"auto"` | Client-side unless any of three independent thresholds are exceeded (default) |
 | Client Only | `"client_only"` | Always send raw rows to the frontend |
 | Threshold Hybrid | `"threshold_hybrid"` | Force server-side pre-aggregation when the config is compatible |
 
@@ -930,7 +930,13 @@ st_pivot_table(
 )
 ```
 
-**Auto thresholds:** In `"auto"` mode, server-side pre-aggregation activates when the dataset has at least 100K rows (high-cardinality layouts) or 250K rows (moderate layouts) and the estimated pivot shape exceeds the client-side comfort budget.
+**Auto thresholds (0.5.0+):** In `"auto"` mode, the component evaluates three independent conditions in order and switches to server-side pre-aggregation when any one is met:
+
+1. **Row ceiling** — dataset has ≥ 500,000 rows (regardless of cardinality or payload size)
+2. **Payload size** — estimated Arrow payload is ≥ 50 MB (using shallow `memory_usage`; O(columns) cost)
+3. **Pivot shape** — estimated visible cells > 5,000 or pivot groups > 10,000 after running `nunique()` on dimension columns
+
+Each check produces a machine-readable reason code (`auto:row_ceiling`, `auto:payload`, `auto:pivot_shape`, or `auto:client_only`) that appears in the `executionReason` component metric for debugging. Forced modes return `forced:client_only` or `forced:threshold_hybrid`; incompatible configs (e.g. a field used as both a dimension and a value) return `incompatible:dim_value_overlap`.
 
 **Supported aggregations:** All 10 aggregation types are supported in hybrid mode. `count` and `count_distinct` work on any column type; all other aggregations (`sum`, `avg`, `min`, `max`, `median`, `percentile_90`, `first`, `last`) coerce values to numeric and ignore non-numeric entries, consistent with client-only mode behavior. For non-decomposable aggregations (`avg`, `count_distinct`, `median`, `percentile_90`, `first`, `last`), the server computes correct totals and subtotals via a sidecar payload, ensuring accuracy that client-side re-aggregation alone cannot provide.
 
