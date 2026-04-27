@@ -158,6 +158,19 @@ def render_app():
         export_filename="golden_export",
     )
 
+    st.subheader("Config VA — Values Axis Rows")
+    st_pivot_table(
+        df,
+        key="golden_va",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Units"],
+        aggregation={"Revenue": "sum", "Units": "sum"},
+        show_totals=True,
+        values_axis="rows",
+        interactive=False,
+    )
+
 
 if __name__ == "__main__" or True:
     init_page()

@@ -599,3 +599,140 @@ def test_csv_export_values_match_golden(page_at_app: Page):
         f"Expected at least 3 CSV values to match golden, got {matched}. "
         f"Golden: {golden_values[:5]}, CSV: {numeric_values[:10]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Config VA — Values Axis Rows (2-row-dim, 1-col-dim, 2-value-field)
+# ---------------------------------------------------------------------------
+
+
+def _compute_va_golden(df: object) -> dict:
+    """Compute expected Revenue and Units sums for Config VA using pandas."""
+
+    rev = (
+        df.groupby(["Region", "Category", "Year"])["Revenue"]
+        .sum()
+        .reset_index()
+        .set_index(["Region", "Category", "Year"])["Revenue"]
+    )
+    units = (
+        df.groupby(["Region", "Category", "Year"])["Units"]
+        .sum()
+        .reset_index()
+        .set_index(["Region", "Category", "Year"])["Units"]
+    )
+    return {
+        "all_revenue": sorted(rev.tolist()),
+        "all_units": sorted(units.tolist()),
+        "grand_revenue": float(df["Revenue"].sum()),
+        "grand_units": float(df["Units"].sum()),
+    }
+
+
+def test_config_va_structure(page_at_app: Page):
+    """Config VA: 'Values' column header is present; measure labels are row headers."""
+    container = get_pivot(page_at_app, "golden_va")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # The "Values" column header must be present in the header section
+    values_header = container.get_by_test_id("pivot-values-axis-header")
+    expect(values_header).to_be_visible(timeout=5000)
+    header_text = (values_header.text_content() or "").strip()
+    assert header_text == "Values", f"Expected 'Values' header, got '{header_text}'"
+
+    # Measure names must appear as row-axis labels (not column headers)
+    axis_labels = container.get_by_test_id("pivot-values-axis-label")
+    expect(axis_labels.first).to_be_visible(timeout=5000)
+    label_texts = {(lbl.text_content() or "").strip() for lbl in axis_labels.all()}
+    assert (
+        "Revenue" in label_texts
+    ), f"'Revenue' not found in axis labels: {label_texts}"
+    assert "Units" in label_texts, f"'Units' not found in axis labels: {label_texts}"
+
+    # Column header cells should contain year values, not measure names
+    header_cells = container.get_by_test_id("pivot-header-cell")
+    expect(header_cells.first).to_be_visible(timeout=5000)
+    col_header_texts = {(h.text_content() or "").strip() for h in header_cells.all()}
+    assert (
+        "Revenue" not in col_header_texts
+    ), "'Revenue' appeared as a column header — should be a row-axis label only"
+    assert (
+        "Units" not in col_header_texts
+    ), "'Units' appeared as a column header — should be a row-axis label only"
+
+
+def test_config_va_data_cells_match_golden(page_at_app: Page):
+    """Config VA: data cell numeric values match pandas-computed Revenue and Units sums."""
+    import pandas as pd  # noqa: PLC0415
+
+    df = pd.read_csv(GOLDEN_DIR / "small.csv")
+    golden = _compute_va_golden(df)
+
+    container = get_pivot(page_at_app, "golden_va")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    rendered = _collect_rendered_numbers(container, "pivot-data-cell")
+
+    rev_matched = _count_golden_matches(rendered, golden["all_revenue"])
+    units_matched = _count_golden_matches(rendered, golden["all_units"])
+
+    assert rev_matched >= len(golden["all_revenue"]) - 2, (
+        f"Config VA Revenue: expected at least {len(golden['all_revenue']) - 2} matches, "
+        f"got {rev_matched}. Expected sample: {golden['all_revenue'][:4]}, "
+        f"Rendered: {rendered[:8]}"
+    )
+    assert units_matched >= len(golden["all_units"]) - 2, (
+        f"Config VA Units: expected at least {len(golden['all_units']) - 2} matches, "
+        f"got {units_matched}. Expected sample: {golden['all_units'][:4]}"
+    )
+
+
+def test_config_va_grand_totals(page_at_app: Page):
+    """Config VA: grand total rows exist for both Revenue and Units."""
+    import pandas as pd  # noqa: PLC0415
+
+    df = pd.read_csv(GOLDEN_DIR / "small.csv")
+    golden = _compute_va_golden(df)
+
+    container = get_pivot(page_at_app, "golden_va")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    grand_cells = container.get_by_test_id("pivot-grand-total")
+    expect(grand_cells.first).to_be_visible(timeout=5000)
+
+    grand_values = []
+    for c in grand_cells.all():
+        val = _parse_number(c.text_content() or "")
+        if val is not None:
+            grand_values.append(val)
+
+    rev_ok = any(abs(v - golden["grand_revenue"]) < 1.0 for v in grand_values)
+    units_ok = any(abs(v - golden["grand_units"]) < 1.0 for v in grand_values)
+
+    assert (
+        rev_ok
+    ), f"Config VA grand Revenue {golden['grand_revenue']} not in {grand_values}"
+    assert (
+        units_ok
+    ), f"Config VA grand Units {golden['grand_units']} not in {grand_values}"
+
+
+def test_config_va_row_count(page_at_app: Page):
+    """Config VA: number of data rows is 2× the number of dimension combinations."""
+    import pandas as pd  # noqa: PLC0415
+
+    df = pd.read_csv(GOLDEN_DIR / "small.csv")
+    expected_dim_rows = df.groupby(["Region", "Category"]).ngroups
+
+    container = get_pivot(page_at_app, "golden_va")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    data_rows = container.get_by_test_id("pivot-data-row")
+    expect(data_rows.first).to_be_visible(timeout=5000)
+    rendered_count = len(data_rows.all())
+
+    # 2 value fields → 2 rows per dim combination
+    assert rendered_count == expected_dim_rows * 2, (
+        f"Config VA: expected {expected_dim_rows * 2} data rows "
+        f"({expected_dim_rows} dim groups × 2 measures), got {rendered_count}"
+    )

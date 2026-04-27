@@ -28,6 +28,7 @@ import type { PivotData, GroupedRow } from "../engine/PivotData";
 import {
   getRenderedValueFields,
   isSyntheticMeasure,
+  isValuesOnRows,
   showColumnTotals,
   type CellClickPayload,
   type DateGrain,
@@ -313,6 +314,8 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     maxColumns != null ? allColKeys.slice(0, maxColumns) : allColKeys;
   const renderedValueFields = getRenderedValueFields(config);
   const hasMultipleValues = renderedValueFields.length > 1;
+  const hasMultipleValuesForColHeaders =
+    hasMultipleValues && !isValuesOnRows(config);
   const numRowDims = Math.max(config.rows.length, 1);
   const numColDims = config.columns.length;
   const columnTypes = pivotData.getColumnTypes();
@@ -342,13 +345,13 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     [config, rowTemporalInfos],
   );
   const effectiveNumRowDims =
-    config.row_layout === "hierarchy"
+    (config.row_layout === "hierarchy"
       ? 1
       : config.rows.length === 0
         ? 1
         : rowTemporalInfos.length > 0
           ? computeNumRowHeaderLevels(config, rowTemporalInfos)
-          : numRowDims;
+          : numRowDims) + (isValuesOnRows(config) ? 1 : 0);
   const totalDataColumns = effectiveColSlots.length;
 
   const useSubtotals =
@@ -643,7 +646,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
             pivotData,
             config,
             hasMultipleValues,
-            collapsedSet.has(makeKeyString(entry.key)),
+            collapsedSet.has(
+              makeKeyString(
+                isValuesOnRows(config) ? entry.key.slice(0, -1) : entry.key,
+              ),
+            ),
             onCollapseChange ? handleToggleGroup : undefined,
             visibleColRange,
             onCellClick,
@@ -698,7 +705,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
             pivotData,
             config,
             hasMultipleValues,
-            collapsedSet.has(makeKeyString(entry.key)),
+            collapsedSet.has(
+              makeKeyString(
+                isValuesOnRows(config) ? entry.key.slice(0, -1) : entry.key,
+              ),
+            ),
             onCollapseChange ? handleToggleGroup : undefined,
             visibleColRange,
             onCellClick,
@@ -763,7 +774,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
         effectiveColSlots,
         config,
         effectiveNumRowDims,
-        hasMultipleValues,
+        hasMultipleValuesForColHeaders,
         visibleColRange,
         hasHeaderMenu ? handleOpenMenu : undefined,
         menuTarget?.dimension,
@@ -836,9 +847,14 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     ],
   );
 
-  const dataColWidth = hasMultipleValues
-    ? columnWidth * renderedValueFields.length
-    : columnWidth;
+  // With values_axis="rows" each column slot holds exactly one cell (the value
+  // field is encoded in the row key, not the column slot), so we treat each
+  // slot as single-value regardless of how many measures exist.
+  const valuesOnRows = isValuesOnRows(config);
+  const dataColWidth =
+    hasMultipleValues && !valuesOnRows
+      ? columnWidth * renderedValueFields.length
+      : columnWidth;
 
   // Per-slot configured width from `column_config.field_widths`. Each data
   // slot represents one column-key position in the column-header grid. In
@@ -848,9 +864,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   // default per-measure `columnWidth` when no entry is configured). This
   // keeps the body column widths in sync with the per-measure header cells
   // rendered by the shared `renderColumnHeaders` helper.
+  // With values_axis="rows", each slot also holds exactly one value (single-slot
+  // semantics), so we use the single-field path regardless of measure count.
   const configuredSlotWidth = useMemo(() => {
     if (!config.field_widths) return undefined;
-    if (hasMultipleValues) {
+    if (hasMultipleValues && !valuesOnRows) {
       let total = 0;
       let anyConfigured = false;
       for (const f of renderedValueFields) {
@@ -862,7 +880,13 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     }
     const singleField = renderedValueFields[0];
     return resolveFieldWidth(config, singleField);
-  }, [config, hasMultipleValues, renderedValueFields, columnWidth]);
+  }, [
+    config,
+    hasMultipleValues,
+    valuesOnRows,
+    renderedValueFields,
+    columnWidth,
+  ]);
 
   // Merge runtime resize with configured widths.
   // Precedence per slot:
@@ -883,10 +907,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       return undefined;
     }
     return Array.from({ length: totalDataColumns }, (_, i) => {
-      // In multi-value mode, if any per-field drag has occurred for this slot,
-      // sum the individual field widths so the body stays in sync with the
-      // value-label header cells.
-      if (hasMultipleValues && hasValFieldWidths) {
+      // In multi-value mode (columns orientation), if any per-field drag has
+      // occurred for this slot, sum the individual field widths so the body
+      // stays in sync with the value-label header cells.
+      // With values_axis="rows" each slot is single-value, so skip this path.
+      if (hasMultipleValues && !valuesOnRows && hasValFieldWidths) {
         let total = 0;
         let anyDragged = false;
         for (let vfi = 0; vfi < renderedValueFields.length; vfi++) {

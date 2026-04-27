@@ -1,13 +1,13 @@
 ---
 name: streamlit-pivot
-description: "Build Streamlit apps with st_pivot_table — a BI-focused pivot table component supporting multi-dimensional pivoting, subtotals, conditional formatting, Excel/CSV/TSV export, drill-down, drag-and-drop, date hierarchies with period-over-period comparisons, synthetic measures (including formula measures), Top N / Bottom N and value-predicate analytical filters (0.5.0+), show-values-as analytical display modes (running total, rank, % of parent, index), and server-side pre-aggregation for large datasets. Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot / st_pivot_table, needs interactive data summarization, Top N filter, value filter, running total, rank, or wants to deploy to Streamlit Community Cloud or Streamlit in Snowflake (SiS) on SPCS (installed from PyPI via PYPI_ACCESS_INTEGRATION). Triggers: pivot table, streamlit_pivot, st_pivot_table, pivot, crosstab, data summarization, top N, top n filter, value filter, running total, rank, SiS, SiS on SPCS, Snowflake streamlit, PYPI_ACCESS_INTEGRATION, Streamlit Community Cloud."
+description: "Build Streamlit apps with st_pivot_table — a BI-focused pivot table component supporting multi-dimensional pivoting, subtotals, conditional formatting, Excel/CSV/TSV export, drill-down, drag-and-drop, date hierarchies with period-over-period comparisons, synthetic measures (including formula measures), Top N / Bottom N and value-predicate analytical filters (0.5.0+), show-values-as analytical display modes (running total, rank, % of parent, index), values axis placement (values_axis rows/columns, 0.5.0+), multi-field chained sorting (0.5.0+), and server-side pre-aggregation for large datasets. Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot / st_pivot_table, needs interactive data summarization, Top N filter, value filter, running total, rank, income statement layout, values on rows, financial report, or wants to deploy to Streamlit Community Cloud or Streamlit in Snowflake (SiS) on SPCS (installed from PyPI via PYPI_ACCESS_INTEGRATION). Triggers: pivot table, streamlit_pivot, st_pivot_table, pivot, crosstab, data summarization, top N, top n filter, value filter, running total, rank, values on rows, income statement, financial layout, SiS, SiS on SPCS, Snowflake streamlit, PYPI_ACCESS_INTEGRATION, Streamlit Community Cloud."
 ---
 
 # Streamlit Pivot Table Component
 
-`streamlit-pivot` provides `st_pivot_table` — a BI-focused pivot table component built with Streamlit Components V2, React, and TypeScript. It supports multi-dimensional pivoting, interactive sorting/filtering, subtotals with collapse/expand, conditional formatting, Excel/CSV/TSV/clipboard export, drill-down detail panels, drag-and-drop field configuration, synthetic (derived) measures with a formula engine, date/time hierarchies with period-over-period comparisons, hierarchical row layouts, column resize, fullscreen mode, and server-side pre-aggregation for large datasets.
+`streamlit-pivot` provides `st_pivot_table` — a BI-focused pivot table component built with Streamlit Components V2, React, and TypeScript. It supports multi-dimensional pivoting, interactive sorting/filtering, subtotals with collapse/expand, conditional formatting, Excel/CSV/TSV/clipboard export, drill-down detail panels, drag-and-drop field configuration, synthetic (derived) measures with a formula engine, date/time hierarchies with period-over-period comparisons, hierarchical row layouts, values axis placement (put measures on rows for income-statement-style reports), multi-field chained sorting, Top N / Bottom N and value-predicate analytical filters, column resize, fullscreen mode, and server-side pre-aggregation for large datasets.
 
-**Current version:** 0.4.0
+**Current version:** 0.5.0
 **Requirements:** Python >= 3.10, Streamlit >= 1.51
 
 ## When to Use
@@ -206,6 +206,7 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `conditional_formatting` | `list[dict] \| None` | `None` | Color scales, data bars, thresholds. |
 | `style` | `str \| PivotStyle \| list \| None` | `None` | Region-based table styling. Pass a preset name, a `PivotStyle` dict, or a list that composes presets + overrides. See [Styling](#styling-1). |
 | `column_config` | `dict[str, Any] \| None` | `None` | Streamlit-style per-column display config. Keys: `format`, `type`, `label`, `help`, `width` (`"small"`/`"medium"`/`"large"`/int px ∈ [20, 2000]), `pinned` (config-UI lock only, not sticky), `alignment` (`"left"`/`"center"`/`"right"`; unions with `column_alignment` kwarg, explicit kwarg wins). Row-dim cell renderers via `type`: `"link"` (+ optional `display_text`), `"image"`, `"checkbox"`, `"text"` with `max_chars`. Both dict literals and `st.column_config.*` objects are accepted. |
+| `values_axis` | `"columns" \| "rows"` | `"columns"` | Where value fields are placed. `"columns"` (default) adds a `"Σ Values"` group to column headers. `"rows"` places each measure as a sub-row of every dimension row — ideal for financial statements. Incompatible with period-comparison `show_values_as` modes and active temporal hierarchies. |
 | `empty_cell_value` | `str` | `"-"` | String for empty cells. |
 
 #### Layout
@@ -561,6 +562,42 @@ Both filter types can also be configured interactively via the **column header m
 - `n` (Top N) must be a positive integer.
 - `between` requires both `value` and `value2`.
 - Filters excluded from `_build_sidecar_fingerprint` — changing them never triggers a server re-aggregate in hybrid mode.
+
+### Values Axis Placement (0.5.0+)
+
+`values_axis="rows"` moves all value fields onto the row axis. Each dimension row expands into N sub-rows (one per measure). A **Values** label column appears at the left of the row-header section to identify each measure. The `"Σ Values"` column group is suppressed from the column header.
+
+```python
+# Income-statement layout
+st_pivot_table(
+    income_df,
+    key="income_stmt",
+    rows=["Account"],
+    columns=["Quarter"],
+    values=["Revenue", "COGS", "Gross Profit"],
+    values_axis="rows",      # <-- moves metrics onto rows
+    show_totals=False,
+    number_format={"__all__": "$,.0f"},
+)
+
+# Multi-dimension with subtotals — sub-rows appear within each subtotal block too
+st_pivot_table(
+    df,
+    key="regional",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Units"],
+    values_axis="rows",
+    show_subtotals=True,
+    show_totals=True,
+)
+```
+
+**Incompatibilities** — raises `ValueError` if combined with:
+- Period-comparison `show_values_as` modes (`diff_from_prev`, `pct_diff_from_prev`, `diff_from_prev_year`, `pct_diff_from_prev_year`)
+- Active temporal hierarchies (`auto_date_hierarchy=True` with a date/datetime axis field, or explicit `date_grains` on an axis field)
+
+**UI**: Settings Panel → Layout section → **Values axis** segmented control ("Rows" option auto-disabled with tooltip when any incompatibility is active).
 
 ### Conditional Formatting
 

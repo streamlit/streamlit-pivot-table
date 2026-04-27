@@ -29,6 +29,8 @@ import {
 } from "react";
 import {
   makeKeyString,
+  encodeValueFieldSegment,
+  getValueFieldForRowKey,
   type PivotData,
   type GroupedRow,
 } from "../engine/PivotData";
@@ -57,6 +59,7 @@ import {
   type SortConfig,
   type TopNFilter,
   type ValueFilter,
+  isValuesOnRows,
 } from "../engine/types";
 import { renderCellContent } from "./cellRenderer";
 import {
@@ -339,10 +342,13 @@ export function buildCellClickPayload(
   config: PivotConfigV1,
   valueField?: string,
 ): CellClickPayload {
+  // Strip the trailing __vf__ encoded segment before mapping to dimension filters.
+  const dimRowKey =
+    config.values_axis === "rows" ? rowKey.slice(0, -1) : rowKey;
   const filters: Record<string, string> = {};
   config.rows.forEach((dim, i) => {
-    if (i < rowKey.length && rowKey[i] !== "Total") {
-      filters[dim] = rowKey[i];
+    if (i < dimRowKey.length && dimRowKey[i] !== "Total") {
+      filters[dim] = dimRowKey[i];
     }
   });
   config.columns.forEach((dim, i) => {
@@ -351,7 +357,7 @@ export function buildCellClickPayload(
     }
   });
   return {
-    rowKey: [...rowKey],
+    rowKey: [...dimRowKey],
     colKey: [...colKey],
     value,
     filters,
@@ -1055,6 +1061,23 @@ export function renderColumnHeaders(
         : dimCellRowSpan;
       if (config.rows.length > 0) {
         if (hierarchyMode) {
+          // Prepend a "Values" column header when value fields are on the row axis.
+          // Must appear before the hierarchy header cell so columns align with body rows.
+          if (config.values_axis === "rows" && level === 0) {
+            cells.push(
+              <th
+                key="values-axis-header"
+                className={`${styles.headerCell} ${styles.rowHeaderSecondary} ${styles.headerRowPinned}`}
+                rowSpan={numColLevels}
+                style={stickyTop}
+                data-testid="pivot-values-axis-header"
+              >
+                <div className={styles.headerCellContent}>
+                  <span>Values</span>
+                </div>
+              </th>,
+            );
+          }
           const effectiveRowHeaderLevels =
             rowHeaderLevels && rowHeaderLevels.length > 0
               ? rowHeaderLevels
@@ -1192,6 +1215,26 @@ export function renderColumnHeaders(
                   isLeaf: true,
                   isTemporal: false,
                 }));
+          // Prepend a "Values" column header when the value fields are on the row axis.
+          if (config.values_axis === "rows" && level === 0) {
+            const valuesColRowSpan = singleTemporalColumn
+              ? numColLevels
+              : numColLevels;
+            cells.push(
+              <th
+                key="values-axis-header"
+                className={`${styles.headerCell} ${styles.rowHeaderSecondary} ${styles.headerRowPinned}`}
+                rowSpan={valuesColRowSpan}
+                style={stickyTop}
+                data-testid="pivot-values-axis-header"
+              >
+                <div className={styles.headerCellContent}>
+                  <span>Values</span>
+                </div>
+              </th>,
+            );
+          }
+
           effectiveRowHeaderLevels.forEach((rowLevel, rowHeaderIdx) => {
             const dim = rowLevel.field;
             const dimIdx = rowLevel.dimIndex;
@@ -2618,6 +2661,263 @@ export function renderDataRow(
   const subtotalsOn = groupContext?.subtotalsEnabled && config.rows.length >= 2;
   const numGroupingDims = groupContext?.numGroupingDims ?? 0;
   const leafDimIdx = config.rows.length - 1;
+
+  // ── values_axis="rows" fast path ─────────────────────────────────────────
+  // The rowKey is `[...dimSegments, "__vf__:<fieldId>"]`. We strip the last
+  // segment for aggregate lookups and add a value-field label header cell.
+  if (isValuesOnRows(config)) {
+    const encodedValField = getValueFieldForRowKey(rowKey);
+    const valField = encodedValField ?? getRenderedValueFields(config)[0] ?? "";
+    const dimRowKey = encodedValField ? rowKey.slice(0, -1) : rowKey;
+    const valFieldLabel = getRenderedValueLabel(config, valField);
+    const renderedVFs = getRenderedValueFields(config);
+    const vfIdx = renderedVFs.indexOf(valField);
+    const trCls = [
+      groupBoundaryLevel !== undefined
+        ? (styles[
+            `groupBoundaryL${Math.min(groupBoundaryLevel, 2)}` as keyof typeof styles
+          ] ?? "")
+        : "",
+      isHierarchyLayout(config) ? styles.hierarchyDataRow : "",
+      !isHierarchyLayout(config) && isEvenRow ? styles.evenDataRow : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return (
+      <tr
+        key={rowKey.join("\x00")}
+        data-testid="pivot-data-row"
+        className={trCls || undefined}
+      >
+        {/* Value field label cell — first column, matches "Values" column header */}
+        <th
+          scope="row"
+          className={`${styles.rowHeaderCell} ${styles.rowHeaderSecondary}`}
+          data-testid="pivot-values-axis-label"
+        >
+          {valFieldLabel}
+        </th>
+        {/* Dimension header cell(s) — after value label */}
+        {isHierarchyLayout(config)
+          ? (() => {
+              // Hierarchy mode: single indented cell (same logic as normal hierarchy path)
+              const activeHeaderIdx = getDeepestActiveHeaderIndex(
+                dimRowKey.map(() => true),
+                headerSpans,
+              );
+              const activeDimIdx =
+                activeHeaderIdx >= 0 ? activeHeaderIdx : dimRowKey.length - 1;
+              const part = dimRowKey[activeDimIdx] ?? "";
+              const activeDimField = config.rows[activeDimIdx] ?? "";
+              const text =
+                (part ? pivotData.formatDimLabel(activeDimField, part) : "") ||
+                "(empty)";
+              const renderedLabel: ReactNode = renderCellContent({
+                rawValue: part,
+                displayText: text,
+                field: activeDimField,
+                config,
+                isTotal: false,
+                variant: "cell",
+              });
+              return renderHierarchyRowHeaderCell(
+                `row-header-hierarchy-${activeDimIdx}-${vfIdx}`,
+                renderedLabel,
+                activeDimIdx,
+                `${styles.rowHeaderCell} ${styles.rowHeaderCellPinned}`,
+                {
+                  reserveToggleSpace: activeDimIdx > 0,
+                  dimIndex: activeDimIdx,
+                },
+              );
+            })()
+          : dimRowKey.map((part, dimIdx) => {
+              const span = headerSpans ? headerSpans[dimIdx] : 1;
+              if (span === 0) return null;
+              const dimClasses = [
+                styles.rowHeaderCell,
+                dimIdx === 0
+                  ? styles.rowHeaderPrimary
+                  : styles.rowHeaderSecondary,
+                dimIdx === 0 ? styles.rowHeaderCellPinned : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const dimField = config.rows[dimIdx] ?? "";
+              const text = part
+                ? pivotData.formatDimLabel(dimField, part) || "(empty)"
+                : "(empty)";
+              return (
+                <th
+                  key={dimIdx}
+                  scope="row"
+                  className={dimClasses}
+                  data-testid="pivot-row-header"
+                  rowSpan={span > 1 ? span : undefined}
+                  data-dim-index={dimIdx}
+                >
+                  <span>{text}</span>
+                </th>
+              );
+            })}
+        {/* Data cells — one per visible slot */}
+        {visibleSlots.map((slot) => {
+          const tSlot = slot as TemporalColSlot;
+          if (tSlot.temporalCollapse || slot.collapsedLevel !== undefined) {
+            // Temporal / collapsed col: show the group subtotal for this value field
+            const agg = tSlot.temporalCollapse
+              ? pivotData.getTemporalColSubtotal(
+                  dimRowKey,
+                  tSlot.temporalCollapse.modifiedColKey,
+                  valField,
+                )
+              : pivotData.getColGroupSubtotal(dimRowKey, slot.key, valField);
+            const cellValue = agg.value();
+            const text = formatTotalCellValue(
+              agg,
+              valField,
+              config,
+              pivotData,
+              null,
+              undefined,
+              undefined,
+              !!tSlot.temporalCollapse,
+            );
+            return (
+              <td
+                key={`tc-${slot.key.join("\x00")}\x01${valField}`}
+                className={`${styles.dataCell} ${styles.totalsCol}`}
+                data-testid="pivot-data-cell"
+              >
+                {text}
+              </td>
+            );
+          }
+          const colKey = slot.key;
+          const agg = pivotData.getAggregator(dimRowKey, colKey, valField);
+          const cellValue = agg.value();
+          const fmt = formatCellValue(
+            cellValue,
+            valField,
+            config,
+            pivotData,
+            dimRowKey,
+            colKey,
+            config.empty_cell_value,
+          );
+          const displayText = fmt.text || agg.format(config.empty_cell_value);
+          const align = getCellAlignment(valField, config);
+          const condStyle = config.conditional_formatting
+            ? computeCellStyle(
+                cellValue,
+                valField,
+                config.conditional_formatting,
+                pivotData,
+                false,
+              )
+            : undefined;
+          const measureStyle = dataCellByMeasureStyle(valField, config.style);
+          const cellStyle: React.CSSProperties = {
+            ...(align
+              ? { textAlign: align as React.CSSProperties["textAlign"] }
+              : {}),
+            ...measureStyle,
+            ...condStyle,
+          };
+          const cellInteractive = interactive && cellValue !== null;
+          return (
+            <td
+              key={`${colKey.join("\x00")}\x01${valField}`}
+              className={`${styles.dataCell}${condStyle ? ` ${styles.condFormatted}` : ""}`}
+              data-testid="pivot-data-cell"
+              style={Object.keys(cellStyle).length > 0 ? cellStyle : undefined}
+              {...(cellInteractive
+                ? {
+                    tabIndex: 0,
+                    role: "gridcell",
+                    onClick: () =>
+                      onCellClick!(
+                        buildCellClickPayload(
+                          rowKey,
+                          colKey,
+                          cellValue,
+                          config,
+                          valField,
+                        ),
+                      ),
+                    onKeyDown: onCellKeyDown
+                      ? (e: KeyboardEvent) =>
+                          onCellKeyDown(e, rowKey, colKey, cellValue, valField)
+                      : undefined,
+                  }
+                : {})}
+            >
+              {displayText}
+            </td>
+          );
+        })}
+        {/* Row total */}
+        {rowTotalValueFields.length > 0 &&
+          (() => {
+            if (!showTotalForMeasure(config, valField, "row")) {
+              return (
+                <td
+                  key={`total-${valField}`}
+                  className={`${styles.dataCell} ${styles.totalsCol} ${styles.excludedTotal}`}
+                  data-testid="pivot-excluded-total"
+                >
+                  –
+                </td>
+              );
+            }
+            const agg = pivotData.getRowTotal(dimRowKey, valField);
+            const cellValue = agg.value();
+            const totalText = formatTotalCellValue(
+              agg,
+              valField,
+              config,
+              pivotData,
+              "row",
+              undefined,
+            );
+            const totalStyle = buildTotalCellStyle(
+              cellValue,
+              valField,
+              config,
+              pivotData,
+            );
+            return (
+              <td
+                key={`total-${valField}`}
+                className={`${styles.dataCell} ${styles.totalsCol}`}
+                data-testid="pivot-row-total"
+                style={totalStyle}
+                {...(interactive
+                  ? {
+                      tabIndex: 0,
+                      role: "gridcell",
+                      onClick: () =>
+                        onCellClick!(
+                          buildCellClickPayload(
+                            rowKey,
+                            TOTAL_KEY,
+                            cellValue,
+                            config,
+                            valField,
+                          ),
+                        ),
+                    }
+                  : {})}
+              >
+                {totalText}
+              </td>
+            );
+          })()}
+      </tr>
+    );
+  }
+  // ── end values_axis="rows" fast path ──────────────────────────────────────
+
   const trClasses = [
     groupBoundaryLevel !== undefined
       ? (styles[
@@ -3068,6 +3368,241 @@ export function renderSubtotalRow(
     : colSlots;
   const valueFields = getDisplayedValueFields(config, hasMultipleValues);
   const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
+
+  // ── values_axis="rows" fast path ────────────────────────────────────────
+  if (isValuesOnRows(config)) {
+    const encodedValField = getValueFieldForRowKey(parentKey);
+    const valField = encodedValField ?? getRenderedValueFields(config)[0] ?? "";
+    const dimParentKey = encodedValField ? parentKey.slice(0, -1) : parentKey;
+    const valFieldLabel = getRenderedValueLabel(config, valField);
+    const dimLabel = dimParentKey[dimParentKey.length - 1] || "(empty)";
+    const groupKeyStr = dimParentKey.join("\x00");
+    const numRowDimsVA = Math.max(config.rows.length, 1);
+    const renderedVFs = getRenderedValueFields(config);
+    const rowCls = [
+      styles.subtotalRow,
+      isHierarchyLayout(config) ? styles.hierarchySubtotalRow : "",
+      config.subtotal_position === "top" ? styles.subtotalTopRow : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return (
+      <tr
+        key={`subtotal-${parentKey.join("\x00")}-${level}`}
+        className={rowCls}
+        data-testid="pivot-subtotal-row"
+        aria-label={`Subtotal for ${dimParentKey.join(" / ")} — ${valFieldLabel}`}
+        data-level={level}
+      >
+        {/* Value field label cell — first column, matches "Values" column header */}
+        <th
+          scope="row"
+          className={`${styles.rowHeaderCell} ${styles.rowHeaderSecondary}`}
+          data-testid="pivot-values-axis-label"
+        >
+          {valFieldLabel}
+        </th>
+        {/* Row header cell(s) — after value label */}
+        {isHierarchyLayout(config)
+          ? (() => {
+              // Hierarchy mode: single indented cell with toggle (same as normal hierarchy path)
+              const subtotalField = config.rows[level] ?? "";
+              const subtotalRawValue = dimParentKey[level];
+              const formatted =
+                subtotalRawValue !== undefined
+                  ? pivotData.formatDimLabel(subtotalField, subtotalRawValue)
+                  : "";
+              const subtotalDisplayText = formatted || "(empty)";
+              const subtotalContent: ReactNode = renderCellContent({
+                rawValue: subtotalRawValue,
+                displayText: subtotalDisplayText,
+                field: subtotalField,
+                config,
+                isTotal: true,
+                variant: "breadcrumb",
+              });
+              return renderHierarchyRowHeaderCell(
+                `sub-hdr-hierarchy-${level}-${valField}`,
+                subtotalContent,
+                level,
+                `${styles.rowHeaderCell} ${styles.rowHeaderPrimary} ${styles.rowHeaderCellPinned} ${styles.subtotalHeaderCell}`,
+                {
+                  dataTestId: "pivot-row-header",
+                  dimIndex: level,
+                  leadingToggle: onToggleGroup ? (
+                    <HierarchyToggleButton
+                      collapsed={isCollapsed}
+                      label={dimLabel}
+                      dataTestId={`pivot-group-toggle-${groupKeyStr}`}
+                      onClick={() => onToggleGroup(groupKeyStr)}
+                    />
+                  ) : null,
+                },
+              );
+            })()
+          : Array.from({ length: numRowDimsVA }, (_, dimIdx) => {
+              if (dimIdx < level) {
+                const parentField = config.rows[dimIdx] ?? "";
+                const parentRaw = dimParentKey[dimIdx];
+                return (
+                  <th
+                    key={`sub-hdr-${dimIdx}`}
+                    scope="row"
+                    className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.groupingDimCell}`}
+                    data-dim-index={dimIdx}
+                  >
+                    {parentRaw || "(empty)"}
+                  </th>
+                );
+              }
+              if (dimIdx === level) {
+                const canToggle = !!onToggleGroup;
+                return (
+                  <th
+                    key={`sub-hdr-${dimIdx}`}
+                    scope="row"
+                    className={`${styles.rowHeaderCell} ${dimIdx === 0 ? styles.rowHeaderPrimary : styles.rowHeaderSecondary} ${dimIdx === 0 ? styles.rowHeaderCellPinned : ""} ${styles.subtotalHeaderCell} ${canToggle ? styles.groupToggleCell : ""}`}
+                    {...(canToggle
+                      ? {
+                          onClick: () => onToggleGroup(groupKeyStr),
+                          role: "button",
+                          tabIndex: 0,
+                          onKeyDown: (e: KeyboardEvent) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onToggleGroup(groupKeyStr);
+                            }
+                          },
+                          "aria-expanded": !isCollapsed,
+                          "aria-label": isCollapsed
+                            ? `Expand ${dimLabel}`
+                            : `Collapse ${dimLabel}`,
+                        }
+                      : {})}
+                    data-testid={
+                      canToggle
+                        ? `pivot-group-toggle-${groupKeyStr}`
+                        : undefined
+                    }
+                  >
+                    <span className={styles.rowHeaderContent}>
+                      {canToggle && (
+                        <GroupToggleIcon isCollapsed={isCollapsed} />
+                      )}
+                      <span className={styles.subtotalLabel}>
+                        {dimLabel} Total
+                      </span>
+                    </span>
+                  </th>
+                );
+              }
+              return (
+                <th
+                  key={`sub-hdr-${dimIdx}`}
+                  scope="row"
+                  className={`${styles.rowHeaderCell} ${styles.rowHeaderSecondary}`}
+                />
+              );
+            })}
+        {/* Subtotal data cells — one per slot */}
+        {visibleSlots.map((slot) => {
+          const tSlotSub = slot as TemporalColSlot;
+          const agg = tSlotSub.temporalCollapse
+            ? pivotData.getTemporalColSubtotal(
+                dimParentKey,
+                tSlotSub.temporalCollapse.modifiedColKey,
+                valField,
+              )
+            : slot.collapsedLevel !== undefined
+              ? pivotData.getSubtotalColGroupAgg(
+                  dimParentKey,
+                  slot.key,
+                  valField,
+                )
+              : pivotData.getSubtotalAggregator(
+                  dimParentKey,
+                  slot.key,
+                  valField,
+                );
+          const cellValue = agg.value();
+          const text = formatTotalCellValue(
+            agg,
+            valField,
+            config,
+            pivotData,
+            null,
+            undefined,
+            {
+              row: pivotData
+                .getSubtotalAggregator(dimParentKey, [], valField)
+                .value(),
+              col: pivotData.getColTotal(slot.key, valField).value(),
+            },
+          );
+          const cellStyle = buildTotalCellStyle(
+            cellValue,
+            valField,
+            config,
+            pivotData,
+          );
+          return (
+            <td
+              key={`${slot.key.join("\x00")}\x01${valField}`}
+              className={styles.dataCell}
+              data-testid="pivot-subtotal-cell"
+              style={cellStyle}
+              {...(onCellClick
+                ? {
+                    tabIndex: 0,
+                    role: "gridcell",
+                    onClick: () =>
+                      onCellClick(
+                        buildCellClickPayload(
+                          parentKey,
+                          slot.key,
+                          cellValue,
+                          config,
+                          valField,
+                        ),
+                      ),
+                  }
+                : {})}
+            >
+              {text}
+            </td>
+          );
+        })}
+        {/* Row total */}
+        {rowTotalValueFields.length > 0 &&
+          showTotalForMeasure(config, valField, "row") && (
+            <td
+              key={`total-${valField}`}
+              className={`${styles.dataCell} ${styles.totalsCol}`}
+              data-testid="pivot-subtotal-total"
+              style={buildTotalCellStyle(
+                pivotData
+                  .getSubtotalAggregator(dimParentKey, [], valField)
+                  .value(),
+                valField,
+                config,
+                pivotData,
+              )}
+            >
+              {formatTotalCellValue(
+                pivotData.getSubtotalAggregator(dimParentKey, [], valField),
+                valField,
+                config,
+                pivotData,
+                "row",
+                undefined,
+              )}
+            </td>
+          )}
+      </tr>
+    );
+  }
+  // ── end values_axis="rows" fast path ────────────────────────────────────
+
   const numRowDims = Math.max(config.rows.length, 1);
   const label = parentKey[parentKey.length - 1] || "(empty)";
   const groupKeyStr = parentKey.join("\x00");
@@ -3560,6 +4095,141 @@ export function renderTotalsRow(
     : colSlots;
   const valueFields = getDisplayedValueFields(config, hasMultipleValues);
   const rowTotalValueFields = getRowTotalValueFields(config, hasMultipleValues);
+  const showRowTotal = rowTotalValueFields.length > 0;
+
+  // ── values_axis="rows" fast path ─────────────────────────────────────
+  if (isValuesOnRows(config)) {
+    const renderedVFs = getRenderedValueFields(config);
+    // numRowDims already includes the +1 for the values column.
+    const dimColSpan = numRowDims - 1; // dimension columns (without value label col)
+    return (
+      <>
+        {renderedVFs.map((valField, vfIdx) => {
+          const encodedKey = [encodeValueFieldSegment(valField)];
+          const isFirstVF = vfIdx === 0;
+          return (
+            <tr
+              key={`grand-total-${valField}`}
+              className={
+                isFirstVF ? styles.totalsRow : styles.totalsRowContinuation
+              }
+              data-testid="pivot-totals-row"
+            >
+              {/* Value field label — first column, matches "Values" column header */}
+              <th
+                scope="row"
+                className={`${styles.rowHeaderCell} ${styles.rowHeaderSecondary}`}
+                data-testid="pivot-values-axis-label"
+              >
+                {getRenderedValueLabel(config, valField)}
+              </th>
+              {/* "Grand Total" label: only on first value-field row, only when there
+                  are actual dimension columns to fill (dimColSpan > 0). When rows=[]
+                  the value-label cell IS the only leading column and no extra cell fits. */}
+              {isFirstVF && dimColSpan > 0 && (
+                <th
+                  scope="row"
+                  className={`${styles.rowHeaderCell} ${styles.rowHeaderCellPinned}`}
+                  colSpan={dimColSpan}
+                  rowSpan={
+                    renderedVFs.length > 1 ? renderedVFs.length : undefined
+                  }
+                >
+                  Grand Total
+                </th>
+              )}
+              {/* Data cells */}
+              {visibleSlots.map((slot) => {
+                if (!showTotalForMeasure(config, valField, "col")) {
+                  return (
+                    <td
+                      key={`coltotal-${slot.key.join("\x00")}-${valField}`}
+                      className={`${styles.dataCell} ${styles.excludedTotal}`}
+                      data-testid="pivot-excluded-total"
+                    >
+                      –
+                    </td>
+                  );
+                }
+                const agg =
+                  slot.collapsedLevel !== undefined
+                    ? pivotData.getColGroupGrandSubtotal(slot.key, valField)
+                    : pivotData.getColTotal(slot.key, valField);
+                const cellValue = agg.value();
+                const text = formatTotalCellValue(
+                  agg,
+                  valField,
+                  config,
+                  pivotData,
+                  "col",
+                  undefined,
+                );
+                const cellStyle = buildTotalCellStyle(
+                  cellValue,
+                  valField,
+                  config,
+                  pivotData,
+                );
+                const cellInteractive = !!onCellClick;
+                return (
+                  <td
+                    key={`coltotal-${slot.key.join("\x00")}-${valField}`}
+                    className={styles.dataCell}
+                    data-testid="pivot-col-total"
+                    style={cellStyle}
+                    {...(cellInteractive
+                      ? {
+                          tabIndex: 0,
+                          role: "gridcell",
+                          onClick: () =>
+                            onCellClick!(
+                              buildCellClickPayload(
+                                encodedKey,
+                                slot.key,
+                                cellValue,
+                                config,
+                                valField,
+                              ),
+                            ),
+                        }
+                      : {})}
+                  >
+                    {text}
+                  </td>
+                );
+              })}
+              {/* Grand total corner */}
+              {showRowTotal &&
+                showTotalForMeasure(config, valField, "grand") && (
+                  <td
+                    key={`grand-${valField}`}
+                    className={`${styles.dataCell} ${styles.totalsCol}`}
+                    data-testid="pivot-grand-total"
+                    style={buildTotalCellStyle(
+                      pivotData.getGrandTotal(valField).value(),
+                      valField,
+                      config,
+                      pivotData,
+                    )}
+                  >
+                    {formatTotalCellValue(
+                      pivotData.getGrandTotal(valField),
+                      valField,
+                      config,
+                      pivotData,
+                      "grand",
+                      undefined,
+                    )}
+                  </td>
+                )}
+            </tr>
+          );
+        })}
+      </>
+    );
+  }
+  // ── end values_axis="rows" fast path ──────────────────────────────────
+
   return (
     <tr className={styles.totalsRow} data-testid="pivot-totals-row">
       <th
@@ -4111,6 +4781,10 @@ const TableRenderer: FC<TableRendererProps> = ({
     maxColumns != null ? allColKeys.slice(0, maxColumns) : allColKeys;
   const renderedValueFields = getRenderedValueFields(config);
   const hasMultipleValues = renderedValueFields.length > 1;
+  // When values_axis="rows", each column slot holds exactly one cell per row (the
+  // value field is baked into the row key), so column headers have no Σ Values row.
+  const hasMultipleValuesForColHeaders =
+    hasMultipleValues && !isValuesOnRows(config);
   const numRowDims = Math.max(config.rows.length, 1);
   const numColDims = config.columns.length;
 
@@ -4136,13 +4810,17 @@ const TableRenderer: FC<TableRendererProps> = ({
     () => computeRowHeaderLevels(config, rowTemporalInfos),
     [config, rowTemporalInfos],
   );
-  const effectiveNumRowDims = isHierarchyLayout(config)
-    ? 1
-    : config.rows.length === 0
+  // When rows=[] and values_axis="rows", the "Values" label IS the only leading
+  // column — no blank placeholder dim column. So skip the +1 for that case.
+  const effectiveNumRowDims =
+    (isHierarchyLayout(config)
       ? 1
-      : rowTemporalInfos.length > 0
-        ? computeNumRowHeaderLevels(config, rowTemporalInfos)
-        : numRowDims;
+      : config.rows.length === 0
+        ? 1
+        : rowTemporalInfos.length > 0
+          ? computeNumRowHeaderLevels(config, rowTemporalInfos)
+          : numRowDims) +
+    (isValuesOnRows(config) && config.rows.length > 0 ? 1 : 0);
 
   const effectiveColSlots: ColSlot[] = useMemo(
     () => computeTemporalColSlots(colSlots, temporalInfos, config),
@@ -4460,7 +5138,11 @@ const TableRenderer: FC<TableRendererProps> = ({
             pivotData,
             config,
             hasMultipleValues,
-            collapsedSet.has(makeKeyString(entry.key)),
+            collapsedSet.has(
+              makeKeyString(
+                isValuesOnRows(config) ? entry.key.slice(0, -1) : entry.key,
+              ),
+            ),
             onCollapseChange ? handleToggleGroup : undefined,
             undefined,
             onCellClick,
@@ -4541,7 +5223,11 @@ const TableRenderer: FC<TableRendererProps> = ({
             pivotData,
             config,
             hasMultipleValues,
-            collapsedSet.has(makeKeyString(entry.key)),
+            collapsedSet.has(
+              makeKeyString(
+                isValuesOnRows(config) ? entry.key.slice(0, -1) : entry.key,
+              ),
+            ),
             onCollapseChange ? handleToggleGroup : undefined,
             undefined,
             onCellClick,
@@ -4642,7 +5328,7 @@ const TableRenderer: FC<TableRendererProps> = ({
               effectiveColSlots,
               config,
               effectiveNumRowDims,
-              hasMultipleValues,
+              hasMultipleValuesForColHeaders,
               undefined,
               hasHeaderMenu ? handleOpenMenu : undefined,
               menuTarget?.dimension,

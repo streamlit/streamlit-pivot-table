@@ -152,6 +152,7 @@ GOLDEN_PIVOT_KEYS = [
     "golden_f3",
     "golden_no_totals",
     "golden_export",
+    "golden_va",
 ]
 
 COLUMN_CONFIG_PIVOT_KEYS = [

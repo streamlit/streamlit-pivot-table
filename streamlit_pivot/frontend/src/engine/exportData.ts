@@ -16,6 +16,7 @@
  */
 
 import type { PivotData, GroupedRow } from "./PivotData";
+import { getValueFieldForRowKey } from "./PivotData";
 import type {
   ColumnTypeMap,
   DateGrain,
@@ -30,6 +31,7 @@ import {
   getRenderedValueFields,
   getRenderedValueLabel,
   getSyntheticMeasureFormat,
+  isValuesOnRows,
   isSyntheticMeasure,
   showRowTotals,
   showColumnTotals,
@@ -515,7 +517,10 @@ function buildHierarchyExportLabel(
     };
   }
 
-  const rowKey = entry.key;
+  // When values_axis="rows", the key has a trailing "__vf__:<field>" segment;
+  // strip it so depth and dimKey refer to the actual dimension, not the pseudo-dim.
+  const encodedVf = getValueFieldForRowKey(entry.key);
+  const rowKey = encodedVf !== null ? entry.key.slice(0, -1) : entry.key;
   const depth = Math.max(rowKey.length - 1, 0);
   const dimName = config.rows[depth] ?? "";
   const dimKey = rowKey[depth] ?? "";
@@ -576,8 +581,17 @@ export function buildExportIR(
   const rowDims = config.rows;
   const colDims = config.columns;
   const hierarchyMode = config.row_layout === "hierarchy";
-  const numRowDimCols = hierarchyMode ? 1 : Math.max(rowDims.length, 1);
-  const colsPerKey = hasMultipleValues ? values.length : 1;
+  const valuesOnRows = isValuesOnRows(config);
+  // When rows=[] and values_axis="rows", the value-label IS the only leading
+  // column — no blank placeholder. So skip the +1 in that specific combination.
+  const numRowDimCols = hierarchyMode
+    ? valuesOnRows
+      ? 2
+      : 1
+    : Math.max(rowDims.length, 1) +
+      (valuesOnRows && rowDims.length > 0 ? 1 : 0);
+  // When values_axis="rows", each colKey maps to 1 data column (not values.length).
+  const colsPerKey = valuesOnRows ? 1 : hasMultipleValues ? values.length : 1;
 
   const grid: ExportCell[][] = [];
   let headerRowCount = 0;
@@ -587,6 +601,10 @@ export function buildExportIR(
     const row: ExportCell[] = [];
     if (level === 0) {
       if (hierarchyMode) {
+        // For values_axis="rows" + hierarchy, the layout has two leading columns:
+        // col 0 = value-field label ("Values"), col 1 = hierarchy row header.
+        // This matches the renderer which prepends the "Values" header first.
+        if (valuesOnRows) row.push(cell("Values", "header"));
         row.push(
           cell(
             rowDims.length === 1
@@ -603,6 +621,9 @@ export function buildExportIR(
           ),
         );
       } else {
+        // "Values" column header is always first when value fields are on the row
+        // axis (matching the renderer which prepends it before dimension headers).
+        if (valuesOnRows) row.push(cell("Values", "header"));
         for (let d = 0; d < rowDims.length; d++) {
           row.push(
             cell(
@@ -616,7 +637,8 @@ export function buildExportIR(
             ),
           );
         }
-        if (rowDims.length === 0) row.push(cell("", "header"));
+        // When rows=[] and !valuesOnRows, add a blank placeholder so widths match.
+        if (rowDims.length === 0 && !valuesOnRows) row.push(cell("", "header"));
       }
     } else {
       for (let d = 0; d < numRowDimCols; d++) {
@@ -639,7 +661,10 @@ export function buildExportIR(
     }
     if (includeVisibleRowTotals) {
       const label = level === 0 ? "Total" : "";
-      if (hasMultipleValues) {
+      // With values_axis="rows" each data row has exactly 1 row-total cell
+      // (the measure is baked into the row, not the column). Use a single header
+      // cell here too so header width matches data row width.
+      if (hasMultipleValues && !valuesOnRows) {
         row.push(
           cell(label, "header", null, {
             mergeRight: rowTotalValues.length - 1,
@@ -656,8 +681,8 @@ export function buildExportIR(
     headerRowCount++;
   }
 
-  // Value-label header row
-  if (hasMultipleValues) {
+  // Value-label header row (not needed when values_axis="rows" — labels are in row headers)
+  if (hasMultipleValues && !valuesOnRows) {
     const row: ExportCell[] = [];
     for (let d = 0; d < numRowDimCols; d++) {
       row.push(cell("", "header"));
@@ -679,6 +704,8 @@ export function buildExportIR(
   // No column dimensions: single header row
   if (colDims.length === 0) {
     const row: ExportCell[] = [];
+    // "Values" column is always first when values are on the row axis.
+    if (valuesOnRows) row.push(cell("Values", "header"));
     if (hierarchyMode) {
       row.push(
         cell(
@@ -696,6 +723,7 @@ export function buildExportIR(
         ),
       );
     } else {
+      // Emit one named header per actual row dimension (same count as data rows).
       for (let d = 0; d < rowDims.length; d++) {
         row.push(
           cell(
@@ -709,8 +737,13 @@ export function buildExportIR(
           ),
         );
       }
+      // When there are no row dims and not valuesOnRows, add blank placeholder.
+      if (rowDims.length === 0 && !valuesOnRows) row.push(cell("", "header"));
     }
-    if (hasMultipleValues) {
+    // Single numeric column header ("Value") — "Values" label was already emitted above.
+    if (valuesOnRows) {
+      row.push(cell("Value", "header")); // single numeric data column
+    } else if (hasMultipleValues) {
       for (const val of values) {
         row.push(cell(getRenderedValueLabel(config, val), "header"));
       }
@@ -766,18 +799,45 @@ export function buildExportIR(
         columnTypes,
         adaptiveDateGrains,
       );
+      // For values_axis="rows" + hierarchy, "Values" column is first (col 0)
+      // and the hierarchy row header comes second (col 1), matching the renderer.
+      if (valuesOnRows) {
+        const encodedVf = getValueFieldForRowKey(groupedRow.key);
+        const rowValField = encodedVf ?? values[0] ?? "";
+        const cellKind =
+          groupedRow.type === "subtotal"
+            ? ("subtotal" as const)
+            : ("data" as const);
+        row.push(cell(getRenderedValueLabel(config, rowValField), cellKind));
+      }
       row.push(cell(labelInfo.display, labelInfo.kind, labelInfo.raw));
     }
 
     if (groupedRow.type === "subtotal") {
+      // When values_axis="rows", the key has an encoded __vf__ segment; strip it.
+      const subtotalEncodedField = valuesOnRows
+        ? getValueFieldForRowKey(groupedRow.key)
+        : null;
+      const dimSubtotalKey =
+        subtotalEncodedField !== null
+          ? groupedRow.key.slice(0, -1)
+          : groupedRow.key;
+      const subtotalValField = subtotalEncodedField ?? values[0] ?? "";
       if (!hierarchyMode) {
-        for (let d = 0; d < numRowDimCols; d++) {
-          if (d < groupedRow.key.length) {
-            const sk = groupedRow.key[d];
+        // "Values" column (value-field label) is always first, matching the renderer.
+        if (valuesOnRows) {
+          row.push(
+            cell(getRenderedValueLabel(config, subtotalValField), "subtotal"),
+          );
+        }
+        const dimCols = numRowDimCols - (valuesOnRows ? 1 : 0);
+        for (let d = 0; d < dimCols; d++) {
+          if (d < dimSubtotalKey.length) {
+            const sk = dimSubtotalKey[d];
             const sdn = rowDims[d] ?? "";
             const sdisplay = sk ? pivotData.formatDimLabel(sdn, sk) : "";
             row.push(cell(sdisplay, "subtotal"));
-          } else if (d === groupedRow.key.length) {
+          } else if (d === dimSubtotalKey.length) {
             row.push(cell("Subtotal", "subtotal"));
           } else {
             row.push(cell("", "subtotal"));
@@ -785,9 +845,10 @@ export function buildExportIR(
         }
       }
       for (const colKey of colKeys) {
-        for (const valField of values) {
+        const subtotalIterValues = valuesOnRows ? [subtotalValField] : values;
+        for (const valField of subtotalIterValues) {
           const agg = pivotData.getSubtotalAggregator(
-            groupedRow.key,
+            dimSubtotalKey,
             colKey,
             valField,
           );
@@ -803,7 +864,7 @@ export function buildExportIR(
             agg,
             comparisonMode
               ? pivotData.getSubtotalComparisonValue(
-                  groupedRow.key,
+                  dimSubtotalKey,
                   colKey,
                   valField,
                   comparisonMode,
@@ -811,7 +872,7 @@ export function buildExportIR(
               : undefined,
             {
               row: pivotData
-                .getSubtotalAggregator(groupedRow.key, [], valField)
+                .getSubtotalAggregator(dimSubtotalKey, [], valField)
                 .value(),
               col: pivotData.getColTotal(colKey, valField).value(),
             },
@@ -824,14 +885,19 @@ export function buildExportIR(
         }
       }
       if (includeVisibleRowTotals) {
-        for (const valField of rowTotalValues) {
+        const subtotalRowTotalValues = valuesOnRows
+          ? [subtotalValField]
+          : rowTotalValues;
+        for (const valField of subtotalRowTotalValues) {
           const agg = pivotData.getSubtotalAggregator(
-            groupedRow.key,
+            dimSubtotalKey,
             [],
             valField,
           );
           const rawValue = agg.value();
-          const comparisonMode = getPeriodComparisonMode(config, valField);
+          const comparisonMode = valuesOnRows
+            ? undefined
+            : getPeriodComparisonMode(config, valField);
           const fmt = formatExportTotalValue(
             rawValue,
             valField,
@@ -842,7 +908,7 @@ export function buildExportIR(
             agg,
             comparisonMode
               ? pivotData.getSubtotalComparisonValue(
-                  groupedRow.key,
+                  dimSubtotalKey,
                   [],
                   valField,
                   comparisonMode,
@@ -910,9 +976,21 @@ export function buildExportIR(
       }
     } else {
       const rowKey = groupedRow.key;
+      // When values_axis="rows", strip the trailing __vf__ segment for lookups.
+      const dataEncodedField = valuesOnRows
+        ? getValueFieldForRowKey(rowKey)
+        : null;
+      const dimRowKey =
+        dataEncodedField !== null ? rowKey.slice(0, -1) : rowKey;
+      const dataValField = dataEncodedField ?? values[0] ?? "";
       if (!hierarchyMode) {
-        for (let d = 0; d < numRowDimCols; d++) {
-          const dimKey = rowKey[d] ?? "";
+        // "Values" column (value-field label) is always first, matching the renderer.
+        if (valuesOnRows) {
+          row.push(cell(getRenderedValueLabel(config, dataValField), "data"));
+        }
+        const dimCols = numRowDimCols - (valuesOnRows ? 1 : 0);
+        for (let d = 0; d < dimCols; d++) {
+          const dimKey = dimRowKey[d] ?? "";
           const dimName = rowDims[d] ?? "";
           const display = dimKey
             ? pivotData.formatDimLabel(dimName, dimKey)
@@ -947,15 +1025,16 @@ export function buildExportIR(
         }
       }
       for (const colKey of colKeys) {
-        for (const valField of values) {
-          const agg = pivotData.getAggregator(rowKey, colKey, valField);
+        const dataIterValues = valuesOnRows ? [dataValField] : values;
+        for (const valField of dataIterValues) {
+          const agg = pivotData.getAggregator(dimRowKey, colKey, valField);
           const rawValue = agg.value();
           const fmt = formatExportValue(
             rawValue,
             valField,
             config,
             pivotData,
-            rowKey,
+            dimRowKey,
             colKey,
             mode,
           );
@@ -967,10 +1046,15 @@ export function buildExportIR(
         }
       }
       if (includeVisibleRowTotals) {
-        for (const valField of rowTotalValues) {
-          const agg = pivotData.getRowTotal(rowKey, valField);
+        const dataRowTotalValues = valuesOnRows
+          ? [dataValField]
+          : rowTotalValues;
+        for (const valField of dataRowTotalValues) {
+          const agg = pivotData.getRowTotal(dimRowKey, valField);
           const rawValue = agg.value();
-          const comparisonMode = getPeriodComparisonMode(config, valField);
+          const comparisonMode = valuesOnRows
+            ? undefined
+            : getPeriodComparisonMode(config, valField);
           const fmt = formatExportTotalValue(
             rawValue,
             valField,
@@ -981,7 +1065,7 @@ export function buildExportIR(
             agg,
             comparisonMode
               ? pivotData.getRowTotalComparisonValue(
-                  rowKey,
+                  dimRowKey,
                   valField,
                   comparisonMode,
                 )
@@ -1000,82 +1084,118 @@ export function buildExportIR(
 
   // --- Column totals row ---
   if (includeColTotals) {
-    const row: ExportCell[] = [];
-    row.push(cell("Total", "col-total"));
-    for (let d = 1; d < numRowDimCols; d++) {
-      row.push(cell("", "col-total"));
-    }
-    for (const colKey of colKeys) {
-      for (const valField of values) {
-        if (!showTotalForMeasure(config, valField, "col")) {
+    // For values_axis="rows", emit one totals row per value field.
+    const totalRowsValueFields = valuesOnRows ? values : [null as null];
+    for (const [
+      totalRowIdx,
+      totalValFieldOrNull,
+    ] of totalRowsValueFields.entries()) {
+      const isFirstTotalRow = totalRowIdx === 0;
+      const row: ExportCell[] = [];
+      // Leading cells mirror the data-row column order: Values first, then dims.
+      if (valuesOnRows) {
+        // col 0: value-field label (always present)
+        row.push(
+          cell(
+            getRenderedValueLabel(
+              config,
+              totalValFieldOrNull ?? values[0] ?? "",
+            ),
+            "col-total",
+          ),
+        );
+        // col 1..n: "Total" on first total row, blank on subsequent rows
+        for (let d = 1; d < numRowDimCols; d++) {
+          row.push(
+            cell(d === 1 && isFirstTotalRow ? "Total" : "", "col-total"),
+          );
+        }
+      } else {
+        row.push(cell(isFirstTotalRow ? "Total" : "", "col-total"));
+        for (let d = 1; d < numRowDimCols; d++) {
           row.push(cell("", "col-total"));
-        } else {
-          const agg = pivotData.getColTotal(colKey, valField);
-          const rawValue = agg.value();
-          const comparisonMode = getPeriodComparisonMode(config, valField);
-          const fmt = formatExportTotalValue(
-            rawValue,
-            valField,
-            config,
-            pivotData,
-            mode,
-            "col",
-            agg,
-            comparisonMode
-              ? pivotData.getColTotalComparisonValue(
-                  colKey,
-                  valField,
-                  comparisonMode,
-                )
-              : undefined,
-          );
-          row.push(
-            cell(fmt.display, "col-total", fmt.raw, {
-              numberFormat: fmt.numberFormat,
-            }),
-          );
         }
       }
-    }
-    if (includeVisibleRowTotals) {
-      for (const valField of rowTotalValues) {
-        if (!showTotalForMeasure(config, valField, "grand")) {
-          row.push(cell("", "grand-total"));
-        } else {
-          const agg = pivotData.getGrandTotal(valField);
-          const rawValue = agg.value();
-          const fmt = formatExportTotalValue(
-            rawValue,
-            valField,
-            config,
-            pivotData,
-            mode,
-            "grand",
-            agg,
-            undefined,
-          );
-          row.push(
-            cell(fmt.display, "grand-total", fmt.raw, {
-              numberFormat: fmt.numberFormat,
-            }),
-          );
+      const totalIterValues = valuesOnRows ? [totalValFieldOrNull!] : values;
+      for (const colKey of colKeys) {
+        for (const valField of totalIterValues) {
+          if (!showTotalForMeasure(config, valField, "col")) {
+            row.push(cell("", "col-total"));
+          } else {
+            const agg = pivotData.getColTotal(colKey, valField);
+            const rawValue = agg.value();
+            const comparisonMode = getPeriodComparisonMode(config, valField);
+            const fmt = formatExportTotalValue(
+              rawValue,
+              valField,
+              config,
+              pivotData,
+              mode,
+              "col",
+              agg,
+              comparisonMode
+                ? pivotData.getColTotalComparisonValue(
+                    colKey,
+                    valField,
+                    comparisonMode,
+                  )
+                : undefined,
+            );
+            row.push(
+              cell(fmt.display, "col-total", fmt.raw, {
+                numberFormat: fmt.numberFormat,
+              }),
+            );
+          }
+        }
+      } // end colKey loop
+      if (includeVisibleRowTotals) {
+        const totalGrandValues = valuesOnRows
+          ? [totalValFieldOrNull!]
+          : rowTotalValues;
+        for (const valField of totalGrandValues) {
+          if (!showTotalForMeasure(config, valField, "grand")) {
+            row.push(cell("", "grand-total"));
+          } else {
+            const agg = pivotData.getGrandTotal(valField);
+            const rawValue = agg.value();
+            const fmt = formatExportTotalValue(
+              rawValue,
+              valField,
+              config,
+              pivotData,
+              mode,
+              "grand",
+              agg,
+              undefined,
+            );
+            row.push(
+              cell(fmt.display, "grand-total", fmt.raw, {
+                numberFormat: fmt.numberFormat,
+              }),
+            );
+          }
         }
       }
-    }
-    grid.push(row);
+      grid.push(row);
+    } // end totalValFieldOrNull loop
   }
 
   // --- Row dimension merging (mergeDown) ---
   if (!hierarchyMode && !config.repeat_row_labels && rowDims.length > 0) {
+    // When values_axis="rows", the "Values" label occupies column 0 and row
+    // dimensions start at column 1. Offset all dim-column accesses accordingly.
+    const dimColOffset = valuesOnRows ? 1 : 0;
     const dataStartRow = headerRowCount;
     for (let d = 0; d < rowDims.length; d++) {
+      const col = dimColOffset + d;
       let spanStart = dataStartRow;
       for (let r = dataStartRow + 1; r <= grid.length; r++) {
         const atEnd = r === grid.length;
-        const curVal = atEnd ? null : grid[r][d]?.display;
-        const startVal = grid[spanStart][d]?.display;
-        const curKind = atEnd ? null : grid[r][d]?.kind;
-        const startKind = grid[spanStart][d]?.kind;
+        const curVal = atEnd ? null : grid[r]![col]?.display;
+        const startVal = grid[spanStart]![col]?.display;
+        const curKind = atEnd ? null : grid[r]![col]?.kind;
+        const startKind = grid[spanStart]![col]?.kind;
         if (
           atEnd ||
           curVal !== startVal ||
@@ -1085,7 +1205,7 @@ export function buildExportIR(
         ) {
           const spanLen = r - spanStart;
           if (spanLen > 1 && startKind === "data") {
-            grid[spanStart][d].mergeDown = spanLen - 1;
+            grid[spanStart]![col]!.mergeDown = spanLen - 1;
           }
           spanStart = r;
         }
@@ -1093,8 +1213,12 @@ export function buildExportIR(
     }
   }
 
-  // Build value field → column index mapping for conditional formatting
+  // Build value field → column index mapping for conditional formatting.
+  // With values_axis="rows", measures share the same data columns and differ
+  // by row — column-based per-field targeting is not meaningful, so we emit
+  // an empty column list for every field to avoid misapplied formatting.
   const valueFieldCols: ValueFieldColumns[] = values.map((field, vIdx) => {
+    if (valuesOnRows) return { field, columns: [] };
     const cols: number[] = [];
     for (let ck = 0; ck < colKeys.length; ck++) {
       cols.push(numRowDimCols + ck * colsPerKey + vIdx);

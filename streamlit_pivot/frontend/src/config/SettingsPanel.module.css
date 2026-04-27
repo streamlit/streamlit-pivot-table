@@ -74,7 +74,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--st-text-color);
-  opacity: 0.5;
+  opacity: 0.8;
   margin-top: 6px;
   margin-bottom: 1px;
 }
@@ -436,7 +436,7 @@
 }
 
 .segmentedOption {
-  padding: 4px 10px;
+  padding: 2px 8px;
   border: none;
   border-radius: var(--st-base-radius);
   background: transparent;
@@ -462,6 +462,38 @@
 .segmentedOption:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 45%, transparent);
+}
+
+/* --- Layout section --- */
+
+.layoutGrid {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.layoutRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.segmentedControlDisabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.segmentedControlDisabled .segmentedOption {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.layoutIncompatible {
+  font-size: 10px;
+  opacity: 0.55;
+  font-style: italic;
 }
 
 /* --- Display section --- */

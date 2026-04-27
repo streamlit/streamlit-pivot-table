@@ -39,6 +39,7 @@ import {
   type SortConfig,
   type TopNFilter,
   type ValueFilter,
+  getRenderedValueFields,
 } from "./types";
 import {
   compileFormula,
@@ -64,6 +65,46 @@ import {
 } from "./dateGrouping";
 
 export type DataRecord = Record<string, unknown>;
+
+// ---------------------------------------------------------------------------
+// Values-axis row-key encoding helpers
+// ---------------------------------------------------------------------------
+
+/** The reserved prefix used to encode a value field as a row-key pseudo-segment. */
+const VALUES_AXIS_PREFIX = "__vf__:";
+
+/**
+ * Encode a value field id as the trailing pseudo-segment of a values-on-rows row key.
+ * e.g. encodeValueFieldSegment("revenue") === "__vf__:revenue"
+ */
+export function encodeValueFieldSegment(fieldId: string): string {
+  return VALUES_AXIS_PREFIX + fieldId;
+}
+
+/**
+ * Decode a value field id from a row-key pseudo-segment.
+ * Returns the field id string when the segment starts with the reserved prefix,
+ * null otherwise.
+ */
+export function decodeValueFieldSegment(segment: string): string | null {
+  return segment.startsWith(VALUES_AXIS_PREFIX)
+    ? segment.slice(VALUES_AXIS_PREFIX.length)
+    : null;
+}
+
+/**
+ * Extract the encoded value field from a values-on-rows row key.
+ * Works at any depth: leaf `["East","Widget","__vf__:revenue"]`, subtotal
+ * `["East","__vf__:revenue"]`, and grand-total `["__vf__:revenue"]`.
+ * Returns null when the last segment is not an encoded value field.
+ * No dependency on config — callers must guard with `config.values_axis === "rows"`.
+ */
+export function getValueFieldForRowKey(
+  rowKey: readonly string[],
+): string | null {
+  if (rowKey.length === 0) return null;
+  return decodeValueFieldSegment(rowKey[rowKey.length - 1]);
+}
 
 /** Represents a row in the grouped output (data row or subtotal row). */
 export interface GroupedRow {
@@ -391,6 +432,9 @@ export class PivotData {
   private _subtotalAggs: Map<string, Aggregator> | null = null;
   private _subtotalSumAggs: Map<string, Aggregator> | null = null;
 
+  /** Sorted, filtered dimension-only row keys (no values-axis encoding). */
+  private _sortedDimRowKeys: string[][] | null = null;
+  /** Public-facing expanded row keys (with __vf__ encoding when values_axis="rows"). */
   private _sortedRowKeys: string[][] | null = null;
   private _sortedColKeys: string[][] | null = null;
 
@@ -1194,8 +1238,13 @@ export class PivotData {
     return (colKey) => this.getColTotal(colKey, valField).value();
   }
 
-  getRowKeys(): string[][] {
-    if (!this._sortedRowKeys) {
+  /**
+   * Internal: sorted + filtered dimension-only row keys (no values-axis encoding).
+   * Used by getGroupedRowKeys() for grouping/collapsing logic, and by the public
+   * getRowKeys() which may expand with value field segments on top.
+   */
+  private _getDimRowKeys(): string[][] {
+    if (!this._sortedDimRowKeys) {
       const rowSortConfigs = this._normalizeSortConfigs(this._config.row_sort);
       const cmp = this._buildChainedComparator(
         rowSortConfigs,
@@ -1228,7 +1277,22 @@ export class PivotData {
           "rows",
         );
 
-      this._sortedRowKeys = sorted;
+      this._sortedDimRowKeys = sorted;
+    }
+    return this._sortedDimRowKeys;
+  }
+
+  getRowKeys(): string[][] {
+    if (!this._sortedRowKeys) {
+      const dimKeys = this._getDimRowKeys();
+      if (this._config.values_axis !== "rows") {
+        this._sortedRowKeys = dimKeys;
+      } else {
+        const valueFields = getRenderedValueFields(this._config);
+        this._sortedRowKeys = dimKeys.flatMap((key) =>
+          valueFields.map((vf) => [...key, encodeValueFieldSegment(vf)]),
+        );
+      }
     }
     return this._sortedRowKeys;
   }
@@ -1561,12 +1625,10 @@ export class PivotData {
   /**
    * Return the sorted leaf row keys in current display order (after sort, excluding total rows).
    *
-   * This is an alias for `getRowKeys()` and is used by the showValuesAs transform layer
-   * (running total, rank) to iterate rows in the same order they appear in the table.
-   *
-   * NOTE: When `values_axis="rows"` is introduced in Commit 5, this method must be updated
-   * to return `__vf__:`-encoded leaf keys so that running total / rank transforms look up
-   * the correct encoded row keys. Coordinate this update in Commit 5.
+   * When `values_axis="rows"`, returns `[...dimSegments, "__vf__:<fieldId>"]` encoded keys
+   * so that running total / rank transforms operate on the same encoded keys that appear in
+   * the table. Callers responsible for aggregate lookups must strip via `getValueFieldForRowKey`
+   * and `rowKey.slice(0, -1)` before calling engine aggregate methods.
    */
   getSortedLeafRowKeys(): string[][] {
     return this.getRowKeys();
@@ -1738,7 +1800,9 @@ export class PivotData {
    */
   getGroupedRowKeys(ignoreCollapsed?: boolean): GroupedRow[] {
     const rowDims = this._config.rows;
-    const rowKeys = this.getRowKeys();
+    // Use dimension-only keys for grouping/collapsing logic; value-field expansion
+    // happens at the END of this method so subtotal prefix keys are computed correctly.
+    const rowKeys = this._getDimRowKeys();
 
     let collapsed: Set<string>;
     if (ignoreCollapsed) {
@@ -1765,11 +1829,21 @@ export class PivotData {
         ? true
         : this._config.show_subtotals;
     if (rowDims.length < 2 || !subtotalsVal) {
-      return rowKeys.map((key) => ({
+      const plain = rowKeys.map((key) => ({
         type: "data" as const,
         key,
         level: rowDims.length - 1,
       }));
+      if (this._config.values_axis === "rows") {
+        const valueFields = getRenderedValueFields(this._config);
+        return plain.flatMap((entry) =>
+          valueFields.map((vf) => ({
+            ...entry,
+            key: [...entry.key, encodeValueFieldSegment(vf)],
+          })),
+        );
+      }
+      return plain;
     }
 
     const subtotalEnabledAtLevel = (lvl: number): boolean => {
@@ -1882,6 +1956,17 @@ export class PivotData {
       }
     }
 
+    // Expand with value field pseudo-segments for values_axis="rows".
+    if (this._config.values_axis === "rows") {
+      const valueFields = getRenderedValueFields(this._config);
+      return result.flatMap((entry) =>
+        valueFields.map((vf) => ({
+          ...entry,
+          key: [...entry.key, encodeValueFieldSegment(vf)],
+        })),
+      );
+    }
+
     return result;
   }
 
@@ -1891,7 +1976,8 @@ export class PivotData {
    */
   getHierarchyRowKeys(ignoreCollapsed?: boolean): GroupedRow[] {
     const rowDims = this._config.rows;
-    const rowKeys = this.getRowKeys();
+    // Use dimension-only keys for grouping; expand at end like getGroupedRowKeys.
+    const rowKeys = this._getDimRowKeys();
 
     let collapsed: Set<string>;
     if (ignoreCollapsed) {
@@ -1952,6 +2038,18 @@ export class PivotData {
     };
 
     visit(0, rowKeys.length, 0, []);
+
+    // Expand with value field pseudo-segments for values_axis="rows".
+    if (this._config.values_axis === "rows") {
+      const valueFields = getRenderedValueFields(this._config);
+      return result.flatMap((entry) =>
+        valueFields.map((vf) => ({
+          ...entry,
+          key: [...entry.key, encodeValueFieldSegment(vf)],
+        })),
+      );
+    }
+
     return result;
   }
 

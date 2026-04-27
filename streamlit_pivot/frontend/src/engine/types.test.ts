@@ -1180,6 +1180,29 @@ describe("date hierarchy helpers", () => {
     );
   });
 
+  it("accepts values_axis='rows' with row_layout='hierarchy'", () => {
+    // hierarchy + values-on-rows is a supported combination — the frontend
+    // renders a 'Values' header column alongside the hierarchy corner cell,
+    // and each data/subtotal row expands into one sub-row per measure.
+    const config = makeConfig({
+      rows: ["Region"],
+      values: ["Revenue", "Units"],
+      values_axis: "rows",
+      row_layout: "hierarchy",
+    });
+    expect(() => validatePivotConfigRuntime(config)).not.toThrow();
+  });
+
+  it("accepts values_axis='rows' with row_layout='table'", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      values: ["Revenue", "Units"],
+      values_axis: "rows",
+      row_layout: "table",
+    });
+    expect(() => validatePivotConfigRuntime(config)).not.toThrow();
+  });
+
   it("accepts valid analytical filters without throwing", () => {
     const config = makeConfig({
       rows: ["Region"],

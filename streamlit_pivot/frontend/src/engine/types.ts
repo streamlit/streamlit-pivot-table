@@ -233,6 +233,14 @@ export interface PivotConfigV1 {
    */
   value_filters?: ValueFilter[];
   /**
+   * 0.5.0: Which axis the Values pseudo-dimension is placed on.
+   * "columns" (default): value fields appear as the innermost column header row.
+   * "rows": value fields become a virtual leaf row dimension; each value field
+   *   occupies its own row and dimension members become column headers.
+   * Incompatible with temporal hierarchy and period comparison show_values_as modes.
+   */
+  values_axis?: "columns" | "rows";
+  /**
    * Per-field display-label override. Populated from column_config.label.
    * Display-only: does NOT rewrite canonical field ids in rows/columns/values.
    * Empty or whitespace-only values fall back to the field id via
@@ -438,6 +446,16 @@ export function pruneSortConfigByField(
     return kept.length === 1 ? kept[0] : kept;
   }
   return matches(sc) ? undefined : sc;
+}
+
+/**
+ * Returns true when value fields are placed on the row axis.
+ * Use this guard everywhere that row-key handling differs between the two axis modes.
+ */
+export function isValuesOnRows(
+  config: Pick<PivotConfigV1, "values_axis">,
+): boolean {
+  return config.values_axis === "rows";
 }
 
 /** Type guard: is the value a legacy string sort direction? */
@@ -1206,6 +1224,28 @@ export function validatePivotConfigRuntime(
     }
   }
 
+  // values_axis="rows" cross-feature checks (TypeScript-side guard for imported configs).
+  if (config.values_axis === "rows") {
+    const hasPeriodModeForValuesAxis = Object.values(
+      config.show_values_as ?? {},
+    ).some((mode) => isPeriodComparisonMode(mode));
+    if (hasPeriodModeForValuesAxis) {
+      throw new Error(
+        "values_axis='rows' is incompatible with period comparison show_values_as modes",
+      );
+    }
+    const hasActiveTemporalAxis = hasGroupedTemporalComparisonAxis(
+      config,
+      columnTypes,
+      adaptiveDateGrains,
+    );
+    if (hasActiveTemporalAxis) {
+      throw new Error(
+        "values_axis='rows' is incompatible with temporal hierarchy on rows or columns",
+      );
+    }
+  }
+
   return config;
 }
 
@@ -1750,6 +1790,15 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
         );
     }
     result.value_filters = filters as unknown as ValueFilter[];
+  }
+
+  if (o.values_axis !== undefined) {
+    if (o.values_axis !== "columns" && o.values_axis !== "rows") {
+      throw new Error(
+        `'values_axis' must be "columns" or "rows", got ${JSON.stringify(o.values_axis)}`,
+      );
+    }
+    result.values_axis = o.values_axis;
   }
 
   return result;

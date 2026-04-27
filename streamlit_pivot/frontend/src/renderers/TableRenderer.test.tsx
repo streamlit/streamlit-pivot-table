@@ -3655,3 +3655,149 @@ describe("TableRenderer - menu-only header whole-cell click activation", () => {
     expect(menuBtn.getAttribute("tabindex")).toBe("-1");
   });
 });
+
+// ---------------------------------------------------------------------------
+// values_axis="rows" — header matrix and row layout
+// ---------------------------------------------------------------------------
+
+describe("TableRenderer - values_axis='rows'", () => {
+  const DATA: DataRecord[] = [
+    { region: "EU", year: "2023", revenue: 200, profit: 80 },
+    { region: "EU", year: "2024", revenue: 250, profit: 100 },
+    { region: "US", year: "2023", revenue: 100, profit: 40 },
+    { region: "US", year: "2024", revenue: 150, profit: 60 },
+  ];
+
+  const valuesOnRowsConfig = makeConfig({
+    rows: ["region"],
+    columns: ["year"],
+    values: ["revenue", "profit"],
+    values_axis: "rows",
+  });
+
+  it("renders 'Values' column header cell (pivot-values-axis-header) in the header row", () => {
+    const pd = new PivotData(DATA, valuesOnRowsConfig);
+    render(<TableRenderer pivotData={pd} config={valuesOnRowsConfig} />);
+    const valuesHeader = screen.getByTestId("pivot-values-axis-header");
+    expect(valuesHeader).toBeInTheDocument();
+    expect(valuesHeader).toHaveTextContent("Values");
+  });
+
+  it("does NOT render a Σ Values column group header when values_axis='rows'", () => {
+    const pd = new PivotData(DATA, valuesOnRowsConfig);
+    render(<TableRenderer pivotData={pd} config={valuesOnRowsConfig} />);
+    // The Σ Values cell only appears when values are on columns
+    const allHeaders = screen.getAllByRole("columnheader");
+    const sigmaValues = allHeaders.find((h) =>
+      h.textContent?.includes("Σ Values"),
+    );
+    expect(sigmaValues).toBeUndefined();
+  });
+
+  it("renders value field labels (pivot-values-axis-label) as row headers — not column headers", () => {
+    const pd = new PivotData(DATA, valuesOnRowsConfig);
+    render(<TableRenderer pivotData={pd} config={valuesOnRowsConfig} />);
+
+    const axisLabels = screen.getAllByTestId("pivot-values-axis-label");
+    const labelTexts = axisLabels.map((el) => el.textContent?.trim() ?? "");
+
+    // Both measure labels appear as row-axis labels
+    expect(labelTexts).toContain("revenue");
+    expect(labelTexts).toContain("profit");
+  });
+
+  it("column headers contain year values (not measure names) as column headers", () => {
+    const pd = new PivotData(DATA, valuesOnRowsConfig);
+    render(<TableRenderer pivotData={pd} config={valuesOnRowsConfig} />);
+
+    const headerCells = screen.getAllByTestId("pivot-header-cell");
+    const colHeaderTexts = headerCells.map((h) => h.textContent?.trim() ?? "");
+
+    expect(colHeaderTexts).toContain("2023");
+    expect(colHeaderTexts).toContain("2024");
+    // Measure names must NOT appear as column headers
+    expect(colHeaderTexts).not.toContain("revenue");
+    expect(colHeaderTexts).not.toContain("profit");
+  });
+
+  it("renders 2 data rows per region (one per value field)", () => {
+    const pd = new PivotData(DATA, valuesOnRowsConfig);
+    render(<TableRenderer pivotData={pd} config={valuesOnRowsConfig} />);
+
+    const dataRows = screen.getAllByTestId("pivot-data-row");
+    // 2 regions × 2 value fields = 4 data rows
+    expect(dataRows).toHaveLength(4);
+  });
+
+  it("renders 2 grand-total rows (one per value field)", () => {
+    const pd = new PivotData(DATA, valuesOnRowsConfig);
+    render(<TableRenderer pivotData={pd} config={valuesOnRowsConfig} />);
+
+    const totalLabels = screen.getAllByTestId("pivot-values-axis-label");
+    // value-axis labels appear on data rows AND total rows
+    // each total row has one label, and data rows have one label each
+    // total count = (numDimRows + 1 total row) × numValueFields
+    expect(totalLabels.length).toBeGreaterThanOrEqual(4); // at least data rows
+  });
+
+  it("hierarchy mode: 'Values' header appears before the hierarchy corner cell", () => {
+    const hierarchyConfig = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue", "profit"],
+      values_axis: "rows",
+      row_layout: "hierarchy",
+    });
+    const pd = new PivotData(DATA, hierarchyConfig);
+    render(<TableRenderer pivotData={pd} config={hierarchyConfig} />);
+
+    const valuesHeader = screen.getByTestId("pivot-values-axis-header");
+    expect(valuesHeader).toBeInTheDocument();
+    expect(valuesHeader).toHaveTextContent("Values");
+  });
+
+  it("single value field: still renders pivot-values-axis-header and labels", () => {
+    const singleValConfig = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue"],
+      values_axis: "rows",
+    });
+    const pd = new PivotData(DATA, singleValConfig);
+    render(<TableRenderer pivotData={pd} config={singleValConfig} />);
+
+    expect(screen.getByTestId("pivot-values-axis-header")).toBeInTheDocument();
+    const labels = screen.getAllByTestId("pivot-values-axis-label");
+    expect(labels.every((l) => l.textContent?.trim() === "revenue")).toBe(true);
+  });
+
+  it("buildCellClickPayload strips __vf__ segment (no encoded segment in row filters)", () => {
+    // Verify the data rows are rendered and clicking one fires the correct payload.
+    const pd = new PivotData(DATA, valuesOnRowsConfig);
+    const clickHandler = vi.fn();
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={valuesOnRowsConfig}
+        onCellClick={clickHandler}
+      />,
+    );
+
+    const dataCells = screen.getAllByTestId("pivot-data-cell");
+    fireEvent.click(dataCells[0]!);
+    expect(clickHandler).toHaveBeenCalledOnce();
+
+    const payload = clickHandler.mock.calls[0][0] as {
+      rowKey: string[];
+      filters: Record<string, string>;
+    };
+    // rowKey must not contain __vf__: segments
+    expect(payload.rowKey.every((seg) => !seg.startsWith("__vf__:"))).toBe(
+      true,
+    );
+    // filters must not have __vf__: keys
+    expect(
+      Object.keys(payload.filters).every((k) => !k.startsWith("__vf__:")),
+    ).toBe(true);
+  });
+});

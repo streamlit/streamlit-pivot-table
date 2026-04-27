@@ -783,6 +783,64 @@ describe("buildExportIR", () => {
     }
   });
 
+  it("mergeDown targets dimension columns (not the Values column) when values_axis='rows'", () => {
+    // With values_axis="rows" the Values label is at col 0; dims start at col 1.
+    // mergeDown should be set on col 1 (dim "a"), not col 0 (the Values label).
+    const data: DataRecord[] = [
+      { a: "X", b: "1", val: 10 },
+      { a: "X", b: "2", val: 20 },
+      { a: "Y", b: "3", val: 30 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b"],
+      columns: [],
+      values: ["val"],
+      values_axis: "rows",
+      repeat_row_labels: false,
+    });
+    const pd = new PivotData(data, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    // col 0 should always be the value-field label (never has mergeDown).
+    for (const row of ir.cells.filter((r) => r[0]?.kind === "data")) {
+      expect(row[0]?.mergeDown).toBeUndefined();
+    }
+    // col 1 is the first dim ("a") — the "X" group spans 2 rows.
+    const xDataRows = ir.cells.filter(
+      (row) => row[1]?.display === "X" && row[1]?.kind === "data",
+    );
+    expect(xDataRows.length).toBeGreaterThan(0);
+    const xMergedRow = xDataRows.find((row) => row[1]?.mergeDown !== undefined);
+    expect(xMergedRow).toBeDefined();
+    expect(xMergedRow![1]?.mergeDown).toBe(1); // X spans 2 data rows
+  });
+
+  it("mergeDown works correctly with multiple row dims + values_axis='rows'", () => {
+    const data: DataRecord[] = [
+      { a: "X", b: "P", val: 1, cnt: 10 },
+      { a: "X", b: "P", val: 2, cnt: 20 },
+      { a: "X", b: "Q", val: 3, cnt: 30 },
+      { a: "Y", b: "P", val: 4, cnt: 40 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b"],
+      columns: [],
+      values: ["val", "cnt"],
+      values_axis: "rows",
+      repeat_row_labels: false,
+    });
+    const pd = new PivotData(data, config);
+    const ir = buildExportIR(pd, config, "raw");
+
+    // col 0 = value label — never has mergeDown
+    for (const row of ir.cells.filter((r) => r[0]?.kind === "data")) {
+      expect(row[0]?.mergeDown).toBeUndefined();
+    }
+    // All grid rows should be the same width (no skipped dim column)
+    const widths = ir.cells.map((r) => r.length);
+    expect(new Set(widths).size).toBe(1);
+  });
+
   it("exports hierarchy layout as a single indented row dimension column", () => {
     const data: DataRecord[] = [
       { a: "X", b: "1", val: 10 },
@@ -930,6 +988,159 @@ describe("buildExportIR conditionalFormatting passthrough", () => {
 // ---------------------------------------------------------------------------
 // patternToExcelFormat
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// values_axis="rows" with rows=[] — normalized layout
+// ---------------------------------------------------------------------------
+
+describe("values_axis='rows' with rows=[]", () => {
+  // rows=[] means no row dimensions: only value labels appear on the row axis.
+  // Expected layout (colDims=["year"]):
+  //   Header:  | [year headers] (2 leading cells: "Values" and colDim span)
+  //   Data:    Revenue | <values per year>
+  //            profit  | <values per year>
+  //   Totals:  Revenue | <col totals per year>
+  //            profit  | <col totals per year>
+
+  function makeNoRowConfig(extra: Partial<PivotConfigV1> = {}): PivotConfigV1 {
+    return makeConfig({
+      rows: [],
+      columns: ["year"],
+      values: ["revenue", "profit"],
+      values_axis: "rows",
+      show_totals: true,
+      ...extra,
+    });
+  }
+
+  it("header row has exactly 1 leading 'Values' column plus col-dim headers", () => {
+    const config = makeNoRowConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    // Header row 0: blank-placeholder-free "Values" + col dim labels
+    expect(grid[0]![0]).toBe("Values");
+    // Col dim values follow (2023, 2024)
+    expect(grid[0]!.slice(1, 3)).toContain("2023");
+    expect(grid[0]!.slice(1, 3)).toContain("2024");
+    // No blank placeholder at position 0
+    expect(grid[0]![0]).not.toBe("");
+  });
+
+  it("each data row has exactly 1 leading value-label cell", () => {
+    const config = makeNoRowConfig();
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+    const dataRows = ir.cells.filter((r) => r[0]?.kind === "data");
+    expect(dataRows.length).toBeGreaterThan(0);
+    for (const row of dataRows) {
+      // col 0 = value-field label (header cell), rest are data cells
+      expect(row[0]?.kind).toBe("data");
+      // Leading cell display should be a recognised value label
+      expect(["revenue", "profit"]).toContain(row[0]?.display);
+    }
+  });
+
+  it("col-total rows are suppressed when rows=[] (showColumnTotals returns false by design)", () => {
+    // showColumnTotals() returns false when config.rows is empty, so no col-total
+    // rows appear. This is consistent behaviour across all layout modes.
+    const config = makeNoRowConfig({ show_totals: true });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+    const totalRows = ir.cells.filter((r) => r[0]?.kind === "col-total");
+    expect(totalRows.length).toBe(0);
+  });
+
+  it("col-total rows emit value-field label first (cell[0]) when rows is non-empty", () => {
+    // With rows=["region"] + valuesOnRows, numRowDimCols=2:
+    //   cell[0] = value-field label (the "Values" column — always first)
+    //   cell[1] = "Total" / "" (row-header label)
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue", "profit"],
+      values_axis: "rows",
+      show_totals: true,
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const ir = buildExportIR(pd, config, "raw");
+    const totalRows = ir.cells.filter((r) => r[0]?.kind === "col-total");
+    expect(totalRows.length).toBe(2); // one per value field
+    // cell[0] is the value label (Values column is now first)
+    const valueLabels = totalRows.map((r) => r[0]?.display);
+    expect(valueLabels).toContain("revenue");
+    expect(valueLabels).toContain("profit");
+    // cell[1] is the row-header label: "Total" on first row, "" on continuation
+    const dimLabels = totalRows.map((r) => r[1]?.display);
+    expect(dimLabels).toContain("Total");
+  });
+
+  it("all rows have the same column count (headers, data, row-totals aligned)", () => {
+    // rows=[] suppresses col-totals; row-totals are 1 cell per row (not per field)
+    const config = makeNoRowConfig({ show_totals: true });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    const widths = grid.map((r) => r.length);
+    expect(new Set(widths).size).toBe(1); // all rows same width
+  });
+
+  it("header emits Values before dim headers (Values first order)", () => {
+    // Renderer always puts Values first; export must match.
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue", "profit"],
+      values_axis: "rows",
+      show_totals: false,
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    // Header row: Values | region | 2023 | 2024
+    expect(grid[0]![0]).toBe("Values"); // col 0 = "Values"
+    expect(grid[0]![1]).toBe("region"); // col 1 = dim header
+    // Data rows: revenue | EU | 200 | ...   (value label first, then dim value)
+    const revenueRow = grid.find((r) => r[0] === "revenue");
+    expect(revenueRow).toBeDefined();
+    expect(["EU", "US"]).toContain(revenueRow![1]); // dim value at col 1
+  });
+
+  it("hierarchy + valuesOnRows export header matches renderer (Values before Rows)", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue", "profit"],
+      values_axis: "rows",
+      row_layout: "hierarchy",
+      show_totals: false,
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    // Header row: Values | region | 2023 | 2024
+    expect(grid[0]![0]).toBe("Values"); // col 0
+    expect(grid[0]![1]).toBe("region"); // col 1 (hierarchy dim label)
+    // Data rows: revenue | EU | 200 | ...
+    const revenueRow = grid.find((r) => r[0] === "revenue");
+    expect(revenueRow).toBeDefined();
+    expect(["EU", "US"]).toContain(revenueRow![1]);
+  });
+
+  it("no-column-dim variant: header is ['Values', 'Value'] with no blank placeholder", () => {
+    const config = makeConfig({
+      rows: [],
+      columns: [],
+      values: ["revenue", "profit"],
+      values_axis: "rows",
+      show_totals: false,
+    });
+    const pd = new PivotData(SAMPLE_DATA, config);
+    const grid = buildExportGrid(pd, config, "raw");
+    // Header: exactly ["Values", "Value"]
+    expect(grid[0]).toEqual(["Values", "Value"]);
+    // Data rows: [value_label, numeric_string]
+    const revenueRow = grid.find((r) => r[0] === "revenue");
+    expect(revenueRow).toBeDefined();
+    expect(revenueRow!).toHaveLength(2);
+  });
+});
 
 describe("patternToExcelFormat", () => {
   it("converts grouped currency", () => {

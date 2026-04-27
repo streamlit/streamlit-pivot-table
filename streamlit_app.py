@@ -957,6 +957,222 @@ section_sort_and_subtotals()
 
 
 # ---------------------------------------------------------------------------
+# Section 5e: Values Axis Placement (0.5.0)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("5e. Values Axis Placement (0.5.0)")
+
+
+@st.fragment
+def section_values_axis():
+    st.markdown(
+        """
+By default, multiple value fields appear as a **"Σ Values"** column-group in the
+column headers — each column slot is repeated once per measure. Setting
+`values_axis="rows"` moves measures onto the **row axis** instead: each
+dimension row is split into one sub-row per measure, and a **Values** header
+column labels each measure.
+
+This layout mirrors how financial statements (income statements, balance sheets)
+and accounting reports are typically presented — rows for line items, columns
+for time periods.
+
+| Feature | Parameter | Default |
+|---------|-----------|---------|
+| Place measures on rows | `values_axis="rows"` | `"columns"` |
+| Incompatible with | period comparison `show_values_as`, temporal hierarchies | — |
+
+**API parameter:** `values_axis`
+"""
+    )
+
+    import pandas as pd  # noqa: PLC0415
+
+    # --- Example 1: side-by-side comparison ---
+    st.markdown("##### Side-by-side: Values on Columns vs. Values on Rows")
+    st.caption(
+        "Both tables show the same data. On the left, Revenue and Units share "
+        "column slots (the default). On the right, each metric occupies its own row."
+    )
+
+    cmp_data = pd.DataFrame(
+        {
+            "Region": ["East", "East", "West", "West"],
+            "Category": ["Electronics", "Furniture", "Electronics", "Furniture"],
+            "Year": ["2023", "2024", "2023", "2024"],
+            "Revenue": [500, 700, 600, 800],
+            "Units": [10, 14, 12, 16],
+        }
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Values on Columns** (default)")
+        st_pivot_table(
+            cmp_data,
+            key="demo_values_axis_cols",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue", "Units"],
+            show_totals=True,
+            number_format={"Revenue": "$,.0f"},
+        )
+    with col2:
+        st.markdown("**Values on Rows**")
+        st_pivot_table(
+            cmp_data,
+            key="demo_values_axis_rows",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue", "Units"],
+            values_axis="rows",
+            show_totals=True,
+            number_format={"Revenue": "$,.0f"},
+        )
+
+    # --- Example 2: Income Statement layout ---
+    st.markdown("##### Income Statement Layout")
+    st.caption(
+        "A classic financial-report layout: line items (Revenue, COGS, Gross Profit, "
+        "OpEx, Operating Income) as rows, quarters as columns."
+    )
+
+    income_data = pd.DataFrame(
+        {
+            "Account": [
+                "Revenue",
+                "Revenue",
+                "Revenue",
+                "Revenue",
+                "COGS",
+                "COGS",
+                "COGS",
+                "COGS",
+                "Gross Profit",
+                "Gross Profit",
+                "Gross Profit",
+                "Gross Profit",
+                "OpEx",
+                "OpEx",
+                "OpEx",
+                "OpEx",
+                "Operating Income",
+                "Operating Income",
+                "Operating Income",
+                "Operating Income",
+            ],
+            "Quarter": ["Q1", "Q2", "Q3", "Q4"] * 5,
+            "Amount": [
+                1_200_000,
+                1_350_000,
+                1_500_000,
+                1_650_000,  # Revenue
+                720_000,
+                810_000,
+                900_000,
+                990_000,  # COGS
+                480_000,
+                540_000,
+                600_000,
+                660_000,  # Gross Profit
+                200_000,
+                210_000,
+                220_000,
+                230_000,  # OpEx
+                280_000,
+                330_000,
+                380_000,
+                430_000,  # Operating Income
+            ],
+        }
+    )
+
+    st_pivot_table(
+        income_data,
+        key="demo_income_statement",
+        rows=["Account"],
+        columns=["Quarter"],
+        values=["Amount"],
+        values_axis="rows",
+        show_totals=False,
+        number_format={"Amount": "$,.0f"},
+    )
+
+    # --- Example 3: Multi-dim rows with values on rows + subtotals ---
+    st.markdown("##### Multi-Dimension Rows + Subtotals")
+    st.caption(
+        "Two row dimensions with subtotals enabled. Each subtotal row also "
+        "gets its own Revenue and Units sub-rows."
+    )
+
+    multi_data = pd.DataFrame(
+        {
+            "Region": ["East"] * 4 + ["West"] * 4,
+            "Category": ["Electronics", "Electronics", "Furniture", "Furniture"] * 2,
+            "Quarter": ["Q1", "Q2", "Q1", "Q2"] * 2,
+            "Revenue": [300, 350, 200, 220, 400, 450, 250, 270],
+            "Units": [6, 7, 4, 5, 8, 9, 5, 6],
+        }
+    )
+
+    st_pivot_table(
+        multi_data,
+        key="demo_values_axis_subtotals",
+        rows=["Region", "Category"],
+        columns=["Quarter"],
+        values=["Revenue", "Units"],
+        values_axis="rows",
+        show_subtotals=True,
+        show_totals=True,
+        number_format={"Revenue": "$,.0f"},
+    )
+
+    with st.expander("Code", expanded=False):
+        st.code(
+            """\
+# Values on rows — basic
+st_pivot_table(
+    df,
+    key="demo_values_axis_rows",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue", "Units"],
+    values_axis="rows",
+    show_totals=True,
+)
+
+# Income Statement layout
+st_pivot_table(
+    income_df,
+    key="demo_income_statement",
+    rows=["Account"],
+    columns=["Quarter"],
+    values=["Amount"],
+    values_axis="rows",
+    show_totals=False,
+    number_format={"Amount": "$,.0f"},
+)
+
+# Multi-dimension rows with subtotals
+st_pivot_table(
+    df,
+    key="demo_values_axis_subtotals",
+    rows=["Region", "Category"],
+    columns=["Quarter"],
+    values=["Revenue", "Units"],
+    values_axis="rows",
+    show_subtotals=True,
+    show_totals=True,
+)
+""",
+            language="python",
+        )
+
+
+section_values_axis()
+
+
+# ---------------------------------------------------------------------------
 # Section 6: Conditional Formatting
 # ---------------------------------------------------------------------------
 st.divider()

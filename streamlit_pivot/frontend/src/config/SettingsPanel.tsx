@@ -54,6 +54,8 @@ import {
   stringifyPivotConfig,
   getSyntheticSourceFields,
   pruneSortConfigByField,
+  isValuesOnRows,
+  isPeriodComparisonMode,
   type AggregationConfig,
   type AggregationType,
   type DimensionFilter,
@@ -1613,6 +1615,15 @@ const LockedView: FC<{
             </span>
           </div>
         )}
+        {isValuesOnRows(config) && (
+          <div
+            className={styles.statusRow}
+            data-testid="settings-values-axis-status"
+          >
+            <span className={styles.statusLabel}>Values on</span>
+            <span className={styles.statusValue}>Rows</span>
+          </div>
+        )}
       </div>
     </>
   );
@@ -1811,6 +1822,9 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   const [localStickyHeaders, setLocalStickyHeaders] = useState(
     config.sticky_headers !== false,
   );
+  const [localValuesAxis, setLocalValuesAxis] = useState<"columns" | "rows">(
+    config.values_axis ?? "columns",
+  );
 
   // Filters zone state
   const [localFilterFields, setLocalFilterFields] = useState<string[]>(
@@ -1851,6 +1865,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       setLocalRowLayout(config.row_layout ?? "table");
       setLocalRepeatLabels(!!config.repeat_row_labels);
       setLocalStickyHeaders(config.sticky_headers !== false);
+      setLocalValuesAxis(config.values_axis ?? "columns");
       setLocalFilterFields(config.filter_fields ?? []);
       setLocalFilters(config.filters ?? {});
       setSearchQuery("");
@@ -2300,6 +2315,14 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     setLocalStickyHeaders((v) => !v);
   }, []);
 
+  const toggleValuesAxis = useCallback(() => {
+    setLocalValuesAxis((v) => (v === "columns" ? "rows" : "columns"));
+  }, []);
+
+  const setValuesAxisDirect = useCallback((value: "columns" | "rows") => {
+    setLocalValuesAxis(value);
+  }, []);
+
   // Derived display state
   const showRowTotals =
     localShowRowTotals === true ||
@@ -2738,6 +2761,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
       repeat_row_labels:
         localRowLayout === "table" && localRepeatLabels ? true : undefined,
       sticky_headers: localStickyHeaders,
+      values_axis: localValuesAxis !== "columns" ? localValuesAxis : undefined,
       filter_fields:
         localFilterFields.length > 0 ? localFilterFields : undefined,
       filters: Object.keys(localFilters).length > 0 ? localFilters : undefined,
@@ -2790,6 +2814,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localRowLayout,
     localRepeatLabels,
     localStickyHeaders,
+    localValuesAxis,
     localFilterFields,
     localFilters,
     onConfigChange,
@@ -2918,6 +2943,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     if (localRowLayout !== (config.row_layout ?? "table")) return true;
     if (localRepeatLabels !== !!config.repeat_row_labels) return true;
     if (localStickyHeaders !== (config.sticky_headers !== false)) return true;
+    if (localValuesAxis !== (config.values_axis ?? "columns")) return true;
     if (!arrEq(localFilterFields, config.filter_fields ?? [])) return true;
     if (JSON.stringify(localFilters) !== JSON.stringify(config.filters ?? {}))
       return true;
@@ -2941,6 +2967,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
     localRowLayout,
     localRepeatLabels,
     localStickyHeaders,
+    localValuesAxis,
     localFilterFields,
     localFilters,
     localShowAs,
@@ -3196,35 +3223,6 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
               )}
             </SortableContext>
           </DropZone>
-          {localRows.length > 0 && (
-            <div
-              className={styles.rowLayoutControl}
-              data-testid="settings-row-layout"
-            >
-              <span className={styles.rowLayoutLabel}>Row Layout:</span>
-              <div
-                className={styles.segmentedControl}
-                role="group"
-                aria-label="Row layout"
-              >
-                {ROW_LAYOUT_OPTIONS.map((option) => {
-                  const isActive = localRowLayout === option.value;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`${styles.segmentedOption} ${isActive ? styles.segmentedOptionActive : ""}`}
-                      aria-pressed={isActive}
-                      onClick={() => handleRowLayoutChange(option.value)}
-                      data-testid={`settings-row-layout-${option.value}`}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           {/* Columns zone */}
           <span className={styles.sectionTitle}>Columns</span>
@@ -3540,6 +3538,120 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
             ) : null}
           </DragOverlay>
         </DndContext>
+
+        {/* Layout section — structural controls for row and values axes */}
+        {(localRows.length > 0 || localVals.length >= 1) && (
+          <>
+            <span className={styles.sectionTitle} style={{ marginTop: 0 }}>
+              Table Layout
+            </span>
+            <div className={styles.layoutGrid}>
+              {localRows.length > 0 && (
+                <div
+                  className={styles.layoutRow}
+                  data-testid="settings-row-layout"
+                >
+                  <span className={styles.rowLayoutLabel}>
+                    Row orientation:
+                  </span>
+                  <div
+                    className={styles.segmentedControl}
+                    role="group"
+                    aria-label="Row layout"
+                  >
+                    {ROW_LAYOUT_OPTIONS.map((option) => {
+                      const isActive = localRowLayout === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`${styles.segmentedOption} ${isActive ? styles.segmentedOptionActive : ""}`}
+                          aria-pressed={isActive}
+                          onClick={() => handleRowLayoutChange(option.value)}
+                          data-testid={`settings-row-layout-${option.value}`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {localVals.length >= 1 &&
+                (() => {
+                  const hasPeriodMode = Object.values(localShowAs).some((m) =>
+                    isPeriodComparisonMode(m),
+                  );
+                  // Mirror Python validation: block when temporal hierarchy is active.
+                  // Two ways a temporal axis can be active (each independently):
+                  //   1. An axis field has an explicit date_grains entry (regardless of
+                  //      auto_date_hierarchy setting).
+                  //   2. auto_date_hierarchy is enabled AND a date/datetime field is on an
+                  //      axis (detected via columnTypes when pivotData is available).
+                  const axisFields = [...localRows, ...localCols];
+                  const columnTypes = pivotData?.getColumnTypes();
+                  const hasTemporalAxis = axisFields.some(
+                    (f) =>
+                      config.date_grains?.[f] !== undefined ||
+                      (config.auto_date_hierarchy !== false &&
+                        (columnTypes?.get(f) === "date" ||
+                          columnTypes?.get(f) === "datetime")),
+                  );
+                  const isDisabled = hasPeriodMode || hasTemporalAxis;
+                  const disabledReason = hasPeriodMode
+                    ? "Incompatible with period comparison show values as modes"
+                    : hasTemporalAxis
+                      ? "Incompatible with active temporal hierarchy on rows/columns"
+                      : undefined;
+                  return (
+                    <div
+                      className={styles.layoutRow}
+                      data-testid="settings-values-axis"
+                      title={disabledReason}
+                    >
+                      <span className={styles.rowLayoutLabel}>
+                        Values axis:
+                      </span>
+                      <div
+                        className={`${styles.segmentedControl} ${isDisabled ? styles.segmentedControlDisabled : ""}`}
+                        role="group"
+                        aria-label="Values axis placement"
+                      >
+                        {(
+                          [
+                            { value: "columns", label: "Columns" },
+                            { value: "rows", label: "Rows" },
+                          ] as const
+                        ).map((option) => {
+                          const isActive = localValuesAxis === option.value;
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`${styles.segmentedOption} ${isActive ? styles.segmentedOptionActive : ""}`}
+                              aria-pressed={isActive}
+                              disabled={isDisabled}
+                              onClick={() =>
+                                !isDisabled && setValuesAxisDirect(option.value)
+                              }
+                              data-testid={`settings-values-axis-${option.value}`}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {disabledReason && (
+                        <span className={styles.layoutIncompatible}>
+                          (incompatible)
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+            </div>
+          </>
+        )}
 
         {/* Display toggles */}
         <span className={styles.sectionTitle} style={{ marginTop: 0 }}>

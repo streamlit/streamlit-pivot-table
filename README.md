@@ -94,6 +94,7 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `conditional_formatting` | `list[dict] \| None` | `None` | Visual formatting rules. See [Conditional Formatting](#conditional-formatting). |
 | `style` | `str \| PivotStyle \| list \| None` | `None` | Region-based table styling. Pass a preset name, a `PivotStyle` dict, or a list that composes presets + overrides. See [Styling](#styling). |
 | `column_config` | `dict[str, Any] \| None` | `None` | Optional per-column display configuration, using a subset of the Streamlit [`column_config`](https://docs.streamlit.io/develop/api-reference/data/st.column_config) shape. Supported keys: `format`, `type`, `label`, `help`, `width` (`"small"` / `"medium"` / `"large"` / integer px), `pinned` (locks the field in the config UI; does not create a sticky column), `alignment` (`"left"` / `"center"` / `"right"`, unions with the `column_alignment` kwarg; explicit kwarg wins), and row-dim cell renderers via `type`: `"link"` (with optional `display_text`), `"image"`, `"checkbox"`, and `"text"` with `max_chars`. Explicit `number_format` / `dimension_format` / `column_alignment` parameters always win. See [Formats from `Styler` and `column_config`](#formats-from-styler-and-column_config). |
+| `values_axis` | `"columns" \| "rows"` | `"columns"` | Where value fields are placed. `"columns"` (default) adds a `"Σ Values"` group to column headers, matching Excel's default layout. `"rows"` moves each measure onto the row axis so every dimension row expands into one sub-row per measure — ideal for financial statements and income-statement-style reports. Incompatible with period-comparison `show_values_as` modes and active temporal hierarchies. |
 | `empty_cell_value` | `str` | `"-"` | Display string for cells with no data. |
 
 #### Layout
@@ -699,6 +700,44 @@ st_pivot_table(
 ```
 
 **Interactive**: these filters are also accessible via the column header ⋮ menu — look for the **"Top / Bottom N"** and **"Filter by value"** sections on any row or column dimension header. Active filters are summarised in the Settings Panel (read-only; edit them from the header menu).
+
+---
+
+### Values Axis Placement
+
+_(0.5.0)_ By default, multiple value fields share column slots under a `"Σ Values"` column group (`values_axis="columns"`, matching Excel's default). Setting `values_axis="rows"` moves measures onto the **row axis**: every dimension row expands into one sub-row per measure, and a **Values** header column labels each measure. This is the standard layout for financial statements and accounting reports.
+
+```python
+# Income-statement layout — line items as rows, quarters as columns
+st_pivot_table(
+    income_df,
+    key="income_stmt",
+    rows=["Account"],
+    columns=["Quarter"],
+    values=["Amount"],
+    values_axis="rows",
+    show_totals=False,
+    number_format={"Amount": "$,.0f"},
+)
+
+# Multi-dimension rows with subtotals — each subtotal block also splits by measure
+st_pivot_table(
+    df,
+    key="pivot_rows",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue", "Units"],
+    values_axis="rows",
+    show_subtotals=True,
+    show_totals=True,
+)
+```
+
+**Incompatibilities** — `values_axis="rows"` raises `ValueError` when combined with:
+- `show_values_as` modes that perform period-over-period comparison (`diff_from_prev`, `pct_diff_from_prev`, `diff_from_prev_year`, `pct_diff_from_prev_year`)
+- Active temporal hierarchies: `date_grains` targeting an axis field, or `auto_date_hierarchy=True` when a `date`/`datetime` field is placed on rows or columns
+
+**Interactive**: the Settings Panel **"Values axis"** control (under the Layout section) is automatically disabled with a tooltip when an incompatible feature is active (period-comparison modes or active temporal hierarchy).
 
 ---
 

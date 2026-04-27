@@ -425,6 +425,7 @@ class PivotConfig(TypedDict, total=False):
     show_sections: bool
     top_n_filters: list[TopNFilterFull]
     value_filters: list[ValueFilterFull]
+    values_axis: str
 
 
 VALID_AGGREGATIONS = frozenset(
@@ -474,6 +475,7 @@ PERIOD_COMPARISON_SHOW_VALUES_AS = frozenset(
     )
 )
 VALID_DATE_GRAINS = frozenset(("year", "quarter", "month", "week", "day"))
+_VALID_VALUES_AXIS = frozenset(("columns", "rows"))
 VALID_ALIGNMENTS = frozenset(("left", "center", "right"))
 VALID_COND_FMT_TYPES = frozenset(("color_scale", "data_bars", "threshold"))
 VALID_NULL_MODES = frozenset(("exclude", "zero", "separate"))
@@ -2830,6 +2832,7 @@ def _default_config(
     show_sections: bool | None = None,
     top_n_filters: list[TopNFilterFull] | None = None,
     value_filters: list[ValueFilterFull] | None = None,
+    values_axis: Literal["columns", "rows"] = "columns",
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -2941,6 +2944,8 @@ def _default_config(
         cfg["top_n_filters"] = top_n_filters
     if value_filters:
         cfg["value_filters"] = value_filters
+    if values_axis != "columns":
+        cfg["values_axis"] = values_axis
     return cfg
 
 
@@ -3096,6 +3101,8 @@ def st_pivot_table(
     # 0.5.0: analytical filtering
     top_n_filters: list[TopNFilterFull] | None = None,
     value_filters: list[ValueFilterFull] | None = None,
+    # 0.5.0: values axis placement
+    values_axis: Literal["columns", "rows"] = "columns",
     # Format hints from Streamlit column_config / dimension_format
     column_config: dict[str, Any] | None = None,
     dimension_format: str | dict[str, str] | None = None,
@@ -3309,6 +3316,17 @@ def st_pivot_table(
         "Revenue > 500" is tested independently within each Region. Members
         with a null measure value are treated as failing the predicate and
         excluded. Grand totals and subtotals always reflect unfiltered data.
+    values_axis : {"columns", "rows"}
+        Which axis the Values pseudo-dimension is placed on. Default
+        ``"columns"`` (standard pivot: value fields appear as the innermost
+        column header row). Use ``"rows"`` for an income-statement layout
+        where each value field occupies its own row and dimension members
+        become column headers. All configured value fields move together —
+        you cannot split them across axes. Incompatible with period
+        comparison ``show_values_as`` modes and with temporal hierarchy
+        (``auto_date_hierarchy=True`` or ``date_grains`` targeting an axis
+        field) when those features would actively expand a date/datetime
+        field on rows or columns.
     conditional_formatting : list[dict] or None
         List of conditional formatting rules applied to value cells.
         Each rule is a dict with ``"type"`` (``"color_scale"``,
@@ -3582,6 +3600,12 @@ def st_pivot_table(
     if subtotal_position not in _VALID_SUBTOTAL_POS:
         raise ValueError(
             f"subtotal_position must be 'top' or 'bottom', got {subtotal_position!r}"
+        )
+
+    # --- Values axis validation ---
+    if values_axis not in _VALID_VALUES_AXIS:
+        raise ValueError(
+            f"values_axis must be 'columns' or 'rows', got {values_axis!r}"
         )
 
     # --- Column list type + membership validation ---
@@ -4131,6 +4155,50 @@ def st_pivot_table(
     adaptive_date_grains = _compute_adaptive_date_grains(
         filtered_data, original_column_types
     )
+
+    # --- values_axis cross-feature compatibility ---
+    # Run before _validate_period_comparison_config so the values_axis error
+    # is reported first when both constraints are violated simultaneously.
+    if values_axis == "rows":
+        # Incompatible with period comparison show_values_as modes
+        if show_values_as:
+            bad = [
+                f"{field!r}: {mode!r}"
+                for field, mode in show_values_as.items()
+                if mode in PERIOD_COMPARISON_SHOW_VALUES_AS
+            ]
+            if bad:
+                raise ValueError(
+                    "values_axis='rows' is incompatible with period comparison "
+                    f"show_values_as modes: {', '.join(bad)}"
+                )
+        # Incompatible when temporal hierarchy would actively expand a field on
+        # rows or columns: either date_grains targets an axis field, or
+        # auto_date_hierarchy=True and a date/datetime field is on an axis.
+        axis_fields = set(resolved_rows or []) | set(resolved_columns or [])
+        if normalized_date_grains:
+            active_date_grain_fields = {
+                f for f in normalized_date_grains if f in axis_fields
+            }
+            if active_date_grain_fields:
+                raise ValueError(
+                    "values_axis='rows' is incompatible with date_grains targeting "
+                    f"axis fields: {sorted(active_date_grain_fields)}"
+                )
+        if auto_date_hierarchy:
+            temporal_axis_fields = [
+                f
+                for f in axis_fields
+                if f in original_column_types
+                and original_column_types[f] in ("date", "datetime")
+            ]
+            if temporal_axis_fields:
+                raise ValueError(
+                    "values_axis='rows' is incompatible with auto_date_hierarchy "
+                    "when date/datetime fields are on rows or columns: "
+                    f"{sorted(temporal_axis_fields)}"
+                )
+
     _validate_period_comparison_config(
         show_values_as,
         resolved_rows,
@@ -4178,6 +4246,7 @@ def st_pivot_table(
         show_sections=show_sections,
         top_n_filters=top_n_filters,
         value_filters=value_filters,
+        values_axis=values_axis,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal

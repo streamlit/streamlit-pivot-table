@@ -63,6 +63,7 @@
  * `null` when any denominator is zero or null.
  */
 
+import { getValueFieldForRowKey } from "./PivotData";
 import type { PivotData } from "./PivotData";
 
 // ---------------------------------------------------------------------------
@@ -127,16 +128,22 @@ export function computeRunningTotals(
     let accumulator: number = 0;
 
     for (const rowKey of rowKeys) {
-      const parentStr = serializeKey(rowKey.slice(0, -1));
+      // values_axis="rows": encoded key is [...dimSegments, "__vf__:<field>"].
+      // Decode to get the plain dim key; skip keys that belong to other value fields.
+      const vfForKey = getValueFieldForRowKey(rowKey);
+      if (vfForKey !== null && vfForKey !== valField) continue;
+      const dimKey = vfForKey !== null ? rowKey.slice(0, -1) : rowKey;
+
+      const parentStr = serializeKey(dimKey.slice(0, -1));
       if (parentStr !== currentParent) {
         // New parent group — reset accumulator
         currentParent = parentStr;
         accumulator = 0;
       }
       const rawValue = pivotData
-        .getAggregator(rowKey, colKey, valField)
+        .getAggregator(dimKey, colKey, valField)
         .value();
-      const rowKeyStr = serializeKey(rowKey);
+      const rowKeyStr = serializeKey(dimKey);
       if (rawValue === null) {
         map.set(rowKeyStr, null);
       } else {
@@ -205,12 +212,17 @@ export function computeRanks(
     const rowKeys = pivotData.getSortedLeafRowKeys();
     const map: RankMap = new Map();
 
-    // Group rows by parent prefix
+    // Group rows by parent prefix, decoding values_axis="rows" encoded keys.
     const groups = new Map<string, string[][]>();
     for (const rowKey of rowKeys) {
-      const parentStr = serializeKey(rowKey.slice(0, -1));
+      // values_axis="rows": skip keys for other value fields; decode to dim key.
+      const vfForKey = getValueFieldForRowKey(rowKey);
+      if (vfForKey !== null && vfForKey !== valField) continue;
+      const dimKey = vfForKey !== null ? rowKey.slice(0, -1) : rowKey;
+
+      const parentStr = serializeKey(dimKey.slice(0, -1));
       if (!groups.has(parentStr)) groups.set(parentStr, []);
-      groups.get(parentStr)!.push(rowKey);
+      groups.get(parentStr)!.push(dimKey);
     }
 
     for (const groupRowKeys of groups.values()) {

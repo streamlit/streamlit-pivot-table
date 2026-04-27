@@ -212,6 +212,23 @@
   font-weight: var(--pivot-column-total-font-weight, 600);
 }
 
+/* Continuation rows for values_axis="rows" grand total (2nd+ value-field rows).
+   Same background/color as totalsRow but no top border — the rowSpan'd "Grand Total"
+   cell provides the single visual boundary for the whole block.
+   border-bottom is also cleared so the trailing continuation row (last row in the
+   table) doesn't paint an extra hairline that is more visible against the grey
+   row-header background than against transparent data cells. */
+.totalsRowContinuation td,
+.totalsRowContinuation th {
+  background-color: var(
+    --pivot-column-total-bg,
+    color-mix(in srgb, var(--st-secondary-background-color) 75%, var(--pivot-bg, var(--st-background-color)))
+  );
+  color: var(--pivot-column-total-color, var(--pivot-color, var(--st-text-color)));
+  font-weight: var(--pivot-column-total-font-weight, 600);
+  border-bottom: none;
+}
+
 /* row_total region — grand total per row, rendered in the rightmost .totalsCol */
 .totalsCol {
   font-weight: var(--pivot-row-total-font-weight, 600);
