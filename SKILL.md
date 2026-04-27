@@ -619,6 +619,10 @@ st_pivot_table(
 
 Color-scale `mid_value` anchors the gradient at a specific raw aggregate (e.g. `0` for PnL). Threshold operators: `gt`, `gte`, `lt`, `lte`, `eq`, `between`. Conditional formatting rules are translated into native Excel conditional formatting on export.
 
+**`scope`** (`"per_column"` | `"global"`, optional) — controls color_scale/data_bars min/max range in XLSX. No effect on threshold rules. With `values_axis="columns"`, default `"per_column"` (independent scale per year/category column). With `values_axis="rows"`, omitting `scope` gives **per-field** behavior: each measure in `apply_to` gets its own independent scale — correct for mixed-unit fields (Revenue, Units, Margin). Set `scope="global"` to force a single scale across all selected measures; `scope="per_column"` for one scale per data column.
+
+**`include_totals`** (bool, default `False`) — include mid-table subtotal rows in the CF range. Consistent across both `values_axis` modes.
+
 ### Null Handling
 
 `"exclude"` (default; null-dimension rows dropped) · `"zero"` (null measures → 0) · `"separate"` (null dimensions → "(null)" group).

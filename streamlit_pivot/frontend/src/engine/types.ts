@@ -712,6 +712,26 @@ export interface ConditionalFormatRule {
   apply_to: string[];
   /** Also apply to subtotal/grand total cells? Default false. */
   include_totals?: boolean;
+  /**
+   * Color scale / data bar min–max scope for XLSX export.
+   * Has no effect on `threshold` rules (conditions are absolute values).
+   *
+   * **When `values_axis="columns"`** (default `"per_column"`):
+   * - `"per_column"` — each data column gets its own independent scale;
+   *   the gradient ranks values relative to their own time period or category.
+   * - `"global"` — one scale spans all target columns simultaneously.
+   *
+   * **When `values_axis="rows"`** (default is per-field when omitted):
+   * - omitted — one CF entry per value field in `apply_to` (or all fields when
+   *   `apply_to` is empty). Each measure gets its own independent scale so
+   *   Revenue and Units are never normalised on the same gradient.
+   * - `"global"` — one scale spanning all selected measure rows and all data
+   *   columns. Use when all targeted fields share the same units and you want a
+   *   single cross-measure comparison.
+   * - `"per_column"` — one scale per data column (all measures within a column
+   *   are normalised together).
+   */
+  scope?: "global" | "per_column";
 }
 
 export interface ColorScaleRule extends ConditionalFormatRule {
@@ -1521,6 +1541,12 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       ) {
         throw new Error(
           `'conditional_formatting[${i}].apply_to' must be an array of strings`,
+        );
+      }
+      const scope = (rule as Record<string, unknown>).scope;
+      if (scope !== undefined && scope !== "global" && scope !== "per_column") {
+        throw new Error(
+          `'conditional_formatting[${i}].scope' must be "global" or "per_column"`,
         );
       }
       if (ruleType === "color_scale") {

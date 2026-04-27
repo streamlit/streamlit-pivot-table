@@ -1270,6 +1270,41 @@ blue, regardless of the column's min/max.
         ],
     )
 
+    st.markdown(
+        """
+#### `scope` — min/max range for color scales and data bars
+
+The `scope` key controls how the min/max is computed in XLSX export.
+`threshold` rules are unaffected (their conditions are absolute values).
+
+| Mode | Default (no scope) | `scope="global"` | `scope="per_column"` |
+|------|-------------------|-----------------|----------------------|
+| `values_axis="columns"` | Per data column — gradient ranks within each year | One scale across all years | Same as default |
+| `values_axis="rows"` | **Per value field** — Revenue and Units each get their own scale | One scale across all measure rows | One scale per data column |
+
+The per-field default for row mode prevents different-unit measures (Revenue
+in dollars, Units as count) from being normalized on the same gradient.
+"""
+    )
+
+    st_pivot_table(
+        df,
+        key="cond_fmt_scope_global",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        conditional_formatting=[
+            {
+                "type": "color_scale",
+                "apply_to": ["Revenue"],
+                "min_color": "#ffffff",
+                "max_color": "#1565c0",
+                "scope": "global",  # one scale across all years
+            }
+        ],
+    )
+
     with st.expander("View Code"):
         st.code(
             """
@@ -1320,6 +1355,25 @@ st_pivot_table(
             "max_color": "#1565c0",   # blue for above-midpoint
             "mid_value": df["Profit"].mean(),  # anchor at overall average
         },
+    ],
+)
+
+# scope="global": single scale across all year columns
+st_pivot_table(
+    df,
+    key="cond_fmt_scope_global",
+    rows=["Region"],
+    columns=["Year"],
+    values=["Revenue"],
+    aggregation="sum",
+    conditional_formatting=[
+        {
+            "type": "color_scale",
+            "apply_to": ["Revenue"],
+            "min_color": "#ffffff",
+            "max_color": "#1565c0",
+            "scope": "global",  # one scale across all years
+        }
     ],
 )
 """,

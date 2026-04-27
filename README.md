@@ -758,6 +758,7 @@ Gradient fill between 2 or 3 colors based on min/mid/max values in the column.
     "mid_color": "#a5d6a7",       # optional (3-color scale)
     "mid_value": 0,               # optional numeric anchor for the midpoint
     "include_totals": False,      # optional, default False
+    "scope": "per_column",        # optional; see Scope section below
 }
 ```
 
@@ -799,6 +800,7 @@ Horizontal bar fill proportional to the cell value.
     "apply_to": ["Revenue"],
     "color": "#1976d2",           # optional bar color
     "fill": "gradient",           # "gradient" or "solid"
+    "scope": "per_column",        # optional; see Scope section below
 }
 ```
 
@@ -821,6 +823,40 @@ Highlight cells matching a numeric condition.
     ],
 }
 ```
+
+#### Scope (color_scale and data_bars only)
+
+The `scope` key controls how the min/max range is calculated in XLSX export.
+`threshold` rules are unaffected by `scope`.
+
+**When `values_axis="columns"`** — default `"per_column"`:
+
+| `scope` | Behavior |
+|---|---|
+| omitted / `"per_column"` | Each data column gets its own independent min/max scale. The gradient ranks values relative to their own time period or category. |
+| `"global"` | One scale spans all target columns — reveals absolute cross-period magnitude. |
+
+**When `values_axis="rows"`** — default is per-field when omitted:
+
+| `scope` | Behavior |
+|---|---|
+| omitted | **One CF entry per value field.** Revenue and Units each get their own scale — correct when `apply_to` spans multiple measures with different units/magnitudes. |
+| `"global"` | One scale across all selected measure rows and all data columns. Use only when all targeted fields share the same units. |
+| `"per_column"` | One scale per data column (all measures within a column are normalised together). |
+
+```python
+# Row axis: explicit global scale (all-measure comparison)
+{"type": "color_scale", "apply_to": [], ..., "scope": "global"}
+
+# Column axis: explicit global scale (cross-year comparison)
+{"type": "color_scale", "apply_to": ["Revenue"], ..., "scope": "global"}
+```
+
+#### `include_totals`
+
+When `True`, mid-table subtotal rows (not grand totals) are included in the CF
+range. Default `False`. Applies to both `values_axis="columns"` and
+`values_axis="rows"` consistently.
 
 Multiple rules can be combined:
 

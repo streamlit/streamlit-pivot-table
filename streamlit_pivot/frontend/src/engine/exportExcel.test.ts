@@ -23,7 +23,12 @@ import {
   colLetter,
   buildThresholdFormula,
 } from "./exportExcel";
-import type { ExportGrid, ExportCell, CellKind } from "./exportData";
+import type {
+  ExportGrid,
+  ExportCell,
+  CellKind,
+  ValueFieldRows,
+} from "./exportData";
 import type { ColorScaleRule, DataBarsRule, ThresholdRule } from "./types";
 
 function cell(
@@ -923,6 +928,663 @@ describe("buildExcelWorkbook", () => {
         (c) => (c.rules[0] as Record<string, unknown>).priority,
       );
       expect(priorities).toEqual([1, 2, 3]);
+    });
+
+    // ── Row-based conditional formatting (values_axis="rows") ──────────────
+
+    function makeRowsGrid(): ExportGrid {
+      // Layout: col 0 = value-label, col 1 = dim "Region", cols 2-3 = data
+      // (two column members: 2023, 2024).
+      // Rows: header | Revenue/EU | Revenue/US | Units/EU | Units/US | col-total...
+      return {
+        cells: [
+          // Header row
+          [
+            cell("Values", "header"),
+            cell("Region", "header"),
+            cell("2023", "header"),
+            cell("2024", "header"),
+          ],
+          // Revenue rows
+          [
+            cell("Revenue", "data"),
+            cell("EU", "data"),
+            cell("200", "data", 200),
+            cell("250", "data", 250),
+          ],
+          [
+            cell("Revenue", "data"),
+            cell("US", "data"),
+            cell("100", "data", 100),
+            cell("150", "data", 150),
+          ],
+          // Units rows
+          [
+            cell("Units", "data"),
+            cell("EU", "data"),
+            cell("80", "data", 80),
+            cell("100", "data", 100),
+          ],
+          [
+            cell("Units", "data"),
+            cell("US", "data"),
+            cell("40", "data", 40),
+            cell("60", "data", 60),
+          ],
+          // Grand-total rows
+          [
+            cell("Revenue", "grand-total"),
+            cell("", "grand-total"),
+            cell("300", "grand-total", 300),
+            cell("400", "grand-total", 400),
+          ],
+          [
+            cell("Units", "grand-total"),
+            cell("", "grand-total"),
+            cell("120", "grand-total", 120),
+            cell("160", "grand-total", 160),
+          ],
+        ],
+        headerRowCount: 1,
+        rowDimCount: 2,
+        // values_axis="rows": column list is empty for every field
+        valueFieldColumns: [
+          { field: "Revenue", columns: [] },
+          { field: "Units", columns: [] },
+        ],
+        valueFieldRows: [
+          { field: "Revenue", rows: [1, 2], subtotalRows: [] },
+          { field: "Units", rows: [3, 4], subtotalRows: [] },
+        ] satisfies ValueFieldRows[],
+      };
+    }
+
+    it("row-based: data_bars applied to Revenue rows only — ref covers rows 2-3", () => {
+      const grid = makeRowsGrid();
+      grid.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: ["Revenue"],
+          color: "#1976d2",
+          fill: "gradient",
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+
+      expect(cfs).toHaveLength(1);
+      // rowDimCount=2 → data cols start at index 2 (col C). Last col is D.
+      // Revenue rows are 0-based [1,2] → Excel rows 2 and 3.
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3");
+      expect((cfs[0]!.rules[0] as Record<string, unknown>).type).toBe(
+        "dataBar",
+      );
+    });
+
+    it("row-based: color_scale for Units rows — ref covers rows 4-5", () => {
+      const grid = makeRowsGrid();
+      grid.conditionalFormatting = [
+        {
+          type: "color_scale",
+          apply_to: ["Units"],
+          min_color: "#ffffff",
+          max_color: "#ff0000",
+        } as ColorScaleRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+
+      expect(cfs).toHaveLength(1);
+      // Units rows are 0-based [3,4] → Excel rows 4 and 5.
+      expect(cfs[0]!.ref).toBe("C4:D4 C5:D5");
+      expect((cfs[0]!.rules[0] as Record<string, unknown>).type).toBe(
+        "colorScale",
+      );
+    });
+
+    it("row-based: apply_to=[] (no scope) produces one CF entry per field — not a shared union", () => {
+      // Default (omitted scope) = per-field: Revenue and Units each get their
+      // own independent scale so different-unit measures aren't normalised
+      // together on the same gradient.
+      const grid = makeRowsGrid();
+      grid.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: [],
+          color: "#aaa",
+          fill: "solid",
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+
+      // Two fields → two separate CF entries
+      expect(cfs).toHaveLength(2);
+      // Revenue rows [1,2] → Excel 2,3; Units rows [3,4] → Excel 4,5
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3");
+      expect(cfs[1]!.ref).toBe("C4:D4 C5:D5");
+    });
+
+    it("row-based: threshold rule formula anchors at the first data cell of the first matching row", () => {
+      const grid = makeRowsGrid();
+      grid.conditionalFormatting = [
+        {
+          type: "threshold",
+          apply_to: ["Revenue"],
+          conditions: [
+            {
+              operator: "gt",
+              value: 150,
+              background: "#ff0000",
+            },
+          ],
+        } as ThresholdRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+
+      expect(cfs).toHaveLength(1);
+      // ref covers Revenue rows (0-based [1,2] → Excel 2-3), data cols C-D
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3");
+      // formula anchors at C2 (first data cell in first Revenue row)
+      const formulae = (cfs[0]!.rules[0] as Record<string, unknown>)
+        .formulae as string[];
+      expect(formulae[0]).toBe("C2>150");
+    });
+
+    it("row-based: ref excludes trailing row-total columns", () => {
+      // Grid with row-total cells appended after data cells (cols 4-5)
+      const gridWithRowTotals: ExportGrid = {
+        cells: [
+          // header: Values | Region | 2023 | 2024 | Total
+          [
+            cell("Values", "header"),
+            cell("Region", "header"),
+            cell("2023", "header"),
+            cell("2024", "header"),
+            cell("Total", "header"),
+          ],
+          // Revenue/EU row: cols 2-3 are data, col 4 is row-total
+          [
+            cell("Revenue", "data"),
+            cell("EU", "data"),
+            cell("200", "data", 200),
+            cell("250", "data", 250),
+            cell("450", "row-total", 450),
+          ],
+          [
+            cell("Revenue", "data"),
+            cell("US", "data"),
+            cell("100", "data", 100),
+            cell("150", "data", 150),
+            cell("250", "row-total", 250),
+          ],
+        ],
+        headerRowCount: 1,
+        rowDimCount: 2,
+        valueFieldColumns: [{ field: "Revenue", columns: [] }],
+        valueFieldRows: [{ field: "Revenue", rows: [1, 2], subtotalRows: [] }],
+      };
+      gridWithRowTotals.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: ["Revenue"],
+          color: "#1976d2",
+          fill: "gradient",
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, gridWithRowTotals);
+      const cfs = getCf(wb.worksheets[0]);
+
+      expect(cfs).toHaveLength(1);
+      // dataColStart=2 (rowDimCount), dataColEnd must stop at col 3 (D), not col 4 (E)
+      // Revenue rows are 0-based [1,2] → Excel rows 2-3
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3");
+    });
+
+    it("row-based: duplicate field labels do not collapse ownership (unique field IDs)", async () => {
+      // Integration test: two measures share the same rendered label.
+      // Their valueFieldRows must remain distinct (no overlap).
+      const { PivotData } = await import("./PivotData");
+      const { buildExportIR } = await import("./exportData");
+      const { makeConfig } = await import("../test-utils");
+
+      const data = [
+        { region: "EU", year: "2023", revenue: 200, profit: 80 },
+        { region: "US", year: "2023", revenue: 100, profit: 40 },
+      ];
+      // Override field_labels so both measures render with the same text
+      const config = makeConfig({
+        rows: ["region"],
+        columns: ["year"],
+        values: ["revenue", "profit"],
+        values_axis: "rows",
+        field_labels: { revenue: "Metric", profit: "Metric" },
+      });
+      const pd = new PivotData(data, config);
+      const ir = buildExportIR(pd, config, "raw");
+
+      expect(ir.valueFieldRows).toBeDefined();
+      const revRows = new Set(
+        ir.valueFieldRows!.find((v) => v.field === "revenue")!.rows,
+      );
+      const profRows = new Set(
+        ir.valueFieldRows!.find((v) => v.field === "profit")!.rows,
+      );
+
+      // Row sets must be disjoint — no row can belong to both fields
+      for (const r of profRows) {
+        expect(revRows.has(r)).toBe(false);
+      }
+      expect(revRows.size).toBeGreaterThan(0);
+      expect(profRows.size).toBeGreaterThan(0);
+    });
+
+    it("row-based: ref excludes subtotal-row trailing columns (first data row used for width scan)", () => {
+      // When subtotal_position="top" the first measure-owned row is a subtotal.
+      // Subtotal trailing cells have kind="subtotal", not "row-total", so scanning
+      // a subtotal row would incorrectly widen dataColEnd.  The fix: scan the
+      // first strict kind="data" row only.
+      const gridSubtotalFirst: ExportGrid = {
+        cells: [
+          // Header
+          [
+            cell("Values", "header"),
+            cell("Region", "header"),
+            cell("2023", "header"),
+            cell("2024", "header"),
+            cell("Total", "header"),
+          ],
+          // Revenue subtotal row: trailing cell is "subtotal" (NOT "row-total")
+          [
+            cell("Revenue", "subtotal"),
+            cell("Subtotal", "subtotal"),
+            cell("300", "subtotal", 300),
+            cell("400", "subtotal", 400),
+            cell("700", "subtotal", 700), // <-- kind="subtotal", same as data cols
+          ],
+          // Revenue data rows: trailing cell is "row-total"
+          [
+            cell("Revenue", "data"),
+            cell("EU", "data"),
+            cell("200", "data", 200),
+            cell("250", "data", 250),
+            cell("450", "row-total", 450),
+          ],
+          [
+            cell("Revenue", "data"),
+            cell("US", "data"),
+            cell("100", "data", 100),
+            cell("150", "data", 150),
+            cell("250", "row-total", 250),
+          ],
+        ],
+        headerRowCount: 1,
+        rowDimCount: 2,
+        valueFieldColumns: [{ field: "Revenue", columns: [] }],
+        valueFieldRows: [
+          {
+            field: "Revenue",
+            rows: [2, 3], // data rows only
+            subtotalRows: [1],
+          },
+        ],
+      };
+      gridSubtotalFirst.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: ["Revenue"],
+          color: "#1976d2",
+          fill: "gradient",
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, gridSubtotalFirst);
+      const cfs = getCf(wb.worksheets[0]);
+      expect(cfs).toHaveLength(1);
+      // dataColEnd must be D (col index 3), not E (col 4 which is row-total/subtotal-total)
+      // Data rows 0-based [2,3] → Excel rows 3,4
+      expect(cfs[0]!.ref).toBe("C3:D3 C4:D4");
+    });
+
+    it("row-based: subtotal rows excluded by default (no include_totals)", () => {
+      const grid = makeRowsGrid();
+      // Add subtotal rows to the valueFieldRows
+      grid.valueFieldRows = [
+        { field: "Revenue", rows: [1, 2], subtotalRows: [5] },
+        { field: "Units", rows: [3, 4], subtotalRows: [6] },
+      ];
+      grid.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: ["Revenue"],
+          color: "#1976d2",
+          fill: "gradient",
+          // include_totals: not set → subtotal rows excluded
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      expect(cfs).toHaveLength(1);
+      // Only data rows [1,2] → Excel rows 2,3 — row 6 (subtotal) must NOT appear
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3");
+      expect(cfs[0]!.ref).not.toContain("6");
+    });
+
+    it("row-based: subtotal rows included when include_totals=true", () => {
+      const grid = makeRowsGrid();
+      grid.valueFieldRows = [
+        { field: "Revenue", rows: [1, 2], subtotalRows: [5] },
+        { field: "Units", rows: [3, 4], subtotalRows: [6] },
+      ];
+      grid.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: ["Revenue"],
+          color: "#1976d2",
+          fill: "gradient",
+          include_totals: true,
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      expect(cfs).toHaveLength(1);
+      // Data rows [1,2] + subtotal row [5] sorted → [1,2,5] → Excel rows 2,3,6
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3 C6:D6");
+    });
+
+    it("row-based: no rules added when valueFieldRows has no data rows", () => {
+      const grid = makeRowsGrid();
+      grid.valueFieldRows = [
+        { field: "Revenue", rows: [], subtotalRows: [] },
+        { field: "Units", rows: [], subtotalRows: [] },
+      ];
+      grid.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: [],
+          color: "#aaa",
+          fill: "solid",
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      expect(getCf(wb.worksheets[0]).length).toBe(0);
+    });
+
+    it("buildExportIR populates valueFieldRows for values_axis='rows'", async () => {
+      // Integration test: verify buildExportIR sets valueFieldRows correctly.
+      const { PivotData } = await import("./PivotData");
+      const { buildExportIR } = await import("./exportData");
+      const { makeConfig } = await import("../test-utils");
+
+      const data = [
+        { region: "EU", year: "2023", revenue: 200, profit: 80 },
+        { region: "US", year: "2023", revenue: 100, profit: 40 },
+      ];
+      const config = makeConfig({
+        rows: ["region"],
+        columns: ["year"],
+        values: ["revenue", "profit"],
+        values_axis: "rows",
+      });
+      const pd = new PivotData(data, config);
+      const ir = buildExportIR(pd, config, "raw");
+
+      expect(ir.valueFieldRows).toBeDefined();
+      expect(ir.valueFieldRows!.length).toBe(2);
+
+      const revRows = ir.valueFieldRows!.find((vfr) => vfr.field === "revenue");
+      const profRows = ir.valueFieldRows!.find((vfr) => vfr.field === "profit");
+      expect(revRows).toBeDefined();
+      expect(profRows).toBeDefined();
+
+      // Revenue and profit rows must be non-overlapping
+      const revSet = new Set(revRows!.rows);
+      const profSet = new Set(profRows!.rows);
+      for (const r of profSet) {
+        expect(revSet.has(r)).toBe(false);
+      }
+
+      // Each entry must have a subtotalRows array (empty when no subtotals)
+      for (const vfr of ir.valueFieldRows!) {
+        expect(Array.isArray(vfr.subtotalRows)).toBe(true);
+      }
+
+      // All row indices must be within data range (>= headerRowCount)
+      for (const vfr of ir.valueFieldRows!) {
+        for (const r of [...vfr.rows, ...(vfr.subtotalRows ?? [])]) {
+          expect(r).toBeGreaterThanOrEqual(ir.headerRowCount);
+        }
+      }
+
+      // valueFieldColumns must still be present but with empty column lists
+      expect(
+        ir.valueFieldColumns!.every((vfc) => vfc.columns.length === 0),
+      ).toBe(true);
+    });
+
+    // ── scope parameter tests ─────────────────────────────────────────────
+
+    it("column-based: scope='global' produces one union ref for all target columns", () => {
+      // Two-column pivot (2023 in col 1, 2024 in col 2) for "Revenue".
+      // With scope="global", both columns should share a single CF entry
+      // instead of the default two separate per-column entries.
+      const grid = makeGrid({
+        valueFieldColumns: [{ field: "revenue", columns: [1, 2] }],
+        conditionalFormatting: [
+          {
+            type: "color_scale",
+            apply_to: ["revenue"],
+            min_color: "#ffffff",
+            max_color: "#ff0000",
+            scope: "global",
+          } as ColorScaleRule,
+        ],
+      });
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      // global scope → one CF entry covering both columns (union ref)
+      expect(cfs).toHaveLength(1);
+      // Both B and C columns included; dataStartRow=2, dataEndRow strips col-total row→3
+      expect(cfs[0]!.ref).toBe("B2:B3 C2:C3");
+    });
+
+    it("column-based: scope='per_column' (default) produces one ref per column", () => {
+      // Verify that omitting scope keeps the existing per-column behavior.
+      const grid = makeGrid({
+        valueFieldColumns: [{ field: "revenue", columns: [1, 2] }],
+        conditionalFormatting: [
+          {
+            type: "data_bars",
+            apply_to: ["revenue"],
+            color: "#1976d2",
+            fill: "gradient",
+            // no scope → defaults to "per_column"
+          } as DataBarsRule,
+        ],
+      });
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      // per_column → two separate CF entries, one per column
+      expect(cfs).toHaveLength(2);
+      expect(cfs[0]!.ref).toBe("B2:B3");
+      expect(cfs[1]!.ref).toBe("C2:C3");
+    });
+
+    it("row-based: scope='per_column' produces one ref per data column", () => {
+      // Two data columns (2023=col 2, 2024=col 3) and Revenue on rows [1,2].
+      // With scope="per_column", each column should get its own CF entry.
+      const grid = makeRowsGrid();
+      grid.valueFieldRows = [
+        { field: "Revenue", rows: [1, 2], subtotalRows: [] },
+        { field: "Units", rows: [3, 4], subtotalRows: [] },
+      ];
+      grid.conditionalFormatting = [
+        {
+          type: "color_scale",
+          apply_to: ["Revenue"],
+          min_color: "#ffffff",
+          max_color: "#ff0000",
+          scope: "per_column",
+        } as ColorScaleRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      // per_column → one CF entry per data column (C and D)
+      expect(cfs).toHaveLength(2);
+      // Each ref targets only Revenue rows [1,2] → Excel rows 2,3
+      expect(cfs[0]!.ref).toBe("C2 C3");
+      expect(cfs[1]!.ref).toBe("D2 D3");
+    });
+
+    // ── column include_totals tests ───────────────────────────────────────
+
+    it("column-based: include_totals=false (default) excludes subtotal rows", () => {
+      // Grid: header | East data | subtotal | West data | col-total
+      // Default include_totals=false should target only East and West (rows 2, 4).
+      const grid: ExportGrid = {
+        cells: [
+          [cell("Region", "header"), cell("Revenue", "header")],
+          [cell("East", "data"), cell("100", "data", 100)],
+          [cell("Subtotal", "subtotal"), cell("100", "subtotal", 100)],
+          [cell("West", "data"), cell("200", "data", 200)],
+          [cell("Total", "col-total"), cell("300", "col-total", 300)],
+        ],
+        headerRowCount: 1,
+        rowDimCount: 1,
+        valueFieldColumns: [{ field: "Revenue", columns: [1] }],
+        conditionalFormatting: [
+          {
+            type: "data_bars",
+            apply_to: ["Revenue"],
+            color: "#1976d2",
+            fill: "gradient",
+            // no include_totals → default false
+          } as DataBarsRule,
+        ],
+      };
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      expect(cfs).toHaveLength(1);
+      // Rows 2 (East) and 4 (West) only; subtotal row 3 excluded.
+      expect(cfs[0]!.ref).toBe("B2 B4");
+    });
+
+    it("column-based: include_totals=true includes subtotal rows", () => {
+      // Same grid; with include_totals=true, subtotal row 3 is included.
+      const grid: ExportGrid = {
+        cells: [
+          [cell("Region", "header"), cell("Revenue", "header")],
+          [cell("East", "data"), cell("100", "data", 100)],
+          [cell("Subtotal", "subtotal"), cell("100", "subtotal", 100)],
+          [cell("West", "data"), cell("200", "data", 200)],
+          [cell("Total", "col-total"), cell("300", "col-total", 300)],
+        ],
+        headerRowCount: 1,
+        rowDimCount: 1,
+        valueFieldColumns: [{ field: "Revenue", columns: [1] }],
+        conditionalFormatting: [
+          {
+            type: "color_scale",
+            apply_to: ["Revenue"],
+            min_color: "#ffffff",
+            max_color: "#ff0000",
+            include_totals: true,
+          } as ColorScaleRule,
+        ],
+      };
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      expect(cfs).toHaveLength(1);
+      // Rows 2 (East), 3 (Subtotal), 4 (West) — contiguous → range.
+      expect(cfs[0]!.ref).toBe("B2:B4");
+    });
+
+    it("row-based: no scope with single field produces one per-field ref spanning all data columns", () => {
+      // With one field, the per-field default produces the same output as
+      // explicit scope="global" — one ref spanning all data columns.
+      const grid = makeRowsGrid();
+      grid.valueFieldRows = [
+        { field: "Revenue", rows: [1, 2], subtotalRows: [] },
+      ];
+      grid.conditionalFormatting = [
+        {
+          type: "data_bars",
+          apply_to: ["Revenue"],
+          color: "#1976d2",
+          fill: "gradient",
+          // no scope → per-field default (same as global for a single field)
+        } as DataBarsRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      expect(cfs).toHaveLength(1);
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3");
+    });
+
+    it("row-based: scope='global' with multiple fields produces one shared ref across all measures", () => {
+      // Explicit scope="global" collapses all measure rows into one scale —
+      // useful when all targeted fields share the same units.
+      const grid = makeRowsGrid();
+      grid.conditionalFormatting = [
+        {
+          type: "color_scale",
+          apply_to: [],
+          min_color: "#ffffff",
+          max_color: "#ff0000",
+          scope: "global",
+        } as ColorScaleRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      // One CF entry covering all Revenue + Units rows
+      expect(cfs).toHaveLength(1);
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3 C4:D4 C5:D5");
+    });
+
+    // ── scope is a no-op for threshold ─────────────────────────────────────
+
+    it("column-based: threshold ignores scope='global' — produces one entry per column", () => {
+      // Threshold rules must not be affected by scope; they always use
+      // per-column refs so formula anchoring is unambiguous.
+      const grid = makeGrid({
+        valueFieldColumns: [{ field: "revenue", columns: [1, 2] }],
+        conditionalFormatting: [
+          {
+            type: "threshold",
+            apply_to: ["revenue"],
+            scope: "global", // should be ignored for threshold
+            conditions: [{ operator: "gt", value: 100, background: "#ff0000" }],
+          } as ThresholdRule,
+        ],
+      });
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      // Identical to the no-scope default: one CF entry per target column.
+      expect(cfs).toHaveLength(2);
+      expect(cfs[0]!.ref).toBe("B2:B3");
+      expect(cfs[1]!.ref).toBe("C2:C3");
+    });
+
+    it("row-based: threshold ignores scope='per_column' — produces single combined ref", () => {
+      // Threshold rules must not be affected by scope; they always use a
+      // single combined ref (all target rows × all data columns).
+      const grid = makeRowsGrid();
+      grid.valueFieldRows = [
+        { field: "Revenue", rows: [1, 2], subtotalRows: [] },
+      ];
+      grid.conditionalFormatting = [
+        {
+          type: "threshold",
+          apply_to: ["Revenue"],
+          scope: "per_column", // should be ignored for threshold
+          conditions: [{ operator: "gt", value: 100, background: "#ff0000" }],
+        } as ThresholdRule,
+      ];
+      const wb = buildExcelWorkbook(ExcelJS, grid);
+      const cfs = getCf(wb.worksheets[0]);
+      // scope ignored: one CF entry with combined ref spanning all data cols
+      expect(cfs).toHaveLength(1);
+      expect(cfs[0]!.ref).toBe("C2:D2 C3:D3");
     });
   });
 });

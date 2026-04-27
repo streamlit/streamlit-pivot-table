@@ -102,6 +102,21 @@ export interface ValueFieldColumns {
   columns: number[];
 }
 
+/**
+ * Row indices (0-based into `cells`) where a value field's data rows live.
+ * Used for row-aware conditional formatting when `values_axis="rows"`.
+ */
+export interface ValueFieldRows {
+  field: string;
+  /** 0-based row indices of data rows belonging to this value field. */
+  rows: number[];
+  /**
+   * 0-based row indices of subtotal rows belonging to this value field.
+   * Included in CF ranges only when the rule has `include_totals: true`.
+   */
+  subtotalRows: number[];
+}
+
 export interface ExportGrid {
   /** 2D grid of typed cells. */
   cells: ExportCell[][];
@@ -111,6 +126,12 @@ export interface ExportGrid {
   rowDimCount: number;
   /** Mapping of value fields to their column indices (for conditional formatting). */
   valueFieldColumns?: ValueFieldColumns[];
+  /**
+   * Mapping of value fields to their data row indices (for conditional
+   * formatting when `values_axis="rows"`). When present, CF targets rows
+   * instead of columns.
+   */
+  valueFieldRows?: ValueFieldRows[];
   /** Conditional formatting rules from the pivot config. */
   conditionalFormatting?: AnyConditionalFormatRule[];
 }
@@ -787,8 +808,20 @@ export function buildExportIR(
         )
       : baseGroupedRows;
 
+  // Emit-time tracker: maps field ID → { data rows, subtotal rows } for
+  // values_axis="rows" CF targeting.  Keyed by field ID (not display label)
+  // to avoid ambiguity when two measures share the same label.
+  const fieldRowTracker: Map<
+    string,
+    { data: number[]; subtotal: number[] }
+  > | null = valuesOnRows
+    ? new Map(values.map((f) => [f, { data: [], subtotal: [] }]))
+    : null;
+
   for (const groupedRow of rowEntries) {
     const row: ExportCell[] = [];
+    // Tracks the value field that owns this row (set below in each branch).
+    let emitValField: string | null = null;
 
     if (hierarchyMode) {
       const labelInfo = buildHierarchyExportLabel(
@@ -809,6 +842,7 @@ export function buildExportIR(
             ? ("subtotal" as const)
             : ("data" as const);
         row.push(cell(getRenderedValueLabel(config, rowValField), cellKind));
+        emitValField = rowValField;
       }
       row.push(cell(labelInfo.display, labelInfo.kind, labelInfo.raw));
     }
@@ -823,6 +857,7 @@ export function buildExportIR(
           ? groupedRow.key.slice(0, -1)
           : groupedRow.key;
       const subtotalValField = subtotalEncodedField ?? values[0] ?? "";
+      if (valuesOnRows && !hierarchyMode) emitValField = subtotalValField;
       if (!hierarchyMode) {
         // "Values" column (value-field label) is always first, matching the renderer.
         if (valuesOnRows) {
@@ -983,6 +1018,7 @@ export function buildExportIR(
       const dimRowKey =
         dataEncodedField !== null ? rowKey.slice(0, -1) : rowKey;
       const dataValField = dataEncodedField ?? values[0] ?? "";
+      if (valuesOnRows && !hierarchyMode) emitValField = dataValField;
       if (!hierarchyMode) {
         // "Values" column (value-field label) is always first, matching the renderer.
         if (valuesOnRows) {
@@ -1080,6 +1116,16 @@ export function buildExportIR(
       }
     }
     grid.push(row);
+    // Record this row for CF targeting — data and subtotal rows tracked
+    // separately so per-rule include_totals can filter correctly.
+    if (fieldRowTracker && emitValField) {
+      const bucket = fieldRowTracker.get(emitValField);
+      if (bucket) {
+        const rowKind = row[0]?.kind;
+        if (rowKind === "data") bucket.data.push(grid.length - 1);
+        else if (rowKind === "subtotal") bucket.subtotal.push(grid.length - 1);
+      }
+    }
   }
 
   // --- Column totals row ---
@@ -1214,9 +1260,6 @@ export function buildExportIR(
   }
 
   // Build value field → column index mapping for conditional formatting.
-  // With values_axis="rows", measures share the same data columns and differ
-  // by row — column-based per-field targeting is not meaningful, so we emit
-  // an empty column list for every field to avoid misapplied formatting.
   const valueFieldCols: ValueFieldColumns[] = values.map((field, vIdx) => {
     if (valuesOnRows) return { field, columns: [] };
     const cols: number[] = [];
@@ -1226,11 +1269,25 @@ export function buildExportIR(
     return { field, columns: cols };
   });
 
+  // Build valueFieldRows from the emit-time tracker (keyed by field ID, not
+  // display label, so duplicate labels never collapse measure ownership).
+  const valueFieldRowsList: ValueFieldRows[] | undefined = fieldRowTracker
+    ? values.map((f) => {
+        const bucket = fieldRowTracker.get(f);
+        return {
+          field: f,
+          rows: bucket?.data ?? [],
+          subtotalRows: bucket?.subtotal ?? [],
+        };
+      })
+    : undefined;
+
   const result: ExportGrid = {
     cells: grid,
     headerRowCount,
     rowDimCount: numRowDimCols,
     valueFieldColumns: valueFieldCols,
+    ...(valueFieldRowsList ? { valueFieldRows: valueFieldRowsList } : {}),
   };
 
   if (

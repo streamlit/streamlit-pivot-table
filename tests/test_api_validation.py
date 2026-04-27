@@ -598,6 +598,50 @@ def test_color_scale_mid_color_must_be_string(pivot_module, sample_df):
         )
 
 
+@pytest.mark.parametrize("valid_scope", ["global", "per_column"])
+def test_conditional_formatting_scope_accepts_valid_values(
+    pivot_module, sample_df, mount_recorder, valid_scope
+):
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        conditional_formatting=[
+            {
+                "type": "data_bars",
+                "apply_to": ["Revenue"],
+                "fill": "gradient",
+                "scope": valid_scope,
+            },
+        ],
+    )
+    rule = calls[0]["data"]["config"]["conditional_formatting"][0]
+    assert rule["scope"] == valid_scope
+
+
+def test_conditional_formatting_scope_rejects_invalid_value(pivot_module, sample_df):
+    with pytest.raises(ValueError, match=r"\['scope'\] must be"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            conditional_formatting=[
+                {
+                    "type": "color_scale",
+                    "apply_to": ["Revenue"],
+                    "min_color": "#ffffff",
+                    "max_color": "#ff0000",
+                    "scope": "by_row",  # invalid
+                },
+            ],
+        )
+
+
 def test_color_scale_mid_value_none_is_ignored(pivot_module, sample_df, mount_recorder):
     """Passing mid_value=None alongside mid_color is treated as omitted."""
     calls = mount_recorder()

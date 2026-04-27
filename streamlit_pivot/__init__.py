@@ -3342,6 +3342,24 @@ def st_pivot_table(
         conditional formatting rules), not as a post-``show_values_as``
         display value. Values outside the observed column range clamp
         to the endpoint colors.
+        ``"scope"`` controls the min/max range for ``color_scale`` and
+        ``data_bars`` rules in XLSX export. Has no effect on
+        ``"threshold"`` rules.
+
+        When ``values_axis="columns"``: omitting ``"scope"`` (or setting it
+        to ``"per_column"``) gives each data column its own independent
+        min/max, so the gradient ranks values relative to their own time
+        period or category. Set ``"scope": "global"`` to use a single scale
+        spanning all target columns.
+
+        When ``values_axis="rows"``: omitting ``"scope"`` gives each value
+        field its own independent scale (one XLSX CF entry per measure). This
+        is the correct default when ``apply_to`` covers multiple fields with
+        different units (Revenue, Units, Margin, …) — they are never
+        normalised together. Set ``"scope": "global"`` to force a single
+        scale across all selected measure rows and data columns (only
+        appropriate when all targeted fields share the same units).
+        ``"scope": "per_column"`` gives one scale per data column.
     number_format : str or dict[str, str] or None
         Number format pattern(s). A single string applies to all
         value fields; a dict maps field names to patterns. Use
@@ -3984,6 +4002,12 @@ def st_pivot_table(
             ):
                 raise TypeError(
                     f"conditional_formatting[{i}]['apply_to'] must be a list of strings"
+                )
+            scope = rule.get("scope")
+            if scope is not None and scope not in ("global", "per_column"):
+                raise ValueError(
+                    f"conditional_formatting[{i}]['scope'] must be "
+                    f'"global" or "per_column", got {scope!r}'
                 )
             if rtype == "color_scale":
                 for color_key in ("min_color", "max_color"):
