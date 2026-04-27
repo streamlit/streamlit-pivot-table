@@ -53,6 +53,7 @@ import {
   reconcileValueOrder,
   stringifyPivotConfig,
   getSyntheticSourceFields,
+  pruneSortConfigByField,
   type AggregationConfig,
   type AggregationType,
   type DimensionFilter,
@@ -288,17 +289,19 @@ export function cleanupConfigAfterFieldChanges(
       const pruned = updated.show_column_totals.filter((f) => f !== field);
       updated.show_column_totals = pruned.length > 0 ? pruned : false;
     }
-    if (
-      updated.row_sort?.by === "value" &&
-      updated.row_sort.value_field === field
-    ) {
-      delete updated.row_sort;
+    {
+      const rs = pruneSortConfigByField(updated.row_sort, {
+        valueField: field,
+      });
+      if (rs === undefined) delete updated.row_sort;
+      else updated.row_sort = rs;
     }
-    if (
-      updated.col_sort?.by === "value" &&
-      updated.col_sort.value_field === field
-    ) {
-      delete updated.col_sort;
+    {
+      const cs = pruneSortConfigByField(updated.col_sort, {
+        valueField: field,
+      });
+      if (cs === undefined) delete updated.col_sort;
+      else updated.col_sort = cs;
     }
     if (updated.conditional_formatting) {
       updated.conditional_formatting = updated.conditional_formatting
@@ -333,9 +336,12 @@ export function cleanupConfigAfterFieldChanges(
   if (rowsChanged) {
     const removedFromRows = [...oldRows].filter((f) => !newRows.has(f));
     for (const field of removedFromRows) {
-      if (updated.row_sort?.dimension === field) {
-        delete updated.row_sort;
-      }
+      const rs = pruneSortConfigByField(updated.row_sort, {
+        dimensionField: field,
+        isFirstAxisDim: oldConfig.rows[0] === field,
+      });
+      if (rs === undefined) delete updated.row_sort;
+      else updated.row_sort = rs;
     }
     // Prune analytical filters on removed row dimension fields.
     if (removedFromRows.length > 0) {
@@ -374,9 +380,12 @@ export function cleanupConfigAfterFieldChanges(
   if (colsChanged) {
     const removedFromCols = [...oldCols].filter((f) => !newCols.has(f));
     for (const field of removedFromCols) {
-      if (updated.col_sort?.dimension === field) {
-        delete updated.col_sort;
-      }
+      const cs = pruneSortConfigByField(updated.col_sort, {
+        dimensionField: field,
+        isFirstAxisDim: oldConfig.columns[0] === field,
+      });
+      if (cs === undefined) delete updated.col_sort;
+      else updated.col_sort = cs;
     }
     // Prune analytical filters on removed column dimension fields.
     if (removedFromCols.length > 0) {

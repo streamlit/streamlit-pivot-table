@@ -399,8 +399,9 @@ class PivotConfig(TypedDict, total=False):
     show_column_totals: bool | list[str]
     empty_cell_value: str
     interactive: bool
-    row_sort: SortConfig
-    col_sort: SortConfig
+    row_sort: list[SortConfig] | SortConfig
+    col_sort: list[SortConfig] | SortConfig
+    subtotal_position: str
     show_subtotals: bool | list[str]
     repeat_row_labels: bool
     row_layout: str
@@ -2806,10 +2807,11 @@ def _default_config(
     show_column_totals: bool | list[str] | None = None,
     empty_cell_value: str = "-",
     interactive: bool = True,
-    row_sort: SortConfig | None = None,
-    col_sort: SortConfig | None = None,
+    row_sort: list[SortConfig] | SortConfig | None = None,
+    col_sort: list[SortConfig] | SortConfig | None = None,
     sticky_headers: bool = True,
     show_subtotals: bool | list[str] = False,
+    subtotal_position: Literal["top", "bottom"] = "bottom",
     repeat_row_labels: bool = False,
     row_layout: Literal["table", "hierarchy"] = "table",
     show_values_as: dict[str, str] | None = None,
@@ -2873,6 +2875,8 @@ def _default_config(
         cfg["row_sort"] = row_sort
     if col_sort is not None:
         cfg["col_sort"] = col_sort
+    if subtotal_position != "bottom":
+        cfg["subtotal_position"] = subtotal_position
     if date_grains is not None:
         cfg["date_grains"] = dict(sorted(date_grains.items()))
     if not sticky_headers:
@@ -3067,11 +3071,12 @@ def st_pivot_table(
     sorters: dict[str, list[str]] | None = None,
     locked: bool = False,
     menu_limit: int | None = None,
-    row_sort: SortConfig | None = None,
-    col_sort: SortConfig | None = None,
+    row_sort: list[SortConfig] | SortConfig | None = None,
+    col_sort: list[SortConfig] | SortConfig | None = None,
     # Phase 3 parameters
     sticky_headers: bool = True,
     show_subtotals: bool | list[str] = False,
+    subtotal_position: Literal["top", "bottom"] = "bottom",
     repeat_row_labels: bool = False,
     row_layout: Literal["table", "hierarchy"] = "table",
     show_values_as: dict[str, str] | None = None,
@@ -3232,16 +3237,19 @@ def st_pivot_table(
     menu_limit : int or None
         Max items to show in the header-menu filter checklist. Defaults
         to 50 when None.
-    row_sort : dict or None
-        Initial sort configuration for rows. Dict with keys ``by``
-        ("key" or "value"), ``direction`` ("asc" or "desc"), and
-        optionally ``value_field`` (str), ``col_key`` (list[str]), and
-        ``dimension`` (str).  When ``dimension`` is set and subtotals
-        are enabled, only the targeted level and below sort — parent
-        groups keep their existing order (scoped sorting).
-    col_sort : dict or None
+    row_sort : dict or list[dict] or None
+        Initial sort configuration for rows. A single dict or a list of
+        dicts for multi-field sorting (secondary, tertiary, …). Each dict
+        has keys ``by`` ("key" or "value"), ``direction`` ("asc" or
+        "desc"), and optionally ``value_field`` (str), ``col_key``
+        (list[str]), and ``dimension`` (str).  When ``dimension`` is set
+        and subtotals are enabled, only the targeted level and below sort
+        — parent groups keep their existing order (scoped sorting).
+        Multiple configs are applied as a chained comparator: ties from
+        the primary config are broken by the secondary, and so on.
+    col_sort : dict or list[dict] or None
         Initial sort configuration for columns. Same shape as row_sort
-        (without ``col_key``).
+        (without ``col_key``). Accepts a single dict or a list of dicts.
     sticky_headers : bool
         If True (default), column headers stick to the top of the
         scrolling container so they remain visible when scrolling
@@ -3250,6 +3258,14 @@ def st_pivot_table(
         ``True`` = subtotal rows at every parent level, ``False`` = none,
         ``["Region"]`` = only Region-level subtotals. Requires 2+ row
         dimensions. Defaults to False.
+    subtotal_position : {"top", "bottom"}
+        Controls where subtotal rows appear relative to their group
+        members. ``"bottom"`` (default) places the subtotal after all
+        group members — consistent with Excel's default pivot behavior.
+        ``"top"`` places the subtotal before group members, acting as a
+        group header row. Has no effect when ``show_subtotals`` is
+        False or when ``row_layout="hierarchy"`` (hierarchy mode always
+        renders subtotals above children). Defaults to ``"bottom"``.
     repeat_row_labels : bool
         If True, row dimension labels are repeated on every row
         instead of being merged/spanned. Defaults to False.
@@ -3532,26 +3548,41 @@ def st_pivot_table(
     # --- Sort config validation ---
     _VALID_SORT_BY = frozenset(("key", "value"))
     _VALID_SORT_DIR = frozenset(("asc", "desc"))
+
+    def _validate_single_sort_cfg(sc: dict, param_name: str) -> None:
+        if not isinstance(sc, dict):
+            raise TypeError(
+                f"{param_name} must be a dict or list of dicts, got {type(sc).__name__}"
+            )
+        if sc.get("by") not in _VALID_SORT_BY:
+            raise ValueError(f"{param_name}['by'] must be 'key' or 'value'")
+        if sc.get("direction") not in _VALID_SORT_DIR:
+            raise ValueError(f"{param_name}['direction'] must be 'asc' or 'desc'")
+        if sc.get("by") == "value":
+            vf = sc.get("value_field")
+            if vf is not None and not isinstance(vf, str):
+                raise TypeError(f"{param_name}['value_field'] must be a string")
+        ck = sc.get("col_key")
+        if ck is not None:
+            if not isinstance(ck, list) or not all(isinstance(s, str) for s in ck):
+                raise TypeError(f"{param_name}['col_key'] must be a list of strings")
+
     for param_name, sort_cfg in [("row_sort", row_sort), ("col_sort", col_sort)]:
         if sort_cfg is not None:
-            if not isinstance(sort_cfg, dict):
-                raise TypeError(
-                    f"{param_name} must be a dict or None, got {type(sort_cfg).__name__}"
-                )
-            if sort_cfg.get("by") not in _VALID_SORT_BY:
-                raise ValueError(f"{param_name}['by'] must be 'key' or 'value'")
-            if sort_cfg.get("direction") not in _VALID_SORT_DIR:
-                raise ValueError(f"{param_name}['direction'] must be 'asc' or 'desc'")
-            if sort_cfg.get("by") == "value":
-                vf = sort_cfg.get("value_field")
-                if vf is not None and not isinstance(vf, str):
-                    raise TypeError(f"{param_name}['value_field'] must be a string")
-            ck = sort_cfg.get("col_key")
-            if ck is not None:
-                if not isinstance(ck, list) or not all(isinstance(s, str) for s in ck):
-                    raise TypeError(
-                        f"{param_name}['col_key'] must be a list of strings"
-                    )
+            if isinstance(sort_cfg, list):
+                if len(sort_cfg) == 0:
+                    raise ValueError(f"{param_name} list must not be empty")
+                for idx, sc in enumerate(sort_cfg):
+                    _validate_single_sort_cfg(sc, f"{param_name}[{idx}]")
+            else:
+                _validate_single_sort_cfg(sort_cfg, param_name)
+
+    # --- Subtotal position validation ---
+    _VALID_SUBTOTAL_POS = frozenset(("top", "bottom"))
+    if subtotal_position not in _VALID_SUBTOTAL_POS:
+        raise ValueError(
+            f"subtotal_position must be 'top' or 'bottom', got {subtotal_position!r}"
+        )
 
     # --- Column list type + membership validation ---
     df_cols = set(data.columns)
@@ -4127,6 +4158,7 @@ def st_pivot_table(
         col_sort=col_sort,
         sticky_headers=sticky_headers,
         show_subtotals=show_subtotals,
+        subtotal_position=subtotal_position,
         repeat_row_labels=repeat_row_labels,
         row_layout=row_layout,
         show_values_as=show_values_as,

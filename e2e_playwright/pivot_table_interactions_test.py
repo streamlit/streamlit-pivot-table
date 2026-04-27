@@ -2383,3 +2383,54 @@ def test_filter_chip_remove_button_removes_field(page_at_app: Page):
 
     # FilterBar should disappear (no more filter_fields)
     expect(container.get_by_test_id("filter-bar")).not_to_be_attached(timeout=3000)
+
+
+# ---------------------------------------------------------------------------
+# Commit 4: subtotal_position
+# ---------------------------------------------------------------------------
+
+
+def test_subtotal_position_bottom_subtotal_appears_after_members(
+    page_at_app: Page,
+):
+    """With subtotal_position='bottom', each subtotal row follows its group members."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_subtotal_bottom")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # East has 2 members (A, B) then a subtotal; West has 2 members then a subtotal.
+    # So the first subtotal row should NOT be the first row.
+    data_rows = container.get_by_test_id("pivot-data-row").all()
+    subtotal_rows = container.get_by_test_id("pivot-subtotal-row").all()
+
+    assert len(data_rows) >= 2, "Expected at least 2 data rows"
+    assert len(subtotal_rows) >= 1, "Expected at least 1 subtotal row"
+
+    # Get the bounding boxes to check ordering (subtotal should come after data rows)
+    first_subtotal_y = subtotal_rows[0].bounding_box()["y"]
+    first_data_y = data_rows[0].bounding_box()["y"]
+    assert (
+        first_data_y < first_subtotal_y
+    ), "In 'bottom' mode the first subtotal row should appear BELOW the first data row"
+
+
+def test_subtotal_position_top_subtotal_appears_before_members(
+    page_at_app: Page,
+):
+    """With subtotal_position='top', each subtotal row precedes its group members."""
+    page = page_at_app
+    container = get_pivot(page, "test_pivot_subtotal_top")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    data_rows = container.get_by_test_id("pivot-data-row").all()
+    subtotal_rows = container.get_by_test_id("pivot-subtotal-row").all()
+
+    assert len(data_rows) >= 2, "Expected at least 2 data rows"
+    assert len(subtotal_rows) >= 1, "Expected at least 1 subtotal row"
+
+    # In 'top' mode the first row in the tbody should be a subtotal (group header).
+    first_subtotal_y = subtotal_rows[0].bounding_box()["y"]
+    first_data_y = data_rows[0].bounding_box()["y"]
+    assert (
+        first_subtotal_y < first_data_y
+    ), "In 'top' mode the first subtotal row should appear ABOVE the first data row"

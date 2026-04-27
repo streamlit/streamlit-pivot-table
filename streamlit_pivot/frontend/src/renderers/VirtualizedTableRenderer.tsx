@@ -83,7 +83,11 @@ export interface VirtualizedTableRendererProps {
   rowHeight?: number;
   columnWidth?: number;
   headerHeight?: number;
-  onSortChange?: (axis: "row" | "col", sort: SortConfig | undefined) => void;
+  onSortChange?: (
+    axis: "row" | "col",
+    sort: SortConfig | undefined,
+    dimension: string,
+  ) => void;
   onFilterChange?: (field: string, filter: DimensionFilter | undefined) => void;
   onConfigChange?: (config: PivotConfigV1) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;

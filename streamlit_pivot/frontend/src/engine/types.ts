@@ -173,12 +173,19 @@ export interface PivotConfigV1 {
   interactive: boolean;
   /** Phase 2: per-dimension value filters (include/exclude lists). */
   filters?: Record<string, DimensionFilter>;
-  /** Phase 2: row sort config. */
-  row_sort?: SortConfig;
-  /** Phase 2: column sort config. */
-  col_sort?: SortConfig;
+  /** Phase 2: row sort config. Accepts a single SortConfig or an array for multi-field (chained) sorting. */
+  row_sort?: SortConfig | SortConfig[];
+  /** Phase 2: column sort config. Accepts a single SortConfig or an array for multi-field (chained) sorting. */
+  col_sort?: SortConfig | SortConfig[];
   /** Phase 3a: show subtotal rows. bool = all/none dims, string[] = only listed dims. */
   show_subtotals?: boolean | string[];
+  /**
+   * Controls where subtotal rows appear relative to their group members.
+   * "bottom" (default) places the subtotal after all group members.
+   * "top" places the subtotal before group members, acting as a group header row.
+   * Has no effect when show_subtotals is false or when row_layout="hierarchy".
+   */
+  subtotal_position?: "top" | "bottom";
   /** Phase 3a: repeat row labels on every row instead of spanning. */
   repeat_row_labels?: boolean;
   /** Row header presentation mode: multi-column table vs compact hierarchy tree. */
@@ -348,6 +355,89 @@ export function migrateSortDirection(dir: LegacySortDirection): SortConfig {
     case "value_desc":
       return { by: "value", direction: "desc" };
   }
+}
+
+/**
+ * Extract the primary (first) SortConfig from a single config or array.
+ * Returns `undefined` when the input is absent. Used by UI components that
+ * need to display the sort direction indicator for the current primary sort.
+ */
+export function getPrimarySortConfig(
+  sc: SortConfig | SortConfig[] | undefined,
+): SortConfig | undefined {
+  if (!sc) return undefined;
+  return Array.isArray(sc) ? sc[0] : sc;
+}
+
+/**
+ * Find the SortConfig that applies to a specific axis dimension.
+ *
+ * - In an array, returns the first element whose `dimension` matches `dim`.
+ * - A config without a `dimension` field is a "global" sort treated as
+ *   belonging to the first (outermost) axis dimension; it is returned only
+ *   when `isFirstInAxis` is `true`.
+ * - For a single SortConfig the same rules apply.
+ *
+ * Use this to determine per-dimension sort indicators and active menu state.
+ */
+export function findDimSortConfig(
+  sort: SortConfig | SortConfig[] | undefined,
+  dim: string,
+  isFirstInAxis: boolean,
+): SortConfig | undefined {
+  if (!sort) return undefined;
+  const configs = Array.isArray(sort) ? sort : [sort];
+  const exact = configs.find((sc) => sc.dimension === dim);
+  if (exact) return exact;
+  if (isFirstInAxis) return configs.find((sc) => !sc.dimension);
+  return undefined;
+}
+
+/**
+ * Remove sort configs that reference a deleted dimension or value field.
+ *
+ * - For a single `SortConfig`: returns `undefined` if the config matches,
+ *   otherwise returns it unchanged.
+ * - For a `SortConfig[]`: filters out matching elements; returns `undefined`
+ *   if the array becomes empty, or the single remaining element if only one
+ *   survives (compacted for consistency with the single-config form).
+ *
+ * Pass `isFirstAxisDim: true` when the removed `dimensionField` was the first
+ * dimension on its axis.  This ensures that global (undimensioned) sort configs
+ * — which are owned by the first axis dimension — are also pruned alongside
+ * the dimension-specific ones.
+ *
+ * Use for cleanup when a field is removed from rows/columns/values.
+ */
+export function pruneSortConfigByField(
+  sc: SortConfig | SortConfig[] | undefined,
+  opts: {
+    dimensionField?: string;
+    valueField?: string;
+    isFirstAxisDim?: boolean;
+  },
+): SortConfig | SortConfig[] | undefined {
+  if (!sc) return undefined;
+  const matches = (c: SortConfig): boolean => {
+    if (opts.dimensionField && c.dimension === opts.dimensionField) return true;
+    // Global (undimensioned) sorts are owned by the first axis dimension; prune
+    // them when that dimension is being removed.
+    if (opts.dimensionField && opts.isFirstAxisDim && !c.dimension) return true;
+    if (
+      opts.valueField &&
+      c.by === "value" &&
+      c.value_field === opts.valueField
+    )
+      return true;
+    return false;
+  };
+  if (Array.isArray(sc)) {
+    const kept = sc.filter((c) => !matches(c));
+    if (kept.length === 0) return undefined;
+    // Compact a surviving single element back to a plain SortConfig.
+    return kept.length === 1 ? kept[0] : kept;
+  }
+  return matches(sc) ? undefined : sc;
 }
 
 /** Type guard: is the value a legacy string sort direction? */
@@ -1175,8 +1265,24 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     );
   }
 
-  const rowSort = validateSortConfig(o.row_sort, "row_sort");
-  const colSort = validateSortConfig(o.col_sort, "col_sort");
+  const rowSort = Array.isArray(o.row_sort)
+    ? (() => {
+        if ((o.row_sort as unknown[]).length === 0)
+          throw new Error("'row_sort' array must not be empty");
+        return (o.row_sort as unknown[])
+          .map((sc, i) => validateSortConfig(sc, `row_sort[${i}]`))
+          .filter((sc): sc is SortConfig => sc !== undefined);
+      })()
+    : validateSortConfig(o.row_sort, "row_sort");
+  const colSort = Array.isArray(o.col_sort)
+    ? (() => {
+        if ((o.col_sort as unknown[]).length === 0)
+          throw new Error("'col_sort' array must not be empty");
+        return (o.col_sort as unknown[])
+          .map((sc, i) => validateSortConfig(sc, `col_sort[${i}]`))
+          .filter((sc): sc is SortConfig => sc !== undefined);
+      })()
+    : validateSortConfig(o.col_sort, "col_sort");
 
   const showTotals =
     typeof o.show_totals === "boolean"
@@ -1245,8 +1351,18 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
   }
   if (o.filters !== undefined)
     result.filters = o.filters as Record<string, DimensionFilter>;
-  if (rowSort) result.row_sort = rowSort;
-  if (colSort) result.col_sort = colSort;
+  if (rowSort && (!Array.isArray(rowSort) || rowSort.length > 0))
+    result.row_sort = rowSort;
+  if (colSort && (!Array.isArray(colSort) || colSort.length > 0))
+    result.col_sort = colSort;
+  if (o.subtotal_position !== undefined) {
+    if (o.subtotal_position !== "top" && o.subtotal_position !== "bottom") {
+      throw new Error(
+        `'subtotal_position' must be "top" or "bottom", got ${JSON.stringify(o.subtotal_position)}`,
+      );
+    }
+    result.subtotal_position = o.subtotal_position;
+  }
   const subtotals = normalizeBoolOrList(
     o.show_subtotals,
     rows.slice(0, -1),

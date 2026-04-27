@@ -2983,3 +2983,262 @@ describe("PivotData — Value filters", () => {
     expect(usRows).not.toContain("Beta");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Commit 4: Multi-field Sorting
+// ---------------------------------------------------------------------------
+
+describe("PivotData - multi-field sorting", () => {
+  // Dataset: three regions with different revenue totals and alphabetical order
+  // EU: 450, US: 300, AP: 300 (tie in revenue)
+  const TIE_DATA: DataRecord[] = [
+    { region: "EU", category: "B", revenue: 250 },
+    { region: "EU", category: "A", revenue: 200 },
+    { region: "US", category: "B", revenue: 180 },
+    { region: "US", category: "A", revenue: 120 },
+    { region: "AP", category: "B", revenue: 160 },
+    { region: "AP", category: "A", revenue: 140 },
+  ];
+
+  it("single-element array row_sort is backward-compatible with single SortConfig", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ row_sort: [{ by: "key", direction: "desc" }] }),
+    );
+    expect(pd.getRowKeys()).toEqual([["US"], ["EU"]]);
+  });
+
+  it("single-element array col_sort is backward-compatible with single SortConfig", () => {
+    const pd = new PivotData(
+      SAMPLE_DATA,
+      makeConfig({ col_sort: [{ by: "key", direction: "desc" }] }),
+    );
+    expect(pd.getColKeys()).toEqual([["2024"], ["2023"]]);
+  });
+
+  it("multi-sort: primary value desc, secondary key asc breaks ties correctly", () => {
+    // EU total=450 > US=300=AP → EU first; US and AP tie in revenue → key asc → AP, US
+    const pd = new PivotData(
+      TIE_DATA,
+      makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        row_sort: [
+          { by: "value", direction: "desc" },
+          { by: "key", direction: "asc" },
+        ],
+      }),
+    );
+    expect(pd.getRowKeys()).toEqual([["EU"], ["AP"], ["US"]]);
+  });
+
+  it("multi-sort: primary value desc, secondary key desc breaks ties in reverse", () => {
+    const pd = new PivotData(
+      TIE_DATA,
+      makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        row_sort: [
+          { by: "value", direction: "desc" },
+          { by: "key", direction: "desc" },
+        ],
+      }),
+    );
+    expect(pd.getRowKeys()).toEqual([["EU"], ["US"], ["AP"]]);
+  });
+
+  it("multi-sort: primary key asc, secondary value desc — key dominates", () => {
+    // key asc → AP, EU, US regardless of revenue
+    const pd = new PivotData(
+      TIE_DATA,
+      makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        row_sort: [
+          { by: "key", direction: "asc" },
+          { by: "value", direction: "desc" },
+        ],
+      }),
+    );
+    expect(pd.getRowKeys()).toEqual([["AP"], ["EU"], ["US"]]);
+  });
+
+  it("multi-sort with nested dimensions: secondary sort breaks parent-level subtotal ties", () => {
+    // 2-level: [region, category]. Primary: value desc on revenue, secondary: key asc.
+    // EU/B=250, EU/A=200, US/B=180, US/A=120, AP/B=160, AP/A=140.
+    // Region totals: EU=450, US=300, AP=300 → EU first.
+    // US and AP tie (both 300) → primary's key fallback is suppressed for non-final
+    // comparators → secondary (key asc) resolves the tie → AP before US.
+    const pd = new PivotData(
+      TIE_DATA,
+      makeConfig({
+        rows: ["region", "category"],
+        columns: [],
+        values: ["revenue"],
+        show_subtotals: false,
+        row_sort: [
+          { by: "value", direction: "desc" },
+          { by: "key", direction: "asc" },
+        ],
+      }),
+    );
+    const rowKeys = pd.getRowKeys().map((k) => k.join("/"));
+    // EU first (450), then AP (300, alphabetically before US), then US (300).
+    // Within each region primary orders by revenue desc: B > A for EU; B > A for others.
+    expect(rowKeys).toEqual(["EU/B", "EU/A", "AP/B", "AP/A", "US/B", "US/A"]);
+  });
+
+  it("multi-sort with nested dimensions: secondary sort breaks leaf-level ties", () => {
+    // 2-level: [region, category]. Primary: value desc on revenue, secondary: key asc.
+    // EU/A=200, EU/B=250 → region totals differ (EU=450 > US=260), so primary cleanly
+    // orders regions. Within US both categories are tied at 130, so the secondary
+    // (key asc) must activate to produce A before B.
+    const leafTieData: DataRecord[] = [
+      { region: "EU", category: "A", revenue: 200 },
+      { region: "EU", category: "B", revenue: 250 },
+      { region: "US", category: "A", revenue: 130 },
+      { region: "US", category: "B", revenue: 130 },
+    ];
+    const pd = new PivotData(
+      leafTieData,
+      makeConfig({
+        rows: ["region", "category"],
+        columns: [],
+        values: ["revenue"],
+        show_subtotals: false,
+        row_sort: [
+          { by: "value", direction: "desc" },
+          { by: "key", direction: "asc" },
+        ],
+      }),
+    );
+    const rowKeys = pd.getRowKeys().map((k) => k.join("/"));
+    // Primary puts EU (450) before US (260). Within EU: B(250)>A(200) → B first.
+    // Within US: A=B=130 (tie) → secondary key asc → A before B.
+    expect(rowKeys).toEqual(["EU/B", "EU/A", "US/A", "US/B"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 4: Subtotal Position
+// ---------------------------------------------------------------------------
+
+describe("PivotData - subtotal_position", () => {
+  function subtotalConfig(overrides: TestConfigOverrides = {}): PivotConfigV1 {
+    return makeConfig({
+      rows: ["region", "state"],
+      columns: ["year"],
+      values: ["revenue"],
+      show_subtotals: true,
+      ...overrides,
+    });
+  }
+
+  it("subtotal_position=bottom (default) places subtotals after group members", () => {
+    const pd = new PivotData(MULTI_ROW_DATA, subtotalConfig());
+    const entries = pd
+      .getGroupedRowKeys()
+      .map((g) => `${g.type}:${g.key.join("/")}`);
+    // EU members first, then EU subtotal; US members first, then US subtotal
+    expect(entries).toEqual([
+      "data:EU/DE",
+      "data:EU/FR",
+      "subtotal:EU",
+      "data:US/CA",
+      "data:US/NY",
+      "subtotal:US",
+    ]);
+  });
+
+  it("subtotal_position=top places subtotals before group members", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      subtotalConfig({ subtotal_position: "top" }),
+    );
+    const entries = pd
+      .getGroupedRowKeys()
+      .map((g) => `${g.type}:${g.key.join("/")}`);
+    // EU subtotal first, then EU members; US subtotal first, then US members
+    expect(entries).toEqual([
+      "subtotal:EU",
+      "data:EU/DE",
+      "data:EU/FR",
+      "subtotal:US",
+      "data:US/CA",
+      "data:US/NY",
+    ]);
+  });
+
+  it("subtotal_position=top with collapsed group still shows subtotal header but hides members", () => {
+    const pd = new PivotData(
+      MULTI_ROW_DATA,
+      subtotalConfig({
+        subtotal_position: "top",
+        collapsed_groups: ["EU"],
+      }),
+    );
+    const entries = pd
+      .getGroupedRowKeys()
+      .map((g) => `${g.type}:${g.key.join("/")}`);
+    // EU subtotal (header) shows; EU members hidden; US subtotal + members visible
+    expect(entries).toEqual([
+      "subtotal:EU",
+      "subtotal:US",
+      "data:US/CA",
+      "data:US/NY",
+    ]);
+  });
+
+  it("subtotal_position=top with 3-level nesting emits headers at each level", () => {
+    const data: DataRecord[] = [
+      { a: "X", b: "1", c: "i", v: 10 },
+      { a: "X", b: "1", c: "ii", v: 20 },
+      { a: "X", b: "2", c: "i", v: 30 },
+      { a: "Y", b: "1", c: "i", v: 40 },
+    ];
+    const config = makeConfig({
+      rows: ["a", "b", "c"],
+      columns: [],
+      values: ["v"],
+      show_subtotals: true,
+      subtotal_position: "top",
+    });
+    const pd = new PivotData(data, config);
+    const typeKeys = pd
+      .getGroupedRowKeys()
+      .map((g) => `${g.type}[${g.level}]:${g.key.join("/")}`);
+    // X header, then X/1 header, then X/1/i, X/1/ii,
+    // then X/2 header, then X/2/i, then X header (no — header emitted at group START)
+    // Correct order: subtotal X, subtotal X/1, data X/1/i, data X/1/ii,
+    //                subtotal X/2, data X/2/i, subtotal Y, subtotal Y/1, data Y/1/i
+    expect(typeKeys).toEqual([
+      "subtotal[0]:X",
+      "subtotal[1]:X/1",
+      "data[2]:X/1/i",
+      "data[2]:X/1/ii",
+      "subtotal[1]:X/2",
+      "data[2]:X/2/i",
+      "subtotal[0]:Y",
+      "subtotal[1]:Y/1",
+      "data[2]:Y/1/i",
+    ]);
+  });
+
+  it("subtotal_position does not affect output when show_subtotals=false", () => {
+    const pdBottom = new PivotData(
+      MULTI_ROW_DATA,
+      subtotalConfig({ show_subtotals: false, subtotal_position: "bottom" }),
+    );
+    const pdTop = new PivotData(
+      MULTI_ROW_DATA,
+      subtotalConfig({ show_subtotals: false, subtotal_position: "top" }),
+    );
+    expect(pdTop.getGroupedRowKeys()).toEqual(pdBottom.getGroupedRowKeys());
+    expect(pdTop.getGroupedRowKeys().every((g) => g.type === "data")).toBe(
+      true,
+    );
+  });
+});

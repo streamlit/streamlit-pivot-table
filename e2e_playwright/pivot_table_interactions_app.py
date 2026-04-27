@@ -463,9 +463,51 @@ def render_app(data):
     )
 
 
+def _make_subtotal_position_data() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Region": ["East", "East", "West", "West"],
+            "Category": ["A", "B", "A", "B"],
+            "Year": ["2023", "2023", "2023", "2023"],
+            "Revenue": [100, 150, 200, 250],
+        }
+    )
+
+
+def render_subtotal_position_fixtures() -> None:
+    df = _make_subtotal_position_data()
+
+    st.subheader("Subtotal Position – Bottom (default)")
+    st_pivot_table(
+        df,
+        key="test_pivot_subtotal_bottom",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        show_subtotals=True,
+        subtotal_position="bottom",
+        interactive=True,
+        on_config_change=noop,
+    )
+
+    st.subheader("Subtotal Position – Top")
+    st_pivot_table(
+        df,
+        key="test_pivot_subtotal_top",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        show_subtotals=True,
+        subtotal_position="top",
+        interactive=True,
+        on_config_change=noop,
+    )
+
+
 def main():
     init_page()
     render_app(load_data())
+    render_subtotal_position_fixtures()
 
 
 if __name__ == "__main__":

@@ -66,6 +66,8 @@ import {
   type ShowValuesAs,
   type SortConfig,
   type SyntheticMeasureConfig,
+  getPrimarySortConfig,
+  pruneSortConfigByField,
   validatePivotConfigRuntime,
   validatePivotConfigV1,
 } from "../engine/types";
@@ -317,17 +319,19 @@ export function applyDragMove({
       const pruned = updated.show_column_totals.filter((f) => f !== field);
       updated.show_column_totals = pruned.length > 0 ? pruned : false;
     }
-    if (
-      updated.row_sort?.by === "value" &&
-      updated.row_sort.value_field === field
-    ) {
-      delete updated.row_sort;
+    {
+      const rs = pruneSortConfigByField(updated.row_sort, {
+        valueField: field,
+      });
+      if (rs === undefined) delete updated.row_sort;
+      else updated.row_sort = rs;
     }
-    if (
-      updated.col_sort?.by === "value" &&
-      updated.col_sort.value_field === field
-    ) {
-      delete updated.col_sort;
+    {
+      const cs = pruneSortConfigByField(updated.col_sort, {
+        valueField: field,
+      });
+      if (cs === undefined) delete updated.col_sort;
+      else updated.col_sort = cs;
     }
     if (updated.conditional_formatting) {
       updated.conditional_formatting = updated.conditional_formatting
@@ -354,8 +358,13 @@ export function applyDragMove({
   }
 
   if (sourceZone === "rows") {
-    if (updated.row_sort?.dimension === field) {
-      delete updated.row_sort;
+    {
+      const rs = pruneSortConfigByField(updated.row_sort, {
+        dimensionField: field,
+        isFirstAxisDim: config.rows[0] === field,
+      });
+      if (rs === undefined) delete updated.row_sort;
+      else updated.row_sort = rs;
     }
     delete updated.collapsed_groups;
     if (Array.isArray(updated.show_subtotals)) {
@@ -380,8 +389,13 @@ export function applyDragMove({
   }
 
   if (sourceZone === "columns") {
-    if (updated.col_sort?.dimension === field) {
-      delete updated.col_sort;
+    {
+      const cs = pruneSortConfigByField(updated.col_sort, {
+        dimensionField: field,
+        isFirstAxisDim: config.columns[0] === field,
+      });
+      if (cs === undefined) delete updated.col_sort;
+      else updated.col_sort = cs;
     }
     delete updated.collapsed_col_groups;
     // Prune analytical filters on the column dimension that was dragged out.
@@ -836,7 +850,7 @@ const Toolbar: FC<ToolbarProps> = ({
             selected={config.rows}
             disabled={locked}
             frozenColumns={frozenColumns}
-            sortConfig={config.row_sort}
+            sortConfig={getPrimarySortConfig(config.row_sort)}
             filters={config.filters}
             isDropHighlighted={activeOverZone === "rows"}
             activeId={activeId}
@@ -858,7 +872,7 @@ const Toolbar: FC<ToolbarProps> = ({
             selected={config.columns}
             disabled={locked}
             frozenColumns={frozenColumns}
-            sortConfig={config.col_sort}
+            sortConfig={getPrimarySortConfig(config.col_sort)}
             filters={config.filters}
             isDropHighlighted={activeOverZone === "columns"}
             activeId={activeId}

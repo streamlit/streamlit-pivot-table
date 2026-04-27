@@ -819,6 +819,144 @@ st_pivot_table(
 section_top_n_value_filters()
 
 # ---------------------------------------------------------------------------
+# Section 5d: Multi-field Sorting + Subtotal Position (0.5.0)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("5d. Multi-field Sorting + Subtotal Position (0.5.0)")
+
+
+@st.fragment
+def section_sort_and_subtotals():
+    st.markdown(
+        """
+**Multi-field sorting** lets you chain sort criteria: the primary sort orders
+rows/columns, and the secondary (tertiary, …) kicks in only when values are
+equal, guaranteeing a deterministic, stable order.
+
+**Subtotal position** (`"top"` or `"bottom"`) controls whether subtotal rows
+appear as group *headers* (above members) or group *footers* (after members,
+the default — matching Excel's default pivot behavior).
+
+| Feature | Parameter | Default |
+|---------|-----------|---------|
+| Multi-field row sort | `row_sort=[{…}, {…}]` | single sort |
+| Multi-field column sort | `col_sort=[{…}, {…}]` | single sort |
+| Subtotal placement | `subtotal_position` | `"bottom"` |
+
+**API parameters used:** `row_sort` (list), `subtotal_position`
+"""
+    )
+
+    import pandas as pd  # noqa: PLC0415
+
+    sort_data = pd.DataFrame(
+        {
+            "Region": ["East"] * 4 + ["West"] * 4,
+            "Category": ["Electronics", "Furniture", "Electronics", "Furniture"] * 2,
+            "Year": ["2023", "2023", "2024", "2024"] * 2,
+            "Revenue": [500, 500, 700, 300, 600, 200, 800, 400],
+            "Units": [10, 20, 14, 6, 12, 4, 16, 8],
+        }
+    )
+
+    st.markdown("##### Multi-field Sort: Primary Revenue desc, Secondary Category asc")
+    st.caption(
+        "East/2024 and West/2024 rows have different revenues so primary sort orders "
+        "them. Rows with equal revenue (East/2023 Electronics = West/2023 Electronics "
+        "= 500 and 600) fall back to Category asc for a stable, deterministic order."
+    )
+    st_pivot_table(
+        sort_data,
+        key="demo_multi_sort",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Units"],
+        row_sort=[
+            {
+                "by": "value",
+                "direction": "desc",
+                "dimension": "Region",
+                "value_field": "Revenue",
+            },
+            {"by": "key", "direction": "asc", "dimension": "Category"},
+        ],
+        show_subtotals=True,
+        number_format={"Revenue": "$,.0f"},
+    )
+
+    subtotal_data = pd.DataFrame(
+        {
+            "Region": ["East", "East", "East", "West", "West", "West"],
+            "Category": ["Electronics", "Furniture", "Clothing"] * 2,
+            "Revenue": [400, 300, 200, 350, 450, 150],
+        }
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("##### Subtotals at Bottom (default)")
+        st.caption("Subtotal row appears after group members — Excel default behavior.")
+        st_pivot_table(
+            subtotal_data,
+            key="demo_subtotal_bottom",
+            rows=["Region", "Category"],
+            columns=[],
+            values=["Revenue"],
+            show_subtotals=True,
+            subtotal_position="bottom",
+            number_format={"Revenue": "$,.0f"},
+        )
+    with col2:
+        st.markdown("##### Subtotals at Top")
+        st.caption(
+            "Subtotal row appears before group members — acts as a collapsible "
+            "group header."
+        )
+        st_pivot_table(
+            subtotal_data,
+            key="demo_subtotal_top",
+            rows=["Region", "Category"],
+            columns=[],
+            values=["Revenue"],
+            show_subtotals=True,
+            subtotal_position="top",
+            number_format={"Revenue": "$,.0f"},
+        )
+
+    with st.expander("Code", expanded=False):
+        st.code(
+            """\
+# Multi-field sorting
+st_pivot_table(
+    df,
+    key="demo_multi_sort",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue"],
+    row_sort=[
+        {"by": "value", "direction": "desc", "dimension": "Region", "value_field": "Revenue"},
+        {"by": "key", "direction": "asc", "dimension": "Category"},  # breaks ties
+    ],
+)
+
+# Subtotals at top (group headers)
+st_pivot_table(
+    df,
+    key="demo_subtotal_top",
+    rows=["Region", "Category"],
+    values=["Revenue"],
+    show_subtotals=True,
+    subtotal_position="top",
+)
+""",
+            language="python",
+        )
+
+
+section_sort_and_subtotals()
+
+
+# ---------------------------------------------------------------------------
 # Section 6: Conditional Formatting
 # ---------------------------------------------------------------------------
 st.divider()

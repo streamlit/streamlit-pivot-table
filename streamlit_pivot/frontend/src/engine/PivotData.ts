@@ -1008,6 +1008,13 @@ export class PivotData {
     dimensions: string[],
     getValueForSort: (key: string[]) => number | null,
     getSubtotalForSort?: (prefix: string[]) => number | null,
+    /**
+     * When true, the value-sort path returns 0 (instead of falling back to key
+     * order) when two parent-level subtotals are equal or both null. Set to true
+     * for all non-final comparators in a chained sort so that ties propagate to
+     * the next comparator rather than being resolved by this one's key fallback.
+     */
+    suppressKeyFallback?: boolean,
   ): (a: string[], b: string[]) => number {
     const by = sortConfig?.by ?? "key";
     const direction = sortConfig?.direction ?? "asc";
@@ -1035,10 +1042,14 @@ export class PivotData {
             const va = getSubtotalForSort(prefixA);
             const vb = getSubtotalForSort(prefixB);
             if (va == null && vb == null)
-              return mixedCompare(a[level], b[level]) * levelSign;
+              return suppressKeyFallback
+                ? 0
+                : mixedCompare(a[level], b[level]) * levelSign;
             if (va == null) return 1;
             if (vb == null) return -1;
             if (va !== vb) return (va - vb) * levelSign;
+            // Equal numeric subtotals: let secondary sort decide if suppressed.
+            if (suppressKeyFallback) return 0;
             return mixedCompare(a[level], b[level]) * levelSign;
           }
           const leafSign =
@@ -1090,6 +1101,73 @@ export class PivotData {
   }
 
   /**
+   * Normalize a row_sort or col_sort value (single SortConfig or array) to a
+   * SortConfig array. Returns an empty array when the config is absent.
+   */
+  private _normalizeSortConfigs(
+    sc: SortConfig | SortConfig[] | undefined,
+  ): SortConfig[] {
+    if (!sc) return [];
+    return Array.isArray(sc) ? sc : [sc];
+  }
+
+  /**
+   * Build a single comparator that chains the supplied sort configs in priority
+   * order: the first config is primary, subsequent configs break ties. Passing
+   * an empty array returns a stable no-op comparator (keys are left in
+   * insertion order, i.e. whatever getRowKeys() / getColKeys() produces after
+   * applying the default `undefined` comparator).
+   *
+   * For non-final configs in the chain, `suppressKeyFallback=true` is passed to
+   * `_buildKeyComparator` so that equal parent-level subtotals return 0 rather
+   * than being resolved by an implicit key comparison. This ensures that the
+   * secondary (or tertiary, …) comparator actually runs when the primary produces
+   * a tie, rather than the primary's own key fallback silently resolving it.
+   */
+  private _buildChainedComparator(
+    sortConfigs: SortConfig[],
+    dimensions: string[],
+    isRowAxis: boolean,
+  ): (a: string[], b: string[]) => number {
+    if (sortConfigs.length === 0) {
+      return this._buildKeyComparator(undefined, dimensions, () => null);
+    }
+    const lastIdx = sortConfigs.length - 1;
+    const comparators = sortConfigs.map((sc, idx) => {
+      const isLast = idx === lastIdx;
+      const valueGetter = isRowAxis
+        ? this._rowValueGetter(sc)
+        : this._colValueGetter(sc);
+      const subtotalGetter =
+        isRowAxis && dimensions.length >= 2 && sc.by === "value"
+          ? (prefix: string[]) => {
+              const valField = sc.value_field ?? this._defaultValueField();
+              return this.getSubtotalAggregator(
+                prefix,
+                sc.col_key ?? [],
+                valField,
+              ).value();
+            }
+          : undefined;
+      return this._buildKeyComparator(
+        sc,
+        dimensions,
+        valueGetter,
+        subtotalGetter,
+        !isLast, // suppressKeyFallback for all non-final comparators
+      );
+    });
+    if (comparators.length === 1) return comparators[0];
+    return (a, b) => {
+      for (const cmp of comparators) {
+        const result = cmp(a, b);
+        if (result !== 0) return result;
+      }
+      return 0;
+    };
+  }
+
+  /**
    * Build the value-getter for row sorting. When the sort config specifies
    * a col_key, sort by the cell value at that intersection; otherwise use
    * the row total.
@@ -1118,24 +1196,11 @@ export class PivotData {
 
   getRowKeys(): string[][] {
     if (!this._sortedRowKeys) {
-      const subtotalGetter =
-        this._config.rows.length >= 2
-          ? (prefix: string[]) => {
-              const valField =
-                this._config.row_sort?.value_field ?? this._defaultValueField();
-              const colKey = this._config.row_sort?.col_key;
-              return this.getSubtotalAggregator(
-                prefix,
-                colKey ?? [],
-                valField,
-              ).value();
-            }
-          : undefined;
-      const cmp = this._buildKeyComparator(
-        this._config.row_sort,
+      const rowSortConfigs = this._normalizeSortConfigs(this._config.row_sort);
+      const cmp = this._buildChainedComparator(
+        rowSortConfigs,
         this._config.rows,
-        this._rowValueGetter(this._config.row_sort),
-        subtotalGetter,
+        true,
       );
       let sorted = [...this._rowKeySet.values()].sort(cmp);
 
@@ -1170,10 +1235,11 @@ export class PivotData {
 
   getColKeys(): string[][] {
     if (!this._sortedColKeys) {
-      const cmp = this._buildKeyComparator(
-        this._config.col_sort,
+      const colSortConfigs = this._normalizeSortConfigs(this._config.col_sort);
+      const cmp = this._buildChainedComparator(
+        colSortConfigs,
         this._config.columns,
-        this._colValueGetter(this._config.col_sort),
+        false,
       );
       let sorted = [...this._colKeySet.values()].sort(cmp);
 
@@ -1715,49 +1781,102 @@ export class PivotData {
 
     const result: GroupedRow[] = [];
     const numLevels = rowDims.length;
+    const subtotalAtTop =
+      (this._config.subtotal_position ?? "bottom") === "top";
 
-    for (let i = 0; i < rowKeys.length; i++) {
-      const currentKey = rowKeys[i];
-      const nextKey: string[] | undefined = rowKeys[i + 1];
+    if (subtotalAtTop) {
+      // "top" mode: emit the subtotal row BEFORE the group members it summarises.
+      // Detect group starts by comparing the current key's prefix at each non-leaf
+      // level against the previous key's prefix. On the very first key every level
+      // is a "new group", so all applicable subtotal headers are emitted first.
+      let prevKey: string[] = [];
+      for (let i = 0; i < rowKeys.length; i++) {
+        const currentKey = rowKeys[i]!;
 
-      // Check if any ancestor group is collapsed — if so, skip this data row
-      let hidden = false;
-      for (let lvl = 0; lvl < numLevels - 1; lvl++) {
-        const prefix = currentKey.slice(0, lvl + 1);
-        if (collapsed.has(makeKeyString(prefix))) {
-          hidden = true;
-          break;
+        // Check if any ancestor group is collapsed — hides this data row.
+        let hidden = false;
+        for (let lvl = 0; lvl < numLevels - 1; lvl++) {
+          if (collapsed.has(makeKeyString(currentKey.slice(0, lvl + 1)))) {
+            hidden = true;
+            break;
+          }
         }
-      }
 
-      if (!hidden) {
-        result.push({ type: "data", key: currentKey, level: numLevels - 1 });
-      }
+        // Detect new groups starting at each non-leaf level (shallowest first).
+        for (let lvl = 0; lvl < numLevels - 1; lvl++) {
+          const currentPrefix = currentKey.slice(0, lvl + 1);
+          const prevPrefix = prevKey.slice(0, lvl + 1);
+          const isNewGroup =
+            i === 0 ||
+            makeKeyString(currentPrefix) !== makeKeyString(prevPrefix);
+          if (!isNewGroup) continue;
 
-      // After processing this row, check if any group just ended.
-      // A group at level `lvl` ends when the next row's prefix differs.
-      // Insert subtotal rows from deepest level to shallowest.
-      for (let lvl = numLevels - 2; lvl >= 0; lvl--) {
-        const currentPrefix = currentKey.slice(0, lvl + 1);
-        const nextPrefix = nextKey?.slice(0, lvl + 1);
-        const groupEnded =
-          !nextKey ||
-          makeKeyString(currentPrefix) !== makeKeyString(nextPrefix!);
-
-        if (groupEnded) {
-          // Check if any ancestor is collapsed — subtotal should still show
-          // if this specific group is collapsed, but not if a parent is collapsed
+          // Emit the subtotal header unless an ancestor group is collapsed.
           let ancestorCollapsed = false;
           for (let parentLvl = 0; parentLvl < lvl; parentLvl++) {
-            const parentPrefix = currentKey.slice(0, parentLvl + 1);
-            if (collapsed.has(makeKeyString(parentPrefix))) {
+            if (
+              collapsed.has(makeKeyString(currentKey.slice(0, parentLvl + 1)))
+            ) {
               ancestorCollapsed = true;
               break;
             }
           }
-
           if (!ancestorCollapsed && subtotalEnabledAtLevel(lvl)) {
             result.push({ type: "subtotal", key: currentPrefix, level: lvl });
+          }
+        }
+
+        if (!hidden) {
+          result.push({ type: "data", key: currentKey, level: numLevels - 1 });
+        }
+
+        prevKey = currentKey;
+      }
+    } else {
+      // "bottom" mode (default): emit data rows first, subtotals after each group.
+      for (let i = 0; i < rowKeys.length; i++) {
+        const currentKey = rowKeys[i]!;
+        const nextKey: string[] | undefined = rowKeys[i + 1];
+
+        // Check if any ancestor group is collapsed — if so, skip this data row.
+        let hidden = false;
+        for (let lvl = 0; lvl < numLevels - 1; lvl++) {
+          const prefix = currentKey.slice(0, lvl + 1);
+          if (collapsed.has(makeKeyString(prefix))) {
+            hidden = true;
+            break;
+          }
+        }
+
+        if (!hidden) {
+          result.push({ type: "data", key: currentKey, level: numLevels - 1 });
+        }
+
+        // After processing this row, check if any group just ended.
+        // A group at level `lvl` ends when the next row's prefix differs.
+        // Insert subtotal rows from deepest level to shallowest.
+        for (let lvl = numLevels - 2; lvl >= 0; lvl--) {
+          const currentPrefix = currentKey.slice(0, lvl + 1);
+          const nextPrefix = nextKey?.slice(0, lvl + 1);
+          const groupEnded =
+            !nextKey ||
+            makeKeyString(currentPrefix) !== makeKeyString(nextPrefix!);
+
+          if (groupEnded) {
+            // Check if any ancestor is collapsed — subtotal should still show
+            // if this specific group is collapsed, but not if a parent is collapsed.
+            let ancestorCollapsed = false;
+            for (let parentLvl = 0; parentLvl < lvl; parentLvl++) {
+              const parentPrefix = currentKey.slice(0, parentLvl + 1);
+              if (collapsed.has(makeKeyString(parentPrefix))) {
+                ancestorCollapsed = true;
+                break;
+              }
+            }
+
+            if (!ancestorCollapsed && subtotalEnabledAtLevel(lvl)) {
+              result.push({ type: "subtotal", key: currentPrefix, level: lvl });
+            }
           }
         }
       }

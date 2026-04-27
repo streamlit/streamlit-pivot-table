@@ -71,14 +71,15 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `show_row_totals` | `bool \| list[str] \| None` | `None` | Row totals visibility: `True` all measures, `False` none, `["Revenue"]` only listed measures. Defaults to `show_totals` when `None`. |
 | `show_column_totals` | `bool \| list[str] \| None` | `None` | Column totals visibility with the same semantics as `show_row_totals`. |
 | `show_subtotals` | `bool \| list[str]` | `False` | Subtotal visibility per row dimension: `True` all parent dimensions, `False` none, or a list of dimension names. |
+| `subtotal_position` | `"top" \| "bottom"` | `"bottom"` | Where subtotal rows appear relative to their group members. `"bottom"` (default) places the subtotal after members (Excel default). `"top"` places it before members as a collapsible group header. No effect when `show_subtotals` is `False` or `row_layout="hierarchy"`. |
 | `repeat_row_labels` | `bool` | `False` | Repeat row dimension labels on every row instead of merging. |
 
 #### Sorting
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `row_sort` | `dict \| None` | `None` | Initial sort for rows. See [Sort Configuration](#sort-configuration). |
-| `col_sort` | `dict \| None` | `None` | Initial sort for columns. Same shape as `row_sort` (without `col_key`). |
+| `row_sort` | `dict \| list[dict] \| None` | `None` | Initial sort for rows. A single `SortConfig` dict or a list for multi-field (chained) sorting. See [Sort Configuration](#sort-configuration). |
+| `col_sort` | `dict \| list[dict] \| None` | `None` | Initial sort for columns. Same shape as `row_sort` (without `col_key`). Accepts a single dict or a list. |
 
 #### Display and Formatting
 
@@ -271,22 +272,31 @@ Synthetic measures render as `fx`-badged chips in the Values zone and can be int
 
 ### Sort Configuration
 
-Sort rows or columns by label or by aggregated value.
+Sort rows or columns by label or by aggregated value. Pass a **single dict** for a single sort, or a **list of dicts** for multi-field (chained) sorting.
 
 ```python
+# Single sort — sort rows by Revenue descending
 row_sort = {
-    "by": "value",           # "key" (alphabetical) or "value" (by measure)
-    "direction": "desc",     # "asc" or "desc"
+    "by": "value",            # "key" (alphabetical) or "value" (by measure)
+    "direction": "desc",      # "asc" or "desc"
     "value_field": "Revenue", # required when by="value"
-    "col_key": ["2023"],     # optional: sort within a specific column
-    "dimension": "Category", # optional: scope sort to this level and below
+    "col_key": ["2023"],      # optional: sort within a specific column
+    "dimension": "Category",  # optional: scope sort to this level and below
 }
+
+# Multi-field sort — primary by Revenue desc, secondary alphabetically asc
+row_sort = [
+    {"by": "value", "direction": "desc", "value_field": "Revenue"},
+    {"by": "key",   "direction": "asc"},   # breaks ties
+]
 
 col_sort = {
     "by": "key",
     "direction": "asc",
 }
 ```
+
+**Multi-field sorting:** When a list is passed, sort configs are applied as a chained comparator — config[0] is primary, config[1] is secondary (activates only when config[0] produces a tie), and so on. This guarantees a deterministic order without relying on sort stability.
 
 **Scoped sorting:** When `dimension` is set and subtotals are enabled, only the
 targeted level and its children reorder — parent groups maintain their existing

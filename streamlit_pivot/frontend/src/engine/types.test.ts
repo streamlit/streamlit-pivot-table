@@ -39,6 +39,9 @@ import {
   showTotalForMeasure,
   validatePivotConfigRuntime,
   validatePivotConfigV1,
+  findDimSortConfig,
+  getPrimarySortConfig,
+  pruneSortConfigByField,
   type AggregatorClass,
   type AggregationType,
   type CellClickPayload,
@@ -1596,5 +1599,254 @@ describe("getDimensionLabel with field_labels", () => {
     });
     expect(config.rows).toEqual(["Region"]);
     expect(config.values).toEqual(["Revenue"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Commit 4 validation: multi-sort arrays and subtotal_position
+// ---------------------------------------------------------------------------
+
+describe("validatePivotConfigV1 — Commit 4 (multi-sort + subtotal_position)", () => {
+  const BASE = {
+    version: 1,
+    rows: ["region"],
+    columns: ["year"],
+    values: ["revenue"],
+    show_totals: true,
+    empty_cell_value: "-",
+    interactive: true,
+  };
+
+  it("row_sort array with one element is accepted and passed through", () => {
+    const cfg = validatePivotConfigV1({
+      ...BASE,
+      row_sort: [{ by: "key", direction: "asc" }],
+    });
+    expect(cfg.row_sort).toEqual([{ by: "key", direction: "asc" }]);
+  });
+
+  it("row_sort array with multiple elements is accepted", () => {
+    const cfg = validatePivotConfigV1({
+      ...BASE,
+      row_sort: [
+        { by: "value", direction: "desc", value_field: "revenue" },
+        { by: "key", direction: "asc" },
+      ],
+    });
+    expect(Array.isArray(cfg.row_sort)).toBe(true);
+    expect((cfg.row_sort as unknown[]).length).toBe(2);
+  });
+
+  it("col_sort array is accepted", () => {
+    const cfg = validatePivotConfigV1({
+      ...BASE,
+      col_sort: [{ by: "key", direction: "desc" }],
+    });
+    expect(cfg.col_sort).toEqual([{ by: "key", direction: "desc" }]);
+  });
+
+  it("empty row_sort array throws", () => {
+    expect(() => validatePivotConfigV1({ ...BASE, row_sort: [] })).toThrow(
+      /row_sort.*must not be empty/,
+    );
+  });
+
+  it("empty col_sort array throws", () => {
+    expect(() => validatePivotConfigV1({ ...BASE, col_sort: [] })).toThrow(
+      /col_sort.*must not be empty/,
+    );
+  });
+
+  it("row_sort array element with invalid 'by' throws with indexed name", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...BASE,
+        row_sort: [{ by: "bogus", direction: "asc" }],
+      }),
+    ).toThrow(/row_sort\[0\]/);
+  });
+
+  it("subtotal_position='top' is accepted", () => {
+    const cfg = validatePivotConfigV1({ ...BASE, subtotal_position: "top" });
+    expect(cfg.subtotal_position).toBe("top");
+  });
+
+  it("subtotal_position='bottom' is accepted", () => {
+    const cfg = validatePivotConfigV1({ ...BASE, subtotal_position: "bottom" });
+    expect(cfg.subtotal_position).toBe("bottom");
+  });
+
+  it("invalid subtotal_position throws with the invalid value in the message", () => {
+    expect(() =>
+      validatePivotConfigV1({ ...BASE, subtotal_position: "middle" }),
+    ).toThrow(/subtotal_position.*middle/);
+  });
+
+  it("missing subtotal_position is not included in result", () => {
+    const cfg = validatePivotConfigV1(BASE);
+    expect(cfg.subtotal_position).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sort config helpers
+// ---------------------------------------------------------------------------
+
+const ASC: SortConfig = { by: "key", direction: "asc" };
+const DESC: SortConfig = { by: "key", direction: "desc" };
+const REGION_DESC: SortConfig = {
+  by: "value",
+  direction: "desc",
+  dimension: "Region",
+};
+const CATEGORY_ASC: SortConfig = {
+  by: "key",
+  direction: "asc",
+  dimension: "Category",
+};
+
+describe("getPrimarySortConfig", () => {
+  it("returns undefined for undefined input", () => {
+    expect(getPrimarySortConfig(undefined)).toBeUndefined();
+  });
+
+  it("returns the single config as-is", () => {
+    expect(getPrimarySortConfig(ASC)).toBe(ASC);
+  });
+
+  it("returns the first element of an array", () => {
+    expect(getPrimarySortConfig([REGION_DESC, CATEGORY_ASC])).toBe(REGION_DESC);
+  });
+
+  it("returns the sole element of a single-element array", () => {
+    expect(getPrimarySortConfig([DESC])).toBe(DESC);
+  });
+});
+
+describe("findDimSortConfig", () => {
+  it("returns undefined when sort is absent", () => {
+    expect(findDimSortConfig(undefined, "Region", true)).toBeUndefined();
+  });
+
+  it("returns a single config for the first dim (isFirstInAxis=true)", () => {
+    expect(findDimSortConfig(ASC, "Region", true)).toBe(ASC);
+  });
+
+  it("does not return a global config for non-first dims", () => {
+    expect(findDimSortConfig(ASC, "Category", false)).toBeUndefined();
+  });
+
+  it("finds an exact dimension match anywhere in array", () => {
+    expect(
+      findDimSortConfig([REGION_DESC, CATEGORY_ASC], "Category", false),
+    ).toBe(CATEGORY_ASC);
+  });
+
+  it("finds a global config for the first dim when no exact match exists", () => {
+    // ASC has no dimension field — owned by the first dim
+    expect(findDimSortConfig([ASC, CATEGORY_ASC], "Region", true)).toBe(ASC);
+  });
+
+  it("exact match takes priority over global config for first dim", () => {
+    expect(findDimSortConfig([ASC, REGION_DESC], "Region", true)).toBe(
+      REGION_DESC,
+    );
+  });
+
+  it("returns undefined for non-first dim with no exact match", () => {
+    expect(findDimSortConfig([ASC], "Category", false)).toBeUndefined();
+  });
+});
+
+describe("pruneSortConfigByField", () => {
+  it("returns undefined for undefined input", () => {
+    expect(
+      pruneSortConfigByField(undefined, { dimensionField: "X" }),
+    ).toBeUndefined();
+  });
+
+  it("removes a single config whose dimension matches", () => {
+    expect(
+      pruneSortConfigByField(REGION_DESC, { dimensionField: "Region" }),
+    ).toBeUndefined();
+  });
+
+  it("keeps a single config whose dimension does not match", () => {
+    expect(
+      pruneSortConfigByField(REGION_DESC, { dimensionField: "Category" }),
+    ).toBe(REGION_DESC);
+  });
+
+  it("removes by valueField for a value sort", () => {
+    const vs: SortConfig = {
+      by: "value",
+      direction: "desc",
+      value_field: "Revenue",
+    };
+    expect(
+      pruneSortConfigByField(vs, { valueField: "Revenue" }),
+    ).toBeUndefined();
+  });
+
+  it("keeps a value sort when valueField doesn't match", () => {
+    const vs: SortConfig = {
+      by: "value",
+      direction: "desc",
+      value_field: "Revenue",
+    };
+    expect(pruneSortConfigByField(vs, { valueField: "Units" })).toBe(vs);
+  });
+
+  it("filters matching elements from an array and keeps the rest", () => {
+    expect(
+      pruneSortConfigByField([REGION_DESC, CATEGORY_ASC], {
+        dimensionField: "Region",
+      }),
+    ).toEqual(CATEGORY_ASC);
+  });
+
+  it("compacts a surviving single-element array to a plain SortConfig", () => {
+    const result = pruneSortConfigByField([REGION_DESC, CATEGORY_ASC], {
+      dimensionField: "Region",
+    });
+    expect(Array.isArray(result)).toBe(false);
+    expect(result).toBe(CATEGORY_ASC);
+  });
+
+  it("returns undefined when all array elements are removed", () => {
+    expect(
+      pruneSortConfigByField([REGION_DESC], { dimensionField: "Region" }),
+    ).toBeUndefined();
+  });
+
+  it("prunes a global (undimensioned) sort when isFirstAxisDim=true", () => {
+    expect(
+      pruneSortConfigByField(ASC, {
+        dimensionField: "Region",
+        isFirstAxisDim: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not prune a global sort when isFirstAxisDim is absent", () => {
+    expect(pruneSortConfigByField(ASC, { dimensionField: "Region" })).toBe(ASC);
+  });
+
+  it("does not prune a global sort when isFirstAxisDim=false", () => {
+    expect(
+      pruneSortConfigByField(ASC, {
+        dimensionField: "Category",
+        isFirstAxisDim: false,
+      }),
+    ).toBe(ASC);
+  });
+
+  it("prunes global sort from array when isFirstAxisDim=true", () => {
+    expect(
+      pruneSortConfigByField([ASC, CATEGORY_ASC], {
+        dimensionField: "Region",
+        isFirstAxisDim: true,
+      }),
+    ).toEqual(CATEGORY_ASC);
   });
 });

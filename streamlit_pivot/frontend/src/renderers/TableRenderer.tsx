@@ -106,7 +106,11 @@ import {
   extractParentBuckets,
   formatTemporalParentLabel,
 } from "../engine/dateGrouping";
-import { getEffectiveDateGrain, type ColumnTypeMap } from "../engine/types";
+import {
+  findDimSortConfig,
+  getEffectiveDateGrain,
+  type ColumnTypeMap,
+} from "../engine/types";
 import { resolveEffectiveWidth, resolveFieldWidth } from "./fieldWidthResolver";
 import styles from "./TableRenderer.module.css";
 
@@ -305,7 +309,11 @@ export interface TableRendererProps {
   onCellClick?: (payload: CellClickPayload) => void;
   maxColumns?: number;
   maxRows?: number;
-  onSortChange?: (axis: "row" | "col", sort: SortConfig | undefined) => void;
+  onSortChange?: (
+    axis: "row" | "col",
+    sort: SortConfig | undefined,
+    dimension: string,
+  ) => void;
   onFilterChange?: (field: string, filter: DimensionFilter | undefined) => void;
   onConfigChange?: (config: PivotConfigV1) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
@@ -1194,22 +1202,15 @@ export function renderColumnHeaders(
             const isFirstRowDim = rowHeaderIdx === 0;
             const hasSubtotals =
               !!config.show_subtotals && config.rows.length >= 2;
-            const sortTargetDim = config.row_sort?.dimension;
-            const sortTargetIdx = sortTargetDim
-              ? config.rows.indexOf(sortTargetDim)
-              : -1;
-            const showSortOnThisDim = config.row_sort
-              ? sortTargetDim
-                ? hasSubtotals
-                  ? dimIdx >= sortTargetIdx && sortTargetIdx !== -1
-                  : sortTargetDim === dim
-                : hasSubtotals
-                  ? rowLevel.isLeaf
-                  : isFirstRowDim
-              : false;
-            const rowSortDir = showSortOnThisDim
-              ? config.row_sort!.direction
-              : undefined;
+            // Each dimension shows its own sort direction arrow.
+            // A global sort config (no dimension field) is owned by the first dim.
+            const dimSortConfig = findDimSortConfig(
+              config.row_sort,
+              dim,
+              isFirstRowDim,
+            );
+            const showSortOnThisDim = !!dimSortConfig;
+            const rowSortDir = dimSortConfig?.direction;
             const isInnermost = dimIdx === config.rows.length - 1;
             const canToggleThisDim =
               showRowDimToggle &&
@@ -1497,10 +1498,12 @@ export function renderColumnHeaders(
         // same key dimension, so keyIndex may differ from level.
         const keyIndex = effectiveDimIndex;
         const isFirstColLevel = level === 0;
-        const colSortDir =
-          isFirstColLevel && config.col_sort
-            ? config.col_sort.direction
-            : undefined;
+        // Each column dimension level shows its own sort direction arrow.
+        const colDimName = config.columns?.[level];
+        const colSortDir = colDimName
+          ? findDimSortConfig(config.col_sort, colDimName, level === 0)
+              ?.direction
+          : undefined;
         let i = 0;
         while (i < visibleSlots.length) {
           const slotIdx = slotOffset + i;
@@ -3072,7 +3075,7 @@ export function renderSubtotalRow(
   return (
     <tr
       key={`subtotal-${groupKeyStr}-${level}`}
-      className={`${styles.subtotalRow} ${isHierarchyLayout(config) ? styles.hierarchySubtotalRow : ""}`}
+      className={`${styles.subtotalRow} ${isHierarchyLayout(config) ? styles.hierarchySubtotalRow : ""} ${config.subtotal_position === "top" ? styles.subtotalTopRow : ""}`}
       data-testid="pivot-subtotal-row"
       aria-label={`Subtotal for ${parentKey.join(" / ")}`}
       data-level={level}

@@ -26,6 +26,7 @@ import type {
   SortConfig,
 } from "../engine/types";
 import {
+  findDimSortConfig,
   getDrilledDateGrain,
   getEffectiveDateGrain,
   getDimensionLabel,
@@ -47,7 +48,11 @@ const NOOP_FILTER = (
 export interface UseHeaderMenuOptions {
   config: PivotConfigV1;
   pivotData: PivotData;
-  onSortChange?: (axis: "row" | "col", sort: SortConfig | undefined) => void;
+  onSortChange?: (
+    axis: "row" | "col",
+    sort: SortConfig | undefined,
+    dimension: string,
+  ) => void;
   onFilterChange?: (field: string, filter: DimensionFilter | undefined) => void;
   onCellClick?: (payload: CellClickPayload) => void;
   onShowValuesAsChange?: (field: string, mode: ShowValuesAs) => void;
@@ -152,6 +157,7 @@ export function useHeaderMenu({
         onSortChange(
           target.axis,
           sort ? { ...sort, dimension: target.dimension } : undefined,
+          target.dimension,
         );
       }
     },
@@ -185,14 +191,22 @@ export function useHeaderMenu({
       ? (key: string) => pivotData.formatDimLabel(menuTarget.dimension, key)
       : undefined;
 
+  // Each header menu shows and controls its own dimension's sort config slot.
   const axisSort =
     menuTarget && !isValueMenu
       ? menuTarget.axis === "row"
         ? config.row_sort
         : config.col_sort
       : undefined;
-  const menuSortConfig =
-    axisSort?.dimension === menuTarget?.dimension ? axisSort : undefined;
+  const axisFirstDim =
+    menuTarget?.axis === "row" ? config.rows?.[0] : config.columns?.[0];
+  const menuSortConfig = menuTarget
+    ? findDimSortConfig(
+        axisSort,
+        menuTarget.dimension,
+        menuTarget.dimension === axisFirstDim,
+      )
+    : undefined;
 
   const menuShowFilter = !isValueMenu;
 

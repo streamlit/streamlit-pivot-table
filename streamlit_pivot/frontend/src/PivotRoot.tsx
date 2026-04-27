@@ -672,14 +672,74 @@ const PivotRoot: FC<PivotRootProps> = ({
   );
 
   const handleSortChange = useCallback(
-    (axis: "row" | "col", sort: SortConfig | undefined) => {
+    (axis: "row" | "col", sort: SortConfig | undefined, dimension: string) => {
       pendingActionRef.current = {
         kind: "sort",
         startedAt: performance.now(),
         axis,
       };
       const key = axis === "row" ? "row_sort" : "col_sort";
-      handleConfigChange({ ...currentConfig, [key]: sort });
+      const dims = axis === "row" ? currentConfig.rows : currentConfig.columns;
+      const current = currentConfig[key] as
+        | SortConfig
+        | SortConfig[]
+        | undefined;
+
+      // Normalize current sort value to an array for uniform manipulation.
+      const currentArray: SortConfig[] = current
+        ? Array.isArray(current)
+          ? current
+          : [current]
+        : [];
+
+      let newArray: SortConfig[];
+      if (sort) {
+        // sort has `.dimension` stamped by applySortChange — add or replace.
+        const existingIdx = currentArray.findIndex(
+          (sc) => sc.dimension === dimension,
+        );
+        if (existingIdx >= 0) {
+          newArray = currentArray.map((sc, i) =>
+            i === existingIdx ? sort : sc,
+          );
+        } else {
+          // Insert in the order of the axis dimensions array.
+          const dimPos = dims.indexOf(dimension);
+          // When adding a dimension-specific sort for the first axis dim, also
+          // evict any lingering global (undimensioned) sort.  Global sorts are
+          // owned by the first dim, so the new dimensioned entry supersedes them.
+          const base =
+            dimPos === 0
+              ? currentArray.filter((sc) => sc.dimension !== undefined)
+              : currentArray;
+          const insertAt = base.findIndex((sc) => {
+            const scPos = sc.dimension ? dims.indexOf(sc.dimension) : -1;
+            return scPos > dimPos;
+          });
+          newArray =
+            insertAt === -1
+              ? [...base, sort]
+              : [...base.slice(0, insertAt), sort, ...base.slice(insertAt)];
+        }
+      } else {
+        // Clear: remove the config for this specific dimension.
+        // Also remove undimensioned (global) configs when clearing the first dim
+        // since global sorts are owned by the first dim.
+        const isFirstDim = dimension === dims[0];
+        newArray = currentArray.filter(
+          (sc) => sc.dimension !== dimension && !(isFirstDim && !sc.dimension),
+        );
+      }
+
+      // Compact: single SortConfig if only one remains, undefined if empty.
+      const newSort: SortConfig | SortConfig[] | undefined =
+        newArray.length === 0
+          ? undefined
+          : newArray.length === 1
+            ? newArray[0]
+            : newArray;
+
+      handleConfigChange({ ...currentConfig, [key]: newSort });
     },
     [currentConfig, handleConfigChange],
   );

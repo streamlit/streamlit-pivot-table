@@ -182,14 +182,15 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `show_row_totals` | `bool \| list[str] \| None` | `None` | `True`/`False`/list of measure names. |
 | `show_column_totals` | `bool \| list[str] \| None` | `None` | Same semantics. |
 | `show_subtotals` | `bool \| list[str]` | `False` | `True` all parent dimensions, list names specific levels. |
+| `subtotal_position` | `"top" \| "bottom"` | `"bottom"` | Where subtotal rows appear: `"bottom"` after members (Excel default), `"top"` before members as group headers. No effect when `show_subtotals=False` or `row_layout="hierarchy"`. |
 | `repeat_row_labels` | `bool` | `False` | Repeat row labels instead of merging. Ignored when `row_layout="hierarchy"`. |
 
 #### Sorting
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `row_sort` | `dict \| None` | `None` | Initial row sort. See [Sort Configuration](#sort-configuration). |
-| `col_sort` | `dict \| None` | `None` | Initial column sort (same shape, no `col_key`). |
+| `row_sort` | `dict \| list[dict] \| None` | `None` | Initial row sort. Single dict or list for multi-field chained sorting. See [Sort Configuration](#sort-configuration). |
+| `col_sort` | `dict \| list[dict] \| None` | `None` | Initial column sort (same shape, no `col_key`). Accepts a list too. |
 | `sorters` | `dict[str, list[str]] \| None` | `None` | Custom sort ordering per dimension. |
 
 #### Display and Formatting
@@ -308,6 +309,7 @@ Formula syntax: arithmetic (`+ - * / ^ %`), comparisons, `and` / `or` / `not`, `
 ### Sort Configuration
 
 ```python
+# Single sort
 row_sort = {
     "by": "value",             # "key" or "value"
     "direction": "desc",       # "asc" or "desc"
@@ -315,7 +317,15 @@ row_sort = {
     "col_key": ["2023"],       # optional: sort within a specific column
     "dimension": "Category",   # optional: scope sort to a specific level
 }
+
+# Multi-field chained sort (0.5.0+)
+row_sort = [
+    {"by": "value", "direction": "desc", "value_field": "Revenue"},
+    {"by": "key",   "direction": "asc"},   # secondary: breaks ties alphabetically
+]
 ```
+
+**Multi-field sorting:** pass a list; configs are applied as a chained comparator — config[0] is primary, config[1] activates only on ties, etc. Guarantees deterministic order.
 
 Scoped sorting (`dimension` set) only reorders that level and below when subtotals are enabled. Header-menu sort sets `dimension` automatically.
 
@@ -1486,6 +1496,25 @@ st_pivot_table(
     value_filters=[
         {"field": "Product", "by": "Revenue", "operator": "gte", "value": 1000, "axis": "rows"}
     ],
+)
+```
+
+**Multi-field sort + subtotal headers (0.5.0+)**
+
+```python
+st_pivot_table(
+    df,
+    key="multi_sort",
+    rows=["Region", "Category"],
+    columns=["Year"],
+    values=["Revenue"],
+    # Primary: Revenue descending; secondary: alphabetical ascending to break ties
+    row_sort=[
+        {"by": "value", "direction": "desc", "value_field": "Revenue"},
+        {"by": "key",   "direction": "asc"},
+    ],
+    show_subtotals=True,
+    subtotal_position="top",   # subtotal rows act as collapsible group headers
 )
 ```
 

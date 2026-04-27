@@ -351,6 +351,17 @@
   border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
 }
 
+/*
+ * When subtotal_position="top" the subtotal row acts as a group *header*.
+ * A stronger bottom border (underline) separates it visually from the
+ * member rows that follow, making the header/members relationship clear.
+ * The top border (inherited above) still acts as the inter-group separator.
+ */
+.subtotalTopRow td,
+.subtotalTopRow th {
+  border-bottom: 2px solid color-mix(in srgb, var(--st-text-color) 30%, transparent);
+}
+
 .emptyState {
   padding: 24px;
   text-align: center;
