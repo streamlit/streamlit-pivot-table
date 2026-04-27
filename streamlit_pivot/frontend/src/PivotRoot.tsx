@@ -260,11 +260,10 @@ const PivotRoot: FC<PivotRootProps> = ({
         typedAdaptiveGrains,
       );
     } catch {
-      // validatePivotConfigRuntime throws for two reasons:
-      //   1. Period comparison show_values_as on a non-temporal axis — hard error,
-      //      re-throw so the caller sees a clear message.
-      //   2. Stale analytical filter field/by refs — strip them and retry so that
-      //      an externally-restored or imported config never hard-crashes the UI.
+      // Strip stale analytical filter refs and retry. If the original error was
+      // caused by a dangling field/by reference the retry succeeds. If the error
+      // was unrelated (e.g. period comparison on a non-temporal axis) the retry
+      // throws again and the exception propagates naturally to the error boundary.
       const safe: PivotConfigV1 = { ...rawCurrentConfig };
       delete safe.top_n_filters;
       delete safe.value_filters;

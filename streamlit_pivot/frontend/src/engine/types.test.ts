@@ -327,6 +327,56 @@ describe("validatePivotConfigV1", () => {
     expect(result.filters).toEqual({ region: { include: ["US", "EU"] } });
   });
 
+  it("rejects non-array analytical filter containers", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        top_n_filters: { field: "region" },
+      }),
+    ).toThrow("'top_n_filters' must be an array");
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        value_filters: { field: "region" },
+      }),
+    ).toThrow("'value_filters' must be an array");
+  });
+
+  it("requires value2 for between value filters", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        value_filters: [
+          {
+            field: "region",
+            by: "revenue",
+            operator: "between",
+            value: 10,
+          },
+        ],
+      }),
+    ).toThrow(
+      "'value_filters[0].value2' must be a number when operator is \"between\"",
+    );
+  });
+
+  it("rejects non-numeric value2 on value filters", () => {
+    expect(() =>
+      validatePivotConfigV1({
+        ...DEFAULT_CONFIG,
+        value_filters: [
+          {
+            field: "region",
+            by: "revenue",
+            operator: "gt",
+            value: 10,
+            value2: "20",
+          },
+        ],
+      }),
+    ).toThrow("'value_filters[0].value2' must be a number");
+  });
+
   it("accepts row_layout when valid", () => {
     const result = validatePivotConfigV1({
       ...DEFAULT_CONFIG,
@@ -1051,6 +1101,128 @@ describe("date hierarchy helpers", () => {
         ]),
       ),
     ).not.toThrow();
+  });
+
+  it("throws when top_n_filters field is not in the declared row dims", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      columns: ["Year"],
+      values: ["Revenue"],
+      top_n_filters: [
+        {
+          field: "Category",
+          n: 5,
+          by: "Revenue",
+          direction: "top",
+          axis: "rows",
+        },
+      ],
+    });
+    expect(() => validatePivotConfigRuntime(config)).toThrow(
+      'top_n_filters[0].field "Category" is not present in rows dimensions',
+    );
+  });
+
+  it("throws when top_n_filters by is not a declared measure", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      columns: ["Year"],
+      values: ["Revenue"],
+      top_n_filters: [
+        {
+          field: "Region",
+          n: 5,
+          by: "Missing",
+          direction: "top",
+          axis: "rows",
+        },
+      ],
+    });
+    expect(() => validatePivotConfigRuntime(config)).toThrow(
+      'top_n_filters[0].by "Missing" is not a declared measure or synthetic measure',
+    );
+  });
+
+  it("throws when value_filters field is not in the declared column dims", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      columns: ["Year"],
+      values: ["Revenue"],
+      value_filters: [
+        {
+          field: "Category",
+          by: "Revenue",
+          operator: "gt",
+          value: 1000,
+          axis: "columns",
+        },
+      ],
+    });
+    expect(() => validatePivotConfigRuntime(config)).toThrow(
+      'value_filters[0].field "Category" is not present in columns dimensions',
+    );
+  });
+
+  it("throws when value_filters by is not a declared measure", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      columns: ["Year"],
+      values: ["Revenue"],
+      value_filters: [
+        { field: "Region", by: "Unknown", operator: "gte", value: 500 },
+      ],
+    });
+    expect(() => validatePivotConfigRuntime(config)).toThrow(
+      'value_filters[0].by "Unknown" is not a declared measure or synthetic measure',
+    );
+  });
+
+  it("accepts valid analytical filters without throwing", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      columns: ["Year"],
+      values: ["Revenue"],
+      top_n_filters: [
+        {
+          field: "Region",
+          n: 3,
+          by: "Revenue",
+          direction: "top",
+          axis: "rows",
+        },
+      ],
+      value_filters: [
+        {
+          field: "Year",
+          by: "Revenue",
+          operator: "gt",
+          value: 5000,
+          axis: "columns",
+        },
+      ],
+    });
+    expect(() => validatePivotConfigRuntime(config)).not.toThrow();
+  });
+
+  it("accepts analytical filters that reference a synthetic measure", () => {
+    const config = makeConfig({
+      rows: ["Region"],
+      values: ["Revenue", "Profit"],
+      synthetic_measures: [
+        {
+          id: "margin",
+          label: "Margin",
+          operation: "formula" as const,
+          numerator: "Revenue",
+          denominator: "Profit",
+          formula: "Revenue / Profit",
+        },
+      ],
+      top_n_filters: [
+        { field: "Region", n: 5, by: "margin", direction: "top", axis: "rows" },
+      ],
+    });
+    expect(() => validatePivotConfigRuntime(config)).not.toThrow();
   });
 });
 

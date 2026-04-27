@@ -657,12 +657,14 @@ describe("HeaderMenu - Top N / Bottom N section", () => {
     expect(screen.queryByTestId("header-menu-top-n")).not.toBeInTheDocument();
   });
 
-  it("Apply button calls onTopNFilterChange with correct filter object", () => {
+  it("Apply button calls onTopNFilterChange with correct filter object and closes menu", () => {
     const onTopNFilterChange = vi.fn();
+    const onClose = vi.fn();
     render(
       <HeaderMenu
         {...topNProps}
         onTopNFilterChange={onTopNFilterChange}
+        onClose={onClose}
         topNFilter={undefined}
       />,
     );
@@ -685,6 +687,7 @@ describe("HeaderMenu - Top N / Bottom N section", () => {
         direction: "bottom",
       }),
     );
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("Clear button is enabled when topNFilter is active, disabled otherwise", () => {
@@ -702,17 +705,32 @@ describe("HeaderMenu - Top N / Bottom N section", () => {
     expect(screen.getByTestId("header-top-n-clear")).not.toBeDisabled();
   });
 
-  it("Clear button calls onTopNFilterChange(undefined)", () => {
+  it("Clear button calls onTopNFilterChange(undefined), resets inputs, and keeps menu open", () => {
     const onTopNFilterChange = vi.fn();
+    const onClose = vi.fn();
     render(
       <HeaderMenu
         {...topNProps}
         onTopNFilterChange={onTopNFilterChange}
-        topNFilter={{ field: "Region", n: 3, by: "Revenue", direction: "top" }}
+        onClose={onClose}
+        topNFilter={{
+          field: "Region",
+          n: 3,
+          by: "Revenue",
+          direction: "bottom",
+        }}
       />,
     );
     fireEvent.click(screen.getByTestId("header-top-n-clear"));
     expect(onTopNFilterChange).toHaveBeenCalledWith(undefined);
+    expect(onClose).not.toHaveBeenCalled();
+    // Inputs reset to defaults
+    expect(screen.getByTestId("header-top-n-count")).toHaveValue(10);
+    expect(screen.getByTestId("header-top-n-by")).toHaveValue("");
+    expect(screen.getByTestId("header-top-n-dir-top")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });
 
@@ -744,10 +762,15 @@ describe("HeaderMenu - Value Filter section", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("Apply calls onValueFilterChange with correct filter", () => {
+  it("Apply calls onValueFilterChange with correct filter and closes menu", () => {
     const onValueFilterChange = vi.fn();
+    const onClose = vi.fn();
     render(
-      <HeaderMenu {...vfProps} onValueFilterChange={onValueFilterChange} />,
+      <HeaderMenu
+        {...vfProps}
+        onValueFilterChange={onValueFilterChange}
+        onClose={onClose}
+      />,
     );
 
     fireEvent.change(screen.getByTestId("header-value-filter-by"), {
@@ -768,6 +791,7 @@ describe("HeaderMenu - Value Filter section", () => {
         value: 1000,
       }),
     );
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("between operator shows second value input", () => {
@@ -803,21 +827,33 @@ describe("HeaderMenu - Value Filter section", () => {
     expect(screen.getByTestId("header-value-filter-clear")).not.toBeDisabled();
   });
 
-  it("Clear button calls onValueFilterChange(undefined)", () => {
+  it("Clear button calls onValueFilterChange(undefined), resets inputs, and keeps menu open", () => {
     const onValueFilterChange = vi.fn();
+    const onClose = vi.fn();
     render(
       <HeaderMenu
         {...vfProps}
         onValueFilterChange={onValueFilterChange}
+        onClose={onClose}
         valueFilter={{
           field: "Region",
           by: "Revenue",
-          operator: "gt",
+          operator: "lte",
           value: 500,
         }}
       />,
     );
     fireEvent.click(screen.getByTestId("header-value-filter-clear"));
     expect(onValueFilterChange).toHaveBeenCalledWith(undefined);
+    expect(onClose).not.toHaveBeenCalled();
+    // Inputs reset to defaults
+    expect(screen.getByTestId("header-value-filter-by")).toHaveValue("");
+    // type="number" with empty state returns null, not ""
+    expect(screen.getByTestId("header-value-filter-value")).toHaveValue(null);
+    // Default operator (gt) button should be active
+    expect(screen.getByTestId("header-value-filter-op-gt")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

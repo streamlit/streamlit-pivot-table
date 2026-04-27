@@ -188,8 +188,10 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
       direction: topNDirection,
       axis: filterAxis,
     });
+    onClose();
   }, [
     onTopNFilterChange,
+    onClose,
     dimension,
     topNValue,
     topNBy,
@@ -199,6 +201,10 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
 
   const clearTopN = useCallback(() => {
     onTopNFilterChange?.(undefined);
+    // Reset inputs to defaults so the user can immediately enter a new filter.
+    setTopNDirection("top");
+    setTopNValue("10");
+    setTopNBy("");
   }, [onTopNFilterChange]);
 
   const applyValueFilter = useCallback(() => {
@@ -218,8 +224,10 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
       filter.value2 = val2;
     }
     onValueFilterChange(filter);
+    onClose();
   }, [
     onValueFilterChange,
+    onClose,
     dimension,
     vfBy,
     vfOperator,
@@ -230,6 +238,11 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
 
   const clearValueFilter = useCallback(() => {
     onValueFilterChange?.(undefined);
+    // Reset inputs to defaults so the user can immediately enter a new filter.
+    setVfBy("");
+    setVfOperator("gt");
+    setVfValue("");
+    setVfValue2("");
   }, [onValueFilterChange]);
 
   useClickOutside(containerRef, onClose, true);
@@ -820,7 +833,11 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
             role="group"
             aria-label={`Top N filter for ${dimension}`}
           >
-            <span className={styles.menuSectionLabel}>Top / Bottom N</span>
+            <span
+              className={`${styles.menuSectionLabel}${topNFilter ? ` ${styles.activeSection}` : ""}`}
+            >
+              Top / Bottom N
+            </span>
             {/* Caption sits directly under heading as a section subtitle */}
             <span className={styles.analyticCaption}>
               Totals always reflect full data, not just visible members.
@@ -834,6 +851,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
                   <button
                     key={dir}
                     type="button"
+                    aria-pressed={topNDirection === dir}
                     className={`${styles.toggleBtn}${topNDirection === dir ? ` ${styles.toggleBtnActive}` : ""}`}
                     onClick={() => setTopNDirection(dir)}
                     data-menu-nav
@@ -924,7 +942,11 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
             role="group"
             aria-label={`Value filter for ${dimension}`}
           >
-            <span className={styles.menuSectionLabel}>Filter by value</span>
+            <span
+              className={`${styles.menuSectionLabel}${valueFilter ? ` ${styles.activeSection}` : ""}`}
+            >
+              Filter by value
+            </span>
             {/* Caption sits directly under heading as a section subtitle */}
             <span className={styles.analyticCaption}>
               Totals always reflect full data, not just visible members.
@@ -979,6 +1001,7 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
                 >
                   <button
                     type="button"
+                    aria-pressed={vfOperator === op}
                     className={`${styles.opBtn}${vfOperator === op ? ` ${styles.opBtnActive}` : ""}`}
                     onClick={() => setVfOperator(op)}
                     aria-label={tooltip}
@@ -1060,7 +1083,11 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
       {/* Filter section */}
       {showFilter && (
         <div className={styles.filterSection} data-testid="header-menu-filter">
-          <span className={styles.menuSectionLabel}>Filter Values</span>
+          <span
+            className={`${styles.menuSectionLabel}${filter?.include?.length || filter?.exclude?.length ? ` ${styles.activeSection}` : ""}`}
+          >
+            Filter Values
+          </span>
           <input
             type="text"
             className={styles.searchInput}

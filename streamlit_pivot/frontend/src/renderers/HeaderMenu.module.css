@@ -214,7 +214,20 @@
   letter-spacing: 0.05em;
   color: color-mix(in srgb, var(--st-text-color) 55%, transparent);
   padding: 0px 8px 4px;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Colored dot appended to a section label when that filter is active */
+.menuSectionLabel.activeSection::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--st-primary-color);
+  flex-shrink: 0;
 }
 
 /* ---- Divider ---- */

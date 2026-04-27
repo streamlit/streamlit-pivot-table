@@ -204,7 +204,12 @@ class TestTopNInteractiveMenu:
         assert _row_headers(container).count() < rows_before
 
     def test_top_n_clear_restores_row_count(self, page_at_app: Page):
-        """Clearing the Top N filter via the header menu restores all rows."""
+        """Clearing the Top N filter via the header menu restores all rows.
+
+        Clear keeps the menu open (for immediate re-entry) and resets inputs
+        to defaults. The table updates immediately; the user closes the menu
+        manually (e.g. Escape) when done.
+        """
         page = page_at_app
         container = get_pivot(page, "test_pivot_top_n_interactive")
         expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
@@ -212,7 +217,7 @@ class TestTopNInteractiveMenu:
         # Capture baseline
         rows_all = _row_headers(container).count()
 
-        # Apply top-2
+        # Apply top-2 (closes menu)
         menu = _open_header_menu(page, container, "Product")
         menu.get_by_test_id("header-top-n-count").fill("2")
         menu.get_by_test_id("header-top-n-by").select_option("Revenue")
@@ -220,13 +225,14 @@ class TestTopNInteractiveMenu:
         expect(page.get_by_test_id("header-menu-Product")).to_be_hidden(timeout=8000)
         expect(_row_headers(container)).not_to_have_count(rows_all, timeout=10000)
 
-        # Now clear
+        # Clear — menu stays open; table restores all rows immediately
         menu2 = _open_header_menu(page, container, "Product")
-        clear_btn = menu2.get_by_test_id("header-top-n-clear")
-        clear_btn.evaluate("el => el.click()")
-        expect(page.get_by_test_id("header-menu-Product")).to_be_hidden(timeout=8000)
-
+        menu2.get_by_test_id("header-top-n-clear").evaluate("el => el.click()")
+        expect(page.get_by_test_id("header-menu-Product")).to_be_visible(timeout=5000)
         expect(_row_headers(container)).to_have_count(rows_all, timeout=10000)
+
+        # Close menu manually
+        _close_header_menu(page, "Product")
 
 
 class TestValueFilterInteractiveMenu:
@@ -274,14 +280,19 @@ class TestValueFilterInteractiveMenu:
         assert _row_headers(container).count() < rows_before
 
     def test_value_filter_clear_restores_rows(self, page_at_app: Page):
-        """Clearing the value filter via the header menu restores all product rows."""
+        """Clearing the value filter via the header menu restores all product rows.
+
+        Clear keeps the menu open (for immediate re-entry) and resets inputs
+        to defaults. The table updates immediately; the user closes the menu
+        manually (e.g. Escape) when done.
+        """
         page = page_at_app
         container = get_pivot(page, "test_pivot_value_filter_interactive")
         expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
         rows_all = _row_headers(container).count()
 
-        # Apply filter first (same threshold as apply test: 7000)
+        # Apply filter first (closes menu)
         menu = _open_header_menu(page, container, "Product")
         menu.get_by_test_id("header-value-filter-by").select_option("Revenue")
         menu.get_by_test_id("header-value-filter-op-gt").evaluate("el => el.click()")
@@ -290,9 +301,11 @@ class TestValueFilterInteractiveMenu:
         expect(page.get_by_test_id("header-menu-Product")).to_be_hidden(timeout=8000)
         expect(_row_headers(container)).not_to_have_count(rows_all, timeout=10000)
 
-        # Clear the filter
+        # Clear — menu stays open; table restores all rows immediately
         menu2 = _open_header_menu(page, container, "Product")
         menu2.get_by_test_id("header-value-filter-clear").evaluate("el => el.click()")
-        expect(page.get_by_test_id("header-menu-Product")).to_be_hidden(timeout=8000)
-
+        expect(page.get_by_test_id("header-menu-Product")).to_be_visible(timeout=5000)
         expect(_row_headers(container)).to_have_count(rows_all, timeout=10000)
+
+        # Close menu manually
+        _close_header_menu(page, "Product")

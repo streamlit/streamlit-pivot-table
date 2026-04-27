@@ -1187,7 +1187,10 @@ export function renderColumnHeaders(
           effectiveRowHeaderLevels.forEach((rowLevel, rowHeaderIdx) => {
             const dim = rowLevel.field;
             const dimIdx = rowLevel.dimIndex;
-            const isFiltered = !!config.filters?.[dim];
+            const isFiltered =
+              !!config.filters?.[dim] ||
+              !!config.top_n_filters?.some((f) => f.field === dim) ||
+              !!config.value_filters?.some((f) => f.field === dim);
             const isFirstRowDim = rowHeaderIdx === 0;
             const hasSubtotals =
               !!config.show_subtotals && config.rows.length >= 2;
@@ -1545,7 +1548,10 @@ export function renderColumnHeaders(
             ? span * renderedValueFields.length
             : span;
 
-          const isFiltered = !!config.filters?.[dimName];
+          const isFiltered =
+            !!config.filters?.[dimName] ||
+            !!config.top_n_filters?.some((f) => f.field === dimName) ||
+            !!config.value_filters?.some((f) => f.field === dimName);
           const showColSortIndicator =
             !!colSortDir && isFirstColLevel && i === 0;
 
@@ -4693,6 +4699,7 @@ const TableRenderer: FC<TableRendererProps> = ({
           style={{ top: menuPosition.top, left: menuPosition.left }}
         >
           <HeaderMenu
+            key={`${menuTarget.dimension}-${menuTarget.axis}`}
             dimension={menuTarget.dimension}
             title={menuTitle}
             axis={menuTarget.axis === "value" ? "col" : menuTarget.axis}

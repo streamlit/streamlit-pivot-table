@@ -1558,6 +1558,9 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
   // top_n_filters and value_filters: structural checks only here (types, enum values).
   // Semantic validation (field/by references against declared dims/measures) is done
   // by validatePivotConfigRuntime() and by Python at call time.
+  if (o.top_n_filters !== undefined && !Array.isArray(o.top_n_filters)) {
+    throw new Error("'top_n_filters' must be an array");
+  }
   if (Array.isArray(o.top_n_filters)) {
     const VALID_DIRECTIONS = new Set<string>(["top", "bottom"]);
     const VALID_AXES = new Set<string>(["rows", "columns"]);
@@ -1588,6 +1591,9 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     result.top_n_filters = filters as unknown as TopNFilter[];
   }
 
+  if (o.value_filters !== undefined && !Array.isArray(o.value_filters)) {
+    throw new Error("'value_filters' must be an array");
+  }
   if (Array.isArray(o.value_filters)) {
     const VALID_OPS = new Set<string>([
       "gt",
@@ -1614,6 +1620,14 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
         );
       if (typeof f.value !== "number")
         throw new Error(`'value_filters[${i}].value' must be a number`);
+      if (f.operator === "between" && typeof f.value2 !== "number") {
+        throw new Error(
+          `'value_filters[${i}].value2' must be a number when operator is "between"`,
+        );
+      }
+      if (f.value2 !== undefined && typeof f.value2 !== "number") {
+        throw new Error(`'value_filters[${i}].value2' must be a number`);
+      }
       if (f.axis !== undefined && !VALID_AXES.has(f.axis as string))
         throw new Error(
           `'value_filters[${i}].axis' must be "rows" or "columns"`,
