@@ -737,6 +737,32 @@ def test_style_invalid_font_weight_raises(pivot_module):
         pivot_module._resolve_style({"column_header": {"font_weight": "700"}})
 
 
+def test_style_invalid_vertical_align_raises(pivot_module):
+    with pytest.raises(ValueError, match="vertical_align"):
+        pivot_module._resolve_style({"row_header": {"vertical_align": "baseline"}})
+
+
+def test_style_valid_vertical_aligns_accepted(pivot_module):
+    """All three valid values must resolve without error or warning."""
+    for value in ("top", "middle", "bottom"):
+        result = pivot_module._resolve_style({"row_header": {"vertical_align": value}})
+        assert result is not None
+        assert result["row_header"]["vertical_align"] == value
+
+
+def test_style_vertical_align_per_measure_validates(pivot_module):
+    """vertical_align on data_cell_by_measure must validate without warning."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = pivot_module._resolve_style(
+            {"data_cell_by_measure": {"Revenue": {"vertical_align": "top"}}}
+        )
+    assert result is not None
+    assert result["data_cell_by_measure"]["Revenue"]["vertical_align"] == "top"
+
+
 def test_style_invalid_font_size_raises(pivot_module):
     with pytest.raises(ValueError, match="font_size"):
         pivot_module._resolve_style({"font_size": "13"})  # missing unit

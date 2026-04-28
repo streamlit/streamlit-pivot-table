@@ -797,6 +797,7 @@ class RegionStyle(TypedDict, total=False):
     background_color: str
     text_color: str
     font_weight: str   # "normal" | "bold"
+    vertical_align: str  # "top" | "middle" | "bottom"
 
 class PivotStyle(TypedDict, total=False):
     # Table-wide

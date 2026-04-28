@@ -50,6 +50,7 @@
 .headerCell {
   padding: 6px 10px;
   text-align: center;
+  vertical-align: var(--pivot-column-header-vertical-align, middle);
   font-weight: var(--pivot-column-header-font-weight, 500);
   background-color: var(
     --pivot-column-header-bg,
@@ -93,6 +94,7 @@
 .rowHeaderCell {
   padding: 6px 10px;
   text-align: left;
+  vertical-align: var(--pivot-row-header-vertical-align, middle);
   font-weight: var(--pivot-row-header-font-weight, 400);
   background-color: var(
     --pivot-row-header-bg,
@@ -154,6 +156,7 @@
 .dataCell {
   padding: 6px 10px;
   text-align: right;
+  vertical-align: var(--pivot-data-cell-vertical-align, middle);
   background-color: var(--pivot-data-cell-bg, var(--pivot-bg, transparent));
   color: var(--pivot-data-cell-color, var(--pivot-color, var(--st-text-color)));
   font-weight: var(--pivot-data-cell-font-weight, 400);
@@ -208,6 +211,7 @@
     color-mix(in srgb, var(--st-secondary-background-color) 75%, var(--pivot-bg, var(--st-background-color)))
   );
   color: var(--pivot-column-total-color, var(--pivot-color, var(--st-text-color)));
+  vertical-align: var(--pivot-column-total-vertical-align, middle);
   border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
   font-weight: var(--pivot-column-total-font-weight, 600);
 }
@@ -225,6 +229,7 @@
     color-mix(in srgb, var(--st-secondary-background-color) 75%, var(--pivot-bg, var(--st-background-color)))
   );
   color: var(--pivot-column-total-color, var(--pivot-color, var(--st-text-color)));
+  vertical-align: var(--pivot-column-total-vertical-align, middle);
   font-weight: var(--pivot-column-total-font-weight, 600);
   border-bottom: none;
 }
@@ -232,6 +237,7 @@
 /* row_total region — grand total per row, rendered in the rightmost .totalsCol */
 .totalsCol {
   font-weight: var(--pivot-row-total-font-weight, 600);
+  vertical-align: var(--pivot-row-total-vertical-align, middle);
   background-color: var(
     --pivot-row-total-bg,
     color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--pivot-bg, var(--st-background-color)))
@@ -247,6 +253,7 @@
     color-mix(in srgb, var(--st-secondary-background-color) 70%, var(--pivot-bg, var(--st-background-color)))
   );
   color: var(--pivot-row-total-color, var(--pivot-color, var(--st-text-color)));
+  vertical-align: var(--pivot-row-total-vertical-align, middle);
   font-weight: var(--pivot-row-total-font-weight, 600);
 }
 
@@ -314,6 +321,7 @@
 }
 
 .emptyCorner {
+  vertical-align: var(--pivot-column-header-vertical-align, middle);
   background-color: var(
     --pivot-column-header-bg,
     var(--st-dataframe-header-background-color, var(--pivot-bg, var(--st-secondary-background-color)))
@@ -334,6 +342,7 @@
 
 .valueLabel {
   font-size: 0.86em;
+  vertical-align: var(--pivot-column-header-vertical-align, middle);
   color: var(
     --pivot-column-header-color,
     color-mix(in srgb, var(--pivot-color, var(--st-text-color)) 80%, transparent)
@@ -365,6 +374,7 @@
     color-mix(in srgb, var(--st-secondary-background-color) 65%, var(--pivot-bg, var(--st-background-color)))
   );
   color: var(--pivot-subtotal-color, var(--pivot-color, var(--st-text-color)));
+  vertical-align: var(--pivot-subtotal-vertical-align, middle);
   border-top: 1px solid color-mix(in srgb, var(--st-text-color) 22%, transparent);
 }
 
@@ -715,6 +725,7 @@
 .hierarchySubtotalRow td:not(.totalsCol),
 .hierarchySubtotalRow th {
   background-color: var(--pivot-subtotal-bg, var(--pivot-bg, var(--st-background-color)));
+  vertical-align: var(--pivot-subtotal-vertical-align, middle);
   border-top: 1px solid color-mix(in srgb, var(--st-text-color) 12%, transparent);
 }
 

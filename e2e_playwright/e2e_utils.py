@@ -187,6 +187,7 @@ STYLING_PIVOT_KEYS = [
     "style_per_measure",
     "style_cf_precedence",
     "style_composition",
+    "style_vertical_align_row_header",
 ]
 
 APP_CONFIGS = {

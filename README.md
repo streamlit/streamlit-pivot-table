@@ -913,6 +913,7 @@ class RegionStyle(TypedDict, total=False):
     background_color: str
     text_color: str
     font_weight: str   # "normal" | "bold"
+    vertical_align: str  # "top" | "middle" | "bottom"
 
 class PivotStyle(TypedDict, total=False):
     # Table-wide
@@ -987,6 +988,17 @@ st_pivot_table(
     ),
 )
 ```
+
+#### Vertical alignment
+
+Control the vertical alignment of cells within a region. Useful when row header cells span many child rows:
+
+```python
+# Top-align row header cells — useful when a dimension spans many child rows
+style={"row_header": {"vertical_align": "top"}}
+```
+
+Accepted values: `"top"`, `"middle"` (default), `"bottom"`. Applies to all regions.
 
 #### Composition
 

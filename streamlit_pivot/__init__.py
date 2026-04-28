@@ -109,6 +109,7 @@ class RegionStyle(TypedDict, total=False):
     background_color: str
     text_color: str
     font_weight: str  # "normal" | "bold"
+    vertical_align: str  # "top" | "middle" | "bottom"
 
 
 class PivotStyle(TypedDict, total=False):
@@ -195,6 +196,7 @@ PIVOT_STYLE_PRESETS: dict[str, PivotStyle] = {
 _VALID_DENSITIES = frozenset(("compact", "default", "comfortable"))
 _VALID_BORDERS = frozenset(("all", "outer", "rows", "columns", "none"))
 _VALID_FONT_WEIGHTS = frozenset(("normal", "bold"))
+_VALID_VERTICAL_ALIGNS = frozenset(("top", "middle", "bottom"))
 _FONT_SIZE_RE = re.compile(
     r"^\d+(\.\d+)?(px|rem|em|%|pt)$"  # simple unit values: 13px, 0.875rem …
     r"|^(calc|clamp|min|max)\(.+\)$",  # CSS function calls: calc(1rem + 2px) …
@@ -244,6 +246,12 @@ def _validate_region_style(region: Any, context: str) -> None:
                 raise ValueError(
                     f"{context}['font_weight'] must be one of "
                     f"{sorted(_VALID_FONT_WEIGHTS)}, got {v!r}"
+                )
+        elif k == "vertical_align":
+            if v not in _VALID_VERTICAL_ALIGNS:
+                raise ValueError(
+                    f"{context}['vertical_align'] must be one of "
+                    f"{sorted(_VALID_VERTICAL_ALIGNS)}, got {v!r}"
                 )
         else:
             warn_key = f"region_key:{context}:{k}"

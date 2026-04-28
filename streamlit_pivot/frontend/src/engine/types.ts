@@ -54,6 +54,7 @@ export interface RegionStyle {
   text_color?: string;
   /** Narrow enum matching the validation on the Python side. */
   font_weight?: "normal" | "bold";
+  vertical_align?: "top" | "middle" | "bottom";
 }
 
 /**

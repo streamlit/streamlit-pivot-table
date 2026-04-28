@@ -138,6 +138,7 @@ def test_style_roundtrips_through_json(pivot_module):
             background_color="blue",
             text_color="white",
             font_weight="bold",
+            vertical_align="top",
         ),
         data_cell_by_measure={
             "Revenue": pivot_module.RegionStyle(background_color="green")
@@ -148,6 +149,7 @@ def test_style_roundtrips_through_json(pivot_module):
     assert roundtripped["borders"] == "rows"
     assert roundtripped["row_hover_color"] is None
     assert roundtripped["column_header"]["font_weight"] == "bold"
+    assert roundtripped["column_header"]["vertical_align"] == "top"
     assert (
         roundtripped["data_cell_by_measure"]["Revenue"]["background_color"] == "green"
     )

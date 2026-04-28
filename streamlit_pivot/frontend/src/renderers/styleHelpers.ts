@@ -102,6 +102,8 @@ export function styleToCSS(style?: PivotStyle): CSSProperties {
     if (r.background_color) v[`--pivot-${slug}-bg`] = r.background_color;
     if (r.text_color) v[`--pivot-${slug}-color`] = r.text_color;
     if (r.font_weight) v[`--pivot-${slug}-font-weight`] = r.font_weight;
+    if (r.vertical_align)
+      v[`--pivot-${slug}-vertical-align`] = r.vertical_align;
   }
 
   return v as CSSProperties;
@@ -189,5 +191,7 @@ export function dataCellByMeasureStyle(
   if (r.text_color) s.color = r.text_color;
   if (r.font_weight)
     s.fontWeight = r.font_weight as CSSProperties["fontWeight"];
+  if (r.vertical_align)
+    s.verticalAlign = r.vertical_align as CSSProperties["verticalAlign"];
   return Object.keys(s).length > 0 ? s : undefined;
 }

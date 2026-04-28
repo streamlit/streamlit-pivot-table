@@ -3278,6 +3278,33 @@ st_pivot_table(
             language="python",
         )
 
+    # --- 8. Vertical alignment ---
+    st.markdown("#### 8. Vertical alignment — top-align row headers")
+    st.caption(
+        "When a row dimension spans many child rows, the default `middle` alignment "
+        "floats the label to the center of a tall cell. Set `vertical_align='top'` "
+        "on `row_header` to pin it to the top edge instead."
+    )
+    st_pivot_table(
+        _style_df,
+        key="style_vertical_align",
+        rows=["Region", "Product"],
+        columns=["Category"],
+        values=["Revenue"],
+        aggregation={"Revenue": "sum"},
+        number_format={"Revenue": "$,.0f"},
+        show_totals=True,
+        interactive=False,
+        style=PivotStyle(row_header=RegionStyle(vertical_align="top")),
+    )
+    with st.expander("View Code"):
+        st.code(
+            """
+style=PivotStyle(row_header=RegionStyle(vertical_align="top"))
+""",
+            language="python",
+        )
+
 
 section_styling()
 

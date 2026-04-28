@@ -309,3 +309,24 @@ def test_style_composition_applies_both_layers(page_at_app: Page):
     assert (
         "--pivot-bg" in style
     ), f"Expected --pivot-bg from PivotStyle override, got style={style!r}"
+
+
+# ---------------------------------------------------------------------------
+# 14. vertical_align: row header computed vertical-align is "top"
+# ---------------------------------------------------------------------------
+
+
+def test_style_vertical_align_row_header_computed(page_at_app: Page):
+    """row_header.vertical_align='top' must result in computed vertical-align: top on row header cells.
+
+    Uses getComputedStyle to verify the CSS var is both emitted by styleHelpers
+    and consumed by TableRenderer.module.css — not just present in the wrapper style.
+    """
+    container = get_pivot(page_at_app, "style_vertical_align_row_header")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    row_header = container.locator("[class*='rowHeaderCell']").first
+    computed_va = row_header.evaluate("el => window.getComputedStyle(el).verticalAlign")
+    assert (
+        computed_va == "top"
+    ), f"Expected computed vertical-align 'top' on row header cell, got {computed_va!r}"

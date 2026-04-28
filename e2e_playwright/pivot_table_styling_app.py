@@ -177,5 +177,14 @@ def render_app() -> None:
         ],
     )
 
+    # 14. vertical_align: row_header top-aligned
+    st.subheader("style_vertical_align_row_header")
+    st_pivot_table(
+        _DF,
+        key="style_vertical_align_row_header",
+        **_SHARED,
+        style=PivotStyle(row_header=RegionStyle(vertical_align="top")),
+    )
+
 
 render_app()
