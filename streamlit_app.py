@@ -99,7 +99,7 @@ and **value fields** to aggregate.
   - **Copy Config** — copies the current config as JSON to your clipboard.
   - **Import Config** — paste a JSON config to apply it.
   - **Export Data** (↓) — export the table as Excel, CSV, TSV, or copy to clipboard
-    (see Section 11 for details).
+    (see Section 12 for details).
   - **Settings** — opens the full Settings Panel for field configuration,
     aggregation, synthetic measures, and display toggles (see Section 19).
 """
@@ -472,10 +472,10 @@ Subtotals are independent — they still show all measures regardless of this se
 section_subtotals()
 
 # ---------------------------------------------------------------------------
-# Section 5: Advanced Aggregators and Show Values As
+# Section 5: Aggregation and Show Values As
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("5. Advanced Aggregators and Show Values As")
+st.subheader("5. Aggregation and Show Values As")
 
 
 @st.fragment
@@ -533,16 +533,13 @@ st_pivot_table(
 section_aggregators()
 
 # ---------------------------------------------------------------------------
-# Section 5b: Show Values As — Analytical Modes (0.5.0)
+# Section 5 continued: Show Values As — Analytical Modes (0.5.0)
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("5b. Show Values As — Running Total, Rank, % of Parent (0.5.0)")
 
 
 @st.fragment
 def section_show_values_as_analytical():
-    import pandas as pd
-
+    st.markdown("#### Analytical Modes (0.5.0+)")
     sva_df = pd.DataFrame(
         {
             "Region": ["US", "US", "US", "EU", "EU", "EU", "APAC", "APAC", "APAC"],
@@ -641,10 +638,10 @@ st_pivot_table(
 section_show_values_as_analytical()
 
 # ---------------------------------------------------------------------------
-# Section 5c: Top N / Value Filters (0.5.0)
+# Section 6: Top N / Value Filters (0.5.0)
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("5c. Top N / Bottom N and Value Filters (0.5.0)")
+st.subheader("6. Top N / Bottom N and Value Filters")
 
 
 @st.cache_data
@@ -819,10 +816,10 @@ st_pivot_table(
 section_top_n_value_filters()
 
 # ---------------------------------------------------------------------------
-# Section 5d: Multi-field Sorting + Subtotal Position (0.5.0)
+# Section 7: Multi-field Sorting + Subtotal Position (0.5.0)
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("5d. Multi-field Sorting + Subtotal Position (0.5.0)")
+st.subheader("7. Multi-field Sorting + Subtotal Position")
 
 
 @st.fragment
@@ -957,10 +954,10 @@ section_sort_and_subtotals()
 
 
 # ---------------------------------------------------------------------------
-# Section 5e: Values Axis Placement (0.5.0)
+# Section 8: Values Axis Placement (0.5.0)
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("5e. Values Axis Placement (0.5.0)")
+st.subheader("8. Values Axis Placement")
 
 
 @st.fragment
@@ -1173,10 +1170,10 @@ section_values_axis()
 
 
 # ---------------------------------------------------------------------------
-# Section 6: Conditional Formatting
+# Section 9: Conditional Formatting
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("6. Conditional Formatting")
+st.subheader("9. Conditional Formatting")
 
 
 @st.fragment
@@ -1384,10 +1381,10 @@ st_pivot_table(
 section_cond_fmt()
 
 # ---------------------------------------------------------------------------
-# Section 7: Number Formatting and Layout
+# Section 10: Number Formatting and Layout
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("7. Number Formatting and Layout")
+st.subheader("10. Number Formatting and Layout")
 
 
 @st.fragment
@@ -1442,63 +1439,10 @@ st_pivot_table(
 section_formatting()
 
 # ---------------------------------------------------------------------------
-# Section 8: Column Group Collapse/Expand
+# Section 11: Synthetic Measures
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("8. Column Group Collapse/Expand")
-
-
-@st.fragment
-def section_col_collapse():
-    st.markdown(
-        """
-When you have **two or more column dimensions**, column groups can be
-collapsed just like row groups.
-
-**Try it:**
-- The table below pivots by **Region** (rows) and **Year × Category** (columns).
-- Hover over a **Year** column header — a **−** toggle appears.
-- Click it to **collapse** that year's sub-columns into a single subtotal column.
-- Click **+** to expand again.
-
-**Note:** Column collapse/expand works alongside row subtotals and row grouping.
-"""
-    )
-
-    st_pivot_table(
-        df,
-        key="col_collapse",
-        rows=["Region"],
-        columns=["Year", "Category"],
-        values=["Revenue"],
-        aggregation="sum",
-        show_totals=True,
-    )
-
-    with st.expander("View Code"):
-        st.code(
-            """
-st_pivot_table(
-    df,
-    key="col_collapse",
-    rows=["Region"],
-    columns=["Year", "Category"],
-    values=["Revenue"],
-    aggregation="sum",
-    show_totals=True,
-)
-""",
-            language="python",
-        )
-
-
-section_col_collapse()
-
-# ---------------------------------------------------------------------------
-# Section 9: Synthetic Measures (V1)
-# ---------------------------------------------------------------------------
-st.divider()
-st.subheader("9. Synthetic Measures (V1)")
+st.subheader("11. Synthetic Measures")
 
 
 @st.fragment
@@ -1600,14 +1544,13 @@ st_pivot_table(
 section_synthetic()
 
 # ---------------------------------------------------------------------------
-# Section 9b: Formula-Based Calculated Measures
+# Section 9 continued: Formula-Based Calculated Measures
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("9b. Formula-Based Calculated Measures")
 
 
 @st.fragment
 def section_formula():
+    st.markdown("#### Formula Measures")
     st.markdown(
         """
 Formula measures extend synthetic measures with a general expression evaluator.
@@ -1709,71 +1652,10 @@ st_pivot_table(
 section_formula()
 
 # ---------------------------------------------------------------------------
-# Section 10: Sticky Headers, Height, and Max Height
+# Section 12: Data Export
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("10. Sticky Headers, Height, and Max Height")
-
-
-@st.fragment
-def section_sticky():
-    st.markdown(
-        """
-By default, column headers **stick** to the top of the table as you scroll.
-You can disable this behavior with `sticky_headers=False` or toggle it at
-runtime via the **Sticky Headers** checkbox in the **Settings Panel** (pivot icon).
-
-The table container size is controlled by `max_height` (default ``500``).
-The table auto-sizes up to this limit, then becomes scrollable with sticky
-headers. The sticky headers checkbox appears when content exceeds this limit.
-
-**Try it:**
-- The table below has `max_height=700` and sticky headers **disabled** — scroll
-  down and notice the headers scroll away.
-- Open the **Settings Panel** (pivot icon), enable **Sticky Headers**, and
-  click **Apply** to re-enable.
-
-**API parameters used:** `sticky_headers`, `max_height`
-"""
-    )
-
-    st_pivot_table(
-        df,
-        key="sticky_off",
-        rows=["Region", "Category"],
-        columns=["Year"],
-        values=["Revenue", "Profit"],
-        aggregation="sum",
-        sticky_headers=False,
-        show_subtotals=True,
-        max_height=700,
-    )
-
-    with st.expander("View Code"):
-        st.code(
-            """
-st_pivot_table(
-    df,
-    key="sticky_off",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    sticky_headers=False,
-    show_subtotals=True,
-    max_height=700,
-)
-""",
-            language="python",
-        )
-
-
-section_sticky()
-
-# ---------------------------------------------------------------------------
-# Section 11: Data Export
-# ---------------------------------------------------------------------------
-st.divider()
-st.subheader("11. Data Export")
+st.subheader("12. Data Export")
 
 
 @st.fragment
@@ -1788,7 +1670,7 @@ headers, bold totals/subtotals, number formatting, banded rows, and frozen
 panes — matching the quality you'd expect from BI tools like Sigma.
 Conditional formatting rules (color scales, data bars, and threshold
 highlights) are translated to native Excel conditional formatting — try
-exporting the table in **Section 6** to see this in action.
+exporting the table in **Section 9** to see this in action.
 
 **Try it:**
 - Use the top-right utility menu in the toolbar.
@@ -1844,10 +1726,10 @@ st_pivot_table(
 section_export()
 
 # ---------------------------------------------------------------------------
-# Section 12: Drill-Down Detail Panel
+# Section 13: Drill-Down Detail Panel
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("12. Drill-Down Detail Panel")
+st.subheader("13. Drill-Down Detail Panel")
 
 
 @st.fragment
@@ -1910,10 +1792,10 @@ result = st_pivot_table(
 section_drilldown()
 
 # ---------------------------------------------------------------------------
-# Section 13: Grouping Hierarchy and Sorting
+# Section 14: Row Layout and Hierarchy
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("13. Grouping Hierarchy and Scoped Sorting")
+st.subheader("14. Row Layout and Hierarchy")
 
 
 @st.fragment
@@ -2074,14 +1956,13 @@ st_pivot_table(
 section_hierarchy()
 
 # ---------------------------------------------------------------------------
-# Section 13b: Row Layout Modes (Table vs. Hierarchy)
+# Section 13 continued: Row Layout Modes (Table vs. Hierarchy)
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("13b. Row Layout Modes (Table vs. Hierarchy)")
 
 
 @st.fragment
 def section_row_layout():
+    st.markdown("#### Row Layout: Table vs. Hierarchy")
     st.markdown(
         """
 The `row_layout` parameter controls how row dimensions are arranged in the row header.
@@ -2199,10 +2080,10 @@ st_pivot_table(
 section_row_layout()
 
 # ---------------------------------------------------------------------------
-# Section 14: Server-Side Drill-Down (Hybrid Mode)
+# Section 15: Server-Side Pre-Aggregation (Hybrid Mode)
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("14. Server-Side Drill-Down (Hybrid Mode)")
+st.subheader("15. Server-Side Pre-Aggregation (Hybrid Mode)")
 
 _rng = np.random.default_rng(42)
 _n = 50_000
@@ -2371,10 +2252,10 @@ st_pivot_table(
 section_hybrid()
 
 # ---------------------------------------------------------------------------
-# Section 15: Drag-and-Drop Field Configuration
+# Section 16: Drag-and-Drop Field Configuration
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("15. Drag-and-Drop Field Configuration")
+st.subheader("16. Drag-and-Drop Field Configuration")
 
 
 @st.fragment
@@ -2434,33 +2315,64 @@ st_pivot_table(
 section_dnd()
 
 # ---------------------------------------------------------------------------
-# Section 16: Column Resize
+# Section 17: Frontend Interactions
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("16. Column Resize")
+st.subheader("17. Frontend Interactions")
+st.markdown(
+    "These features require no Python API parameters — they are purely frontend "
+    "interactions available whenever `interactive=True`."
+)
 
 
 @st.fragment
-def section_resize():
+def section_frontend_interactions():
+    st.markdown("#### Column Group Collapse / Expand")
     st.markdown(
         """
-Drag the **right edge of any column header** to resize that column.
-The resize handle appears as a thin highlight strip when you hover the
-column border. Minimum width is 40 px. Works in both virtualized and
-non-virtualized rendering modes.
-
-**Try it:**
-- Hover the right edge of a column header until the cursor changes to
-  a **col-resize** handle.
-- Drag left or right to change the column width.
-- Resize multiple columns — each column remembers its width independently.
-- Widths reset when the pivot config changes (new rows, columns, values, etc.).
-
-Column resize is a **purely frontend interaction** — no Python API parameter
-is required.
+When you have **two or more column dimensions**, hover any parent column header
+to reveal a **−** toggle. Click to collapse that group into a single subtotal
+column; click **+** to expand again. Works alongside row subtotals.
 """
     )
+    st_pivot_table(
+        df,
+        key="col_collapse",
+        rows=["Region"],
+        columns=["Year", "Category"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=True,
+    )
 
+    st.markdown("#### Sticky Headers and `max_height`")
+    st.markdown(
+        """
+Column headers stick to the top of the scroll container by default (`sticky_headers=True`).
+The table auto-sizes up to `max_height` (default `500` px), then becomes scrollable.
+Toggle sticky headers at runtime via the Settings Panel.
+"""
+    )
+    st_pivot_table(
+        df,
+        key="sticky_off",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Profit"],
+        aggregation="sum",
+        sticky_headers=False,
+        show_subtotals=True,
+        max_height=400,
+    )
+
+    st.markdown("#### Column Resize")
+    st.markdown(
+        """
+Drag the **right edge** of any column header to resize it (cursor → `col-resize`).
+**Double-click** the edge to auto-size to content. Minimum width is 40 px.
+Each column remembers its width independently; widths reset when the config changes.
+"""
+    )
     st_pivot_table(
         df,
         key="column_resize_demo",
@@ -2472,56 +2384,14 @@ is required.
         show_totals=True,
     )
 
-    with st.expander("View Code"):
-        st.code(
-            """
-st_pivot_table(
-    df,
-    key="column_resize_demo",
-    rows=["Region"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation={"Revenue": "sum", "Profit": "sum"},
-    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
-    show_totals=True,
-)
-# Drag any column header edge to resize.
-""",
-            language="python",
-        )
-
-
-section_resize()
-
-# ---------------------------------------------------------------------------
-# Section 17: Fullscreen Mode
-# ---------------------------------------------------------------------------
-st.divider()
-st.subheader("17. Fullscreen Mode")
-
-
-@st.fragment
-def section_fullscreen():
+    st.markdown("#### Fullscreen Mode")
     st.markdown(
         """
-Click the **expand icon** (⤢) in the toolbar utility menu to enter
-**fullscreen mode**. The pivot table fills the entire browser viewport
-as a fixed overlay. Press **Escape** or click the **collapse icon** (⤡)
-to exit.
-
-**Try it:**
-- Hover over the toolbar area to reveal the utility buttons.
-- Click the expand icon in the utility menu (before the Settings icon).
-- The table expands to fill the full viewport — virtual scrolling
-  automatically adjusts to the new height.
-- Press **Escape** or click the collapse icon to return to normal view.
-
-Fullscreen mode is a **purely frontend interaction** — no Python API
-parameter is required. It works with both virtualized and non-virtualized
-tables.
+Click the **expand icon** (⤢) in the toolbar utility menu to fill the entire
+browser viewport. Press **Escape** or click the collapse icon (⤡) to exit.
+Virtual scrolling height adjusts automatically.
 """
     )
-
     st_pivot_table(
         df,
         key="fullscreen_demo",
@@ -2538,26 +2408,23 @@ tables.
     with st.expander("View Code"):
         st.code(
             """
-st_pivot_table(
-    df,
-    key="fullscreen_demo",
-    rows=["Region", "Category"],
-    columns=["Year"],
-    values=["Revenue", "Profit"],
-    aggregation={"Revenue": "sum", "Profit": "sum"},
-    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
-    show_totals=True,
-    show_subtotals=True,
-    max_height=350,
-)
-# Click the expand icon in the toolbar to go fullscreen.
-# Press Escape to exit.
+# Column group collapse — 2+ column dimensions automatically get the +/- toggle
+st_pivot_table(df, key="col_collapse", rows=["Region"],
+               columns=["Year", "Category"], values=["Revenue"])
+
+# Sticky headers off + custom max height
+st_pivot_table(df, key="sticky_off", rows=["Region", "Category"],
+               columns=["Year"], values=["Revenue"],
+               sticky_headers=False, max_height=400)
+
+# Column resize and fullscreen need no API params —
+# just drag any header edge, or click the ⤢ toolbar icon.
 """,
             language="python",
         )
 
 
-section_fullscreen()
+section_frontend_interactions()
 
 # ---------------------------------------------------------------------------
 # Section 18: Date Hierarchy and Time Comparisons

@@ -785,6 +785,7 @@ style={"column_header": {"background_color": "#1a73e8"}}
 | `"striped"` | Subtle alternating-row banding. |
 | `"minimal"` | No borders, no hover, no stripes — good for static output. |
 | `"compact"` | Tight padding + reduced virtualized row height. |
+| `"comfortable"` | Generous padding — easier to scan on large monitors or in reports. |
 | `"contrast"` | Bold headers, bold totals, subtle stripe — Power BI Contrast parity. |
 
 **`PivotStyle` and `RegionStyle` shapes:**
@@ -1103,7 +1104,7 @@ sales_pivot()
 - Keep random / non-deterministic data generation outside the fragment.
 - `on_config_change` and `on_cell_click` fire on fragment reruns — as expected.
 
-The reference example app (`streamlit_app.py` in this repo) wraps each section in `@st.fragment`.
+The reference example app (`streamlit_app.py` in this repo) has 22 numbered sections, each wrapped in `@st.fragment`.
 
 ---
 
@@ -1436,7 +1437,7 @@ Before telling the user "replicated," walk through this checklist. If any item i
 | **Top N / Bottom N filter** | **Yes (0.5.0+)** | Use `top_n_filters=[{"field": "Product", "n": 10, "by": "Revenue", "direction": "top"}]`. Ranking is per-parent; totals reflect full data. |
 | **Value filter (e.g. Revenue > X)** | **Yes (0.5.0+)** | Use `value_filters=[{"field": "Product", "by": "Revenue", "operator": "gt", "value": 1000}]`. Per-parent evaluation; totals reflect full data. |
 | **Top N / Bottom N / Above Average conditional formatting** | Partial | Top N / Bottom N now available as `top_n_filters`. Above Average: compute the cutoff in Pandas and pass as a `threshold` rule. |
-| **Values laid out on rows** (measures on the row axis) | No | `st_pivot_table` always renders measures on the value axis inside the column hierarchy. If the source tool has measures on rows, reshape by swapping `rows` and `columns`. |
+| **Values laid out on rows** (measures on the row axis) | **Yes (0.5.0+)** | Use `values_axis="rows"`. Each dimension row expands into one sub-row per measure — ideal for financial statements and income-statement layouts. Incompatible with period-comparison `show_values_as` modes and active temporal hierarchies. |
 | **Per-cell manual formatting** (Excel clicking one cell and overriding) | No | Not supported. Apply rules by field (`number_format`) or by value range (`conditional_formatting`) instead. |
 | **Grand-total placement (top vs bottom / left vs right)** | Not configurable | Grand totals render at the bottom of rows and the right of columns. |
 | **Filter on measure values** (Excel's "Value Filters: Greater Than…") | **Yes (0.5.0+)** | Use `value_filters`. See the "Value filter" row above for full syntax. |

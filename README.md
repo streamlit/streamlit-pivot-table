@@ -1399,7 +1399,7 @@ Interacting with "sales" only re-executes `sales_pivot()` — the data load and 
 - **Data prep with randomness**: Keep DataFrame generation that uses random seeds outside the fragment to avoid non-deterministic data on fragment reruns.
 - **Callbacks**: `on_config_change` and `on_cell_click` fire during fragment reruns, which is the expected behavior.
 
-The demo app (`streamlit_app.py`) wraps each of its 19 sections in `@st.fragment` as a reference implementation.
+The demo app (`streamlit_app.py`) wraps each of its 22 sections in `@st.fragment` as a reference implementation.
 
 ---
 
@@ -1419,7 +1419,7 @@ uv pip install -e '.[with-streamlit]' --force-reinstall
 uv run streamlit run streamlit_app.py
 ```
 
-The example app (`streamlit_app.py`) contains more than 20 sections covering the major features and usage patterns with interactive examples and inline documentation.
+The example app (`streamlit_app.py`) contains 22 sections covering the major features and usage patterns with interactive examples and inline documentation.
 
 ### Building the frontend
 

@@ -122,6 +122,49 @@ def test_period_comparison_requires_grouped_temporal_axis(pivot_module, sample_d
         )
 
 
+# ---------------------------------------------------------------------------
+# 0.5.0 — analytical show_values_as modes passthrough
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["running_total", "pct_running_total", "rank", "pct_of_parent", "index"],
+)
+def test_analytical_show_values_as_mode_accepted(
+    pivot_module, sample_df, mount_recorder, mode
+):
+    """Each 0.5.0 analytical mode passes Python validation and is forwarded verbatim."""
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        show_values_as={"Revenue": mode},
+    )
+    cfg = calls[0]["data"]["config"]
+    assert cfg["show_values_as"]["Revenue"] == mode
+
+
+def test_analytical_show_values_as_multi_measure_accepted(
+    pivot_module, sample_df, mount_recorder
+):
+    """Multiple analytical modes can be mixed across measures in a single call."""
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        values=["Revenue", "Profit"],
+        show_values_as={"Revenue": "running_total", "Profit": "rank"},
+    )
+    cfg = calls[0]["data"]["config"]
+    assert cfg["show_values_as"]["Revenue"] == "running_total"
+    assert cfg["show_values_as"]["Profit"] == "rank"
+
+
 def test_invalid_number_format_type_raises(pivot_module, sample_df):
     with pytest.raises(TypeError, match="number_format must be str, dict, or None"):
         pivot_module.st_pivot_table(
