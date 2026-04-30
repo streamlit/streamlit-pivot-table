@@ -18,6 +18,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from collections import OrderedDict
 
 
 def test_can_use_threshold_hybrid_accepts_avg(pivot_module):
@@ -2060,3 +2061,437 @@ def test_reason_code_prefixes(pivot_module, monkeypatch):
         assert reason.startswith(
             expected_prefix
         ), f"mode={mode!r}: expected prefix {expected_prefix!r}, got {reason!r}"
+
+
+# ---------------------------------------------------------------------------
+# Aggregation result memoization — focused unit tests (0.6.0)
+# ---------------------------------------------------------------------------
+
+
+def _agg_cfg(rows=None, values=None, agg=None):
+    """Minimal config for cache tests."""
+    return {
+        "rows": rows or ["region"],
+        "columns": [],
+        "values": values or ["revenue"],
+        "aggregation": agg or {"revenue": "sum"},
+        "synthetic_measures": [],
+    }
+
+
+def _small_df():
+    return pd.DataFrame(
+        {"region": ["East", "West"] * 100, "revenue": [10.0, 20.0] * 100}
+    )
+
+
+def test_agg_cache_hit_skips_reaggregation(pivot_module, monkeypatch):
+    """Second call with identical data/config returns cached entry; all three
+    aggregation functions are each called exactly once."""
+    prepare_calls = []
+    totals_calls = []
+    filter_calls = []
+
+    orig_prepare = pivot_module._prepare_threshold_hybrid_frame
+    orig_totals = pivot_module._compute_hybrid_totals
+    orig_filter = pivot_module._compute_filter_field_values
+
+    def spy_prepare(*a, **kw):
+        prepare_calls.append(1)
+        return orig_prepare(*a, **kw)
+
+    def spy_totals(*a, **kw):
+        totals_calls.append(1)
+        return orig_totals(*a, **kw)
+
+    def spy_filter(*a, **kw):
+        filter_calls.append(1)
+        return orig_filter(*a, **kw)
+
+    monkeypatch.setattr(pivot_module, "_prepare_threshold_hybrid_frame", spy_prepare)
+    monkeypatch.setattr(pivot_module, "_compute_hybrid_totals", spy_totals)
+    monkeypatch.setattr(pivot_module, "_compute_filter_field_values", spy_filter)
+
+    df = _small_df()
+    cfg = _agg_cfg()
+    cache: "OrderedDict" = OrderedDict()
+
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg, None, None, None, cache)
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg, None, None, None, cache)
+
+    assert len(prepare_calls) == 1, "prepare called more than once — cache miss on hit"
+    assert len(totals_calls) == 1, "totals called more than once — cache miss on hit"
+    assert len(filter_calls) == 1, "filter called more than once — cache miss on hit"
+
+
+def test_agg_cache_hit_on_display_only_change(pivot_module, monkeypatch):
+    """Core roadmap promise: changing a display-only param (show_values_as)
+    must NOT trigger re-aggregation."""
+    prepare_calls = []
+    orig_prepare = pivot_module._prepare_threshold_hybrid_frame
+    monkeypatch.setattr(
+        pivot_module,
+        "_prepare_threshold_hybrid_frame",
+        lambda *a, **kw: [prepare_calls.append(1), orig_prepare(*a, **kw)][1],
+    )
+    # _compute_hybrid_totals / _compute_filter_field_values spied via same proxy approach
+    totals_calls = []
+    orig_totals = pivot_module._compute_hybrid_totals
+    monkeypatch.setattr(
+        pivot_module,
+        "_compute_hybrid_totals",
+        lambda *a, **kw: [totals_calls.append(1), orig_totals(*a, **kw)][1],
+    )
+
+    df = _small_df()
+    cfg1 = dict(_agg_cfg(), show_values_as="percent_of_column_total")
+    cfg2 = dict(_agg_cfg(), show_values_as="percent_of_row_total")
+    cache: "OrderedDict" = OrderedDict()
+
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg1, None, None, None, cache)
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg2, None, None, None, cache)
+
+    assert (
+        len(prepare_calls) == 1
+    ), "re-aggregation triggered by display-only change — cache must hit"
+    assert len(totals_calls) == 1
+
+
+def test_agg_cache_invalidated_on_config_change(pivot_module, monkeypatch):
+    """Changing rows (aggregation-relevant) must bust the cache."""
+    prepare_calls = []
+    orig_prepare = pivot_module._prepare_threshold_hybrid_frame
+    monkeypatch.setattr(
+        pivot_module,
+        "_prepare_threshold_hybrid_frame",
+        lambda *a, **kw: [prepare_calls.append(1), orig_prepare(*a, **kw)][1],
+    )
+
+    df = pd.DataFrame(
+        {
+            "region": ["East", "West"] * 50,
+            "category": ["A", "B"] * 50,
+            "revenue": [1.0, 2.0] * 50,
+        }
+    )
+    cfg1 = _agg_cfg(rows=["region"])
+    cfg2 = _agg_cfg(rows=["category"])
+    cache: "OrderedDict" = OrderedDict()
+
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg1, None, None, None, cache)
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg2, None, None, None, cache)
+
+    assert len(prepare_calls) == 2, "cache should miss when rows change"
+
+
+def test_agg_cache_lru_eviction(pivot_module):
+    """After _MAX_AGG_CACHE + 1 distinct configs, cache size stays at _MAX_AGG_CACHE
+    and the first inserted key has been evicted."""
+    cap = pivot_module._MAX_AGG_CACHE
+    cache: "OrderedDict" = OrderedDict()
+    df = _small_df()
+
+    # Each config must differ on the aggregation key — use distinct value fields.
+    # Using a different aggregation function ensures a distinct agg fingerprint.
+    agg_funcs = ["sum", "avg", "count", "min", "max", "first"]
+    assert len(agg_funcs) == cap + 1, "update test: need cap+1 distinct agg funcs"
+
+    first_key = None
+    for i, func in enumerate(agg_funcs):
+        cfg = _agg_cfg(agg={"revenue": func})
+        pivot_module._materialize_threshold_hybrid_cached(
+            df, cfg, None, None, None, cache
+        )
+        if i == 0:
+            first_key = pivot_module._make_agg_cache_key(df, cfg, None, None)
+
+    assert len(cache) == cap, f"cache size should be {cap}, got {len(cache)}"
+    assert first_key not in cache, "first inserted key should have been LRU-evicted"
+
+
+def test_agg_cache_not_read_on_client_only(pivot_module):
+    """client_only mode must not read or clobber the aggregation cache.
+
+    Pre-seed the cache with a sentinel entry.  Confirm that _should_use_threshold_hybrid
+    returns False for client_only, and that the sentinel remains unchanged.
+    """
+    df = _small_df()
+    cfg = _agg_cfg()
+    sentinel_key = pivot_module._make_agg_cache_key(df, cfg, None, None)
+    sentinel_entry = pivot_module._AggCacheEntry(
+        materialized_data="sentinel",
+        hybrid_totals=None,
+        filter_field_values=None,
+    )
+    cache: "OrderedDict" = OrderedDict({sentinel_key: sentinel_entry})
+
+    use_hybrid, _ = pivot_module._should_use_threshold_hybrid(df, cfg, "client_only")
+    assert use_hybrid is False, "client_only must not select hybrid path"
+
+    # The sentinel must be untouched — we did not call the cache helper at all
+    assert cache.get(sentinel_key) is sentinel_entry
+    assert len(cache) == 1
+
+
+def test_pivot_table_client_only_does_not_call_cache_helper(
+    pivot_module, mount_recorder, monkeypatch
+):
+    """Integration: st_pivot_table with execution_mode='client_only' must never
+    invoke _materialize_threshold_hybrid_cached, even if session_state exists."""
+    helper_calls = []
+
+    def fake_helper(*args, **kwargs):
+        helper_calls.append(1)
+        raise AssertionError("cache helper must not be called in client_only mode")
+
+    monkeypatch.setattr(
+        pivot_module, "_materialize_threshold_hybrid_cached", fake_helper
+    )
+    mount_recorder()
+
+    df = pd.DataFrame({"region": ["East", "West"], "revenue": [1.0, 2.0]})
+    pivot_module.st_pivot_table(
+        df,
+        key="test_client_only",
+        rows=["region"],
+        values=["revenue"],
+        execution_mode="client_only",
+    )
+    assert len(helper_calls) == 0
+
+
+def test_agg_cache_key_order_sensitive_for_first_last(pivot_module):
+    """Row order must produce different cache keys for first/last aggregations.
+
+    Same data, different row order → different blake2b digest → different keys.
+    Regression guard against switching back to a commutative .sum() digest.
+    """
+    df_asc = pd.DataFrame({"region": ["East", "West"], "revenue": [10.0, 20.0]})
+    df_desc = pd.DataFrame({"region": ["West", "East"], "revenue": [20.0, 10.0]})
+    cfg = _agg_cfg(agg={"revenue": "first"})
+
+    key_asc = pivot_module._make_agg_cache_key(df_asc, cfg, None, None)
+    key_desc = pivot_module._make_agg_cache_key(df_desc, cfg, None, None)
+
+    assert (
+        key_asc != key_desc
+    ), "reordered rows must produce different cache keys for first/last aggregations"
+
+
+def test_sidecar_fingerprint_synthetic_measures_coverage(pivot_module):
+    """Changing aggregation-relevant synthetic measure fields must change the fingerprint;
+    changing display-only fields (label, format) must not."""
+    base_cfg = {
+        "rows": ["region"],
+        "columns": [],
+        "values": ["revenue"],
+        "aggregation": {"revenue": "sum"},
+        "synthetic_measures": [
+            {
+                "id": "sm1",
+                "label": "My Measure",
+                "operation": "formula",
+                "formula": "revenue * 2",
+                "numerator": "",
+                "denominator": "",
+                "format": "#,##0",
+            }
+        ],
+    }
+
+    def fp(cfg):
+        return pivot_module._build_sidecar_fingerprint(cfg, None)
+
+    base = fp(base_cfg)
+
+    # Display-only changes must NOT change the fingerprint
+    label_changed = {
+        **base_cfg,
+        "synthetic_measures": [
+            {**base_cfg["synthetic_measures"][0], "label": "Other Label"}
+        ],
+    }
+    assert fp(label_changed) == base, "label change should not affect fingerprint"
+
+    format_changed = {
+        **base_cfg,
+        "synthetic_measures": [
+            {**base_cfg["synthetic_measures"][0], "format": "0.00%"}
+        ],
+    }
+    assert fp(format_changed) == base, "format change should not affect fingerprint"
+
+    # Aggregation-relevant changes MUST change the fingerprint
+    formula_changed = {
+        **base_cfg,
+        "synthetic_measures": [
+            {**base_cfg["synthetic_measures"][0], "formula": "revenue * 3"}
+        ],
+    }
+    assert fp(formula_changed) != base, "formula change must invalidate fingerprint"
+
+    op_changed = {
+        **base_cfg,
+        "synthetic_measures": [
+            {**base_cfg["synthetic_measures"][0], "operation": "sum_over_sum"}
+        ],
+    }
+    assert fp(op_changed) != base, "operation change must invalidate fingerprint"
+
+    numerator_changed = {
+        **base_cfg,
+        "synthetic_measures": [
+            {**base_cfg["synthetic_measures"][0], "numerator": "profit"}
+        ],
+    }
+    assert fp(numerator_changed) != base, "numerator change must invalidate fingerprint"
+
+    denominator_changed = {
+        **base_cfg,
+        "synthetic_measures": [
+            {**base_cfg["synthetic_measures"][0], "denominator": "revenue"}
+        ],
+    }
+    assert (
+        fp(denominator_changed) != base
+    ), "denominator change must invalidate fingerprint"
+
+
+# ---------------------------------------------------------------------------
+# Aggregation result memoization — e2e and invalidation tests (0.6.0)
+# ---------------------------------------------------------------------------
+
+
+def test_pivot_table_threshold_hybrid_populates_cache(
+    pivot_module, mount_recorder, monkeypatch
+):
+    """Happy-path: st_pivot_table in threshold_hybrid mode populates session_state
+    with exactly one _AggCacheEntry; a second call with only a display-only change
+    reuses the same entry (no new miss)."""
+    monkeypatch.setattr(pivot_module, "_HARD_HYBRID_CEILING", 0)  # force hybrid
+    mount_recorder()
+    # Reference the actual session_state dict after patching (mount_recorder may
+    # create a fresh dict due to `or {}` when given a falsy value).
+    ss = pivot_module.st.session_state
+
+    df = _small_df()
+    pivot_module.st_pivot_table(
+        df,
+        key="cache_test",
+        rows=["region"],
+        values=["revenue"],
+        execution_mode="threshold_hybrid",
+    )
+
+    ss_key = "_pivot_agg_cache_test"
+    assert ss_key in ss, "session_state must contain the agg cache"
+    cache = ss[ss_key]
+    assert len(cache) == 1, "exactly one entry after first call"
+    first_entry = next(iter(cache.values()))
+
+    # Second call — only number_format changes (display-only)
+    pivot_module.st_pivot_table(
+        df,
+        key="cache_test",
+        rows=["region"],
+        values=["revenue"],
+        execution_mode="threshold_hybrid",
+        number_format={"revenue": "#,##0.00"},
+    )
+
+    assert len(cache) == 1, "no new miss for display-only change"
+    assert next(iter(cache.values())) is first_entry, "same entry must be reused"
+
+
+def test_agg_cache_result_matches_direct_computation(pivot_module):
+    """Cached materialized_data must equal a fresh direct computation."""
+    df = _small_df()
+    cfg = _agg_cfg()
+    cache: "OrderedDict" = OrderedDict()
+
+    entry = pivot_module._materialize_threshold_hybrid_cached(
+        df, cfg, None, None, None, cache
+    )
+    direct = pivot_module._prepare_threshold_hybrid_frame(df, cfg, None, None)
+    pd.testing.assert_frame_equal(
+        entry.materialized_data.reset_index(drop=True),
+        direct.reset_index(drop=True),
+        check_like=True,
+    )
+
+
+def test_agg_cache_invalidated_on_filter_change(pivot_module, monkeypatch):
+    """Changing filters must bust the cache."""
+    prepare_calls = []
+    orig = pivot_module._prepare_threshold_hybrid_frame
+    monkeypatch.setattr(
+        pivot_module,
+        "_prepare_threshold_hybrid_frame",
+        lambda *a, **kw: [prepare_calls.append(1), orig(*a, **kw)][1],
+    )
+
+    df = _small_df()
+    cfg1 = dict(_agg_cfg(), filters={"region": {"include": ["East"]}})
+    cfg2 = dict(_agg_cfg(), filters={"region": {"include": ["West"]}})
+    cache: "OrderedDict" = OrderedDict()
+
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg1, None, None, None, cache)
+    pivot_module._materialize_threshold_hybrid_cached(df, cfg2, None, None, None, cache)
+
+    assert len(prepare_calls) == 2, "cache should miss when filters change"
+
+
+def test_agg_cache_invalidated_on_null_handling_change(pivot_module, monkeypatch):
+    """Changing null_handling must bust the cache."""
+    prepare_calls = []
+    orig = pivot_module._prepare_threshold_hybrid_frame
+    monkeypatch.setattr(
+        pivot_module,
+        "_prepare_threshold_hybrid_frame",
+        lambda *a, **kw: [prepare_calls.append(1), orig(*a, **kw)][1],
+    )
+
+    df = _small_df()
+    cfg = _agg_cfg()
+    cache: "OrderedDict" = OrderedDict()
+
+    pivot_module._materialize_threshold_hybrid_cached(
+        df, cfg, "zero", None, None, cache
+    )
+    pivot_module._materialize_threshold_hybrid_cached(
+        df, cfg, "skip", None, None, cache
+    )
+
+    assert len(prepare_calls) == 2, "cache should miss when null_handling changes"
+
+
+def test_agg_cache_invalidated_on_adaptive_grains_change(pivot_module, monkeypatch):
+    """Changing adaptive_date_grains must bust the cache."""
+    prepare_calls = []
+    orig = pivot_module._prepare_threshold_hybrid_frame
+    monkeypatch.setattr(
+        pivot_module,
+        "_prepare_threshold_hybrid_frame",
+        lambda *a, **kw: [prepare_calls.append(1), orig(*a, **kw)][1],
+    )
+
+    df = pd.DataFrame(
+        {
+            "region": ["East", "West"] * 50,
+            "date": pd.to_datetime(["2024-01-01", "2024-02-01"] * 50),
+            "revenue": [1.0, 2.0] * 50,
+        }
+    )
+    cfg = _agg_cfg()
+    grains1 = {"date": "month"}
+    grains2 = {"date": "quarter"}
+    cache: "OrderedDict" = OrderedDict()
+
+    pivot_module._materialize_threshold_hybrid_cached(
+        df, cfg, None, None, grains1, cache
+    )
+    pivot_module._materialize_threshold_hybrid_cached(
+        df, cfg, None, None, grains2, cache
+    )
+
+    assert len(prepare_calls) == 2, "cache should miss when adaptive_date_grains change"

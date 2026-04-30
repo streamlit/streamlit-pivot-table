@@ -17,9 +17,12 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import re
 import warnings
+from collections import OrderedDict
 from datetime import date, datetime
 import math
 from math import prod
@@ -1679,6 +1682,20 @@ def _normalize_show_subtotals(st: Any) -> Any:
     return st
 
 
+@dataclasses.dataclass
+class _AggCacheEntry:
+    """Cached output of all three server-side aggregation calls.
+
+    Cache entries hold the original DataFrame instances.  Downstream code
+    must treat ``materialized_data`` as read-only; in-place mutation would
+    corrupt later cache hits.
+    """
+
+    materialized_data: Any  # pre-aggregated DataFrame
+    hybrid_totals: dict | None  # sidecar grand/subtotals
+    filter_field_values: dict | None  # sidecar filter-dropdown values
+
+
 def _build_sidecar_fingerprint(
     config: PivotConfig,
     null_handling: Any,
@@ -1713,7 +1730,151 @@ def _build_sidecar_fingerprint(
         ),
         "values": config.get("values", []),
     }
+    # Include aggregation-relevant synthetic measure fields.  label and format
+    # are display-only and deliberately excluded.  Sorted by (id, operation)
+    # for a stable canonical ordering.  .get() is used for defensive access
+    # since persisted configs may not have passed full normalization.
+    synth = config.get("synthetic_measures") or []
+    obj["synthetic_measures"] = sorted(
+        [
+            {
+                "id": s.get("id") or "",
+                "operation": s.get("operation") or "",
+                "formula": s.get("formula", ""),
+                "numerator": s.get("numerator", ""),
+                "denominator": s.get("denominator", ""),
+            }
+            for s in synth
+        ],
+        key=lambda x: (x["id"], x["operation"]),
+    )
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+def _make_agg_cache_key(
+    df: Any,
+    config: "PivotConfig",
+    null_handling: Any,
+    adaptive_date_grains: dict[str, str] | None = None,
+) -> tuple:
+    """Compute a cache key for the aggregation result cache.
+
+    Hashes only the columns that drive aggregation results (rows + columns +
+    values + synthetic source fields).  This is O(n × relevant_cols) on every
+    call — a deliberate correctness choice.  A memo keyed on id(df) would be
+    unsafe for two reasons: (1) in-place DataFrame mutation would produce a
+    stale hash while id/len/schema are unchanged, and (2) CPython recycles
+    object ids after GC, so a later unrelated DataFrame could collide with a
+    cached entry.  The O(n) cost is acceptable because the groupby this key
+    protects is 10–20× more expensive.
+
+    The full row-hash array is digested as a byte string (not .sum()) to
+    preserve row order, which matters for first/last aggregations: same rows
+    in different order must produce different keys.
+
+    Unlike the nunique heuristic cache (where a false hit only affects
+    threshold estimation), a false hit here serves stale aggregation results
+    directly.  The content hash over relevant columns makes false hits
+    effectively impossible under normal usage (they would require a blake2b
+    collision on actual cell values).
+
+    Fingerprint scope: ``filtered_data`` is passed in (source filters already
+    applied), so the hash naturally reflects upstream filter changes.
+    ``original_column_types`` is derived from the same frame; if
+    ``_build_original_column_types`` is ever changed to produce different
+    results from the same frame, re-evaluate whether it needs an explicit term.
+
+    Only relevant column schema is included, not the full df schema.  Including
+    all df.columns / df.dtypes would cause cache misses when unrelated columns
+    are added or changed — a common pattern in Streamlit apps that build or
+    annotate DataFrames incrementally.
+    """
+    synth_sources = _get_synthetic_source_fields(config.get("synthetic_measures"))
+    agg_cols = list(
+        dict.fromkeys(
+            (config.get("rows") or [])
+            + (config.get("columns") or [])
+            + (config.get("values") or [])
+            + synth_sources
+        )
+    )
+    relevant = [c for c in agg_cols if c in df.columns]
+    subset = df[relevant] if relevant else df
+    content_hash = hashlib.blake2b(
+        pd.util.hash_pandas_object(subset, index=False).to_numpy().tobytes(),
+        digest_size=8,
+    ).hexdigest()
+    data_fp = (
+        len(df),
+        tuple(relevant),
+        str({c: str(df[c].dtype) for c in relevant}),
+        content_hash,
+    )
+    config_fp = _build_sidecar_fingerprint(config, null_handling, adaptive_date_grains)
+    return (data_fp, config_fp)
+
+
+_MAX_AGG_CACHE = 5
+
+
+def _materialize_threshold_hybrid_cached(
+    filtered_data: Any,
+    config: "PivotConfig",
+    null_handling: Any,
+    original_column_types: dict | None,
+    adaptive_date_grains: dict[str, str] | None,
+    agg_cache: "OrderedDict[tuple, _AggCacheEntry]",
+) -> _AggCacheEntry:
+    """Lookup or compute all three server-side aggregation results.
+
+    On a cache miss, runs all three computations and stores the combined entry.
+    On a hit, refreshes LRU order and returns the cached entry immediately.
+
+    INVARIANT: must only be called when use_threshold_hybrid is True.
+    Calling on a client_only path would store pre-aggregated frames and risk
+    returning them on a later hybrid run that shares the same cache key.
+
+    Cache entries hold the original DataFrame instances.  Downstream code must
+    treat ``materialized_data`` as read-only; in-place mutation would corrupt
+    later cache hits.
+    """
+    key = _make_agg_cache_key(
+        filtered_data, config, null_handling, adaptive_date_grains
+    )
+    entry = agg_cache.get(key)
+    if entry is not None:
+        agg_cache.move_to_end(key)
+        return entry
+    materialized = _prepare_threshold_hybrid_frame(
+        filtered_data,
+        config,
+        null_handling,
+        original_column_types,
+        adaptive_grains=adaptive_date_grains,
+    )
+    totals = _compute_hybrid_totals(
+        filtered_data,
+        config,
+        null_handling,
+        original_column_types,
+        adaptive_grains=adaptive_date_grains,
+    )
+    filter_vals = _compute_filter_field_values(
+        filtered_data,
+        config,
+        null_handling,
+        original_column_types,
+        adaptive_grains=adaptive_date_grains,
+    )
+    if len(agg_cache) >= _MAX_AGG_CACHE:
+        agg_cache.popitem(last=False)  # evict oldest (LRU)
+    entry = _AggCacheEntry(
+        materialized_data=materialized,
+        hybrid_totals=totals,
+        filter_field_values=filter_vals,
+    )
+    agg_cache[key] = entry
+    return entry
 
 
 def _sidecar_agg_func(
@@ -4305,17 +4466,32 @@ def st_pivot_table(
         )
         if drill_note not in threshold_reason:
             threshold_reason = f"{threshold_reason}{drill_note}"
-    materialized_data = (
-        _prepare_threshold_hybrid_frame(
+    # Session-state key for this pivot instance's aggregation result cache.
+    _agg_ss_key = f"_pivot_agg_{key}"
+    if _agg_ss_key not in st.session_state:
+        st.session_state[_agg_ss_key] = OrderedDict()
+    _agg_cache: OrderedDict[tuple, _AggCacheEntry] = st.session_state[_agg_ss_key]
+
+    # INVARIANT: _materialize_threshold_hybrid_cached is called only when
+    # use_threshold_hybrid is True.  Must not be hoisted above
+    # _should_use_threshold_hybrid — a client_only rerun sharing a cache key
+    # would incorrectly receive a pre-aggregated frame.
+    if use_threshold_hybrid:
+        _entry = _materialize_threshold_hybrid_cached(
             filtered_data,
             config_to_send,
             null_handling,
             original_column_types,
-            adaptive_grains=adaptive_date_grains,
+            adaptive_date_grains,
+            _agg_cache,
         )
-        if use_threshold_hybrid
-        else filtered_data
-    )
+        materialized_data = _entry.materialized_data
+        totals_sidecar = _entry.hybrid_totals
+        filter_val_sidecar = _entry.filter_field_values
+    else:
+        materialized_data = filtered_data
+        totals_sidecar = None
+        filter_val_sidecar = None
     effective_execution_mode = (
         "threshold_hybrid" if use_threshold_hybrid else "client_only"
     )
@@ -4342,22 +4518,8 @@ def st_pivot_table(
         agg_remap = _build_hybrid_agg_remap(agg_dict)
         if agg_remap:
             data_payload["hybrid_agg_remap"] = agg_remap
-        totals_sidecar = _compute_hybrid_totals(
-            filtered_data,
-            config_to_send,
-            null_handling,
-            original_column_types,
-            adaptive_grains=adaptive_date_grains,
-        )
         if totals_sidecar:
             data_payload["hybrid_totals"] = totals_sidecar
-        filter_val_sidecar = _compute_filter_field_values(
-            filtered_data,
-            config_to_send,
-            null_handling,
-            original_column_types,
-            adaptive_grains=adaptive_date_grains,
-        )
         if filter_val_sidecar:
             data_payload["filter_field_values"] = filter_val_sidecar
 

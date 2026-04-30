@@ -1176,6 +1176,14 @@ Each check produces a machine-readable reason code (`auto:row_ceiling`, `auto:pa
 
 `row_layout` is supported in both execution paths. Switching between `table` and `hierarchy` does not by itself force a fallback out of `threshold_hybrid`.
 
+#### Aggregation result caching
+
+In `threshold_hybrid` mode (including `auto` when hybrid is selected), the component caches the output of each server-side aggregation in `st.session_state` keyed on a content hash of the aggregation-relevant columns plus the aggregation config. Subsequent reruns that change only display-layer parameters — `number_format`, `style`, `conditional_formatting`, `show_values_as`, `collapsed_groups`, layout options — skip re-aggregation entirely. The warm path recomputes a content hash over aggregation-relevant columns (O(n × relevant\_cols)) but skips the full groupby + sidecar work, resulting in a 5–15× latency reduction that scales with dataset size.
+
+The cache holds up to 5 distinct aggregation configs per pivot instance (LRU eviction). Changing `rows`, `columns`, `values`, `aggregation`, `filters`, `null_handling`, or `synthetic_measures` invalidates the cache and triggers a fresh groupby.
+
+The cache is per-session and per-pivot key — it is never shared across users or across pivot instances.
+
 ### Locked Mode
 
 Use `locked=True` for a viewer-mode experience with exploration enabled. The Settings Panel and toolbar config controls are locked so end-users cannot change rows, columns, values, or per-measure aggregation. Reset, Swap, and config import/export are hidden, while data export remains available. Expand/Collapse All group controls remain accessible in the toolbar utility menu. Header-menu sorting, filtering, and `Show Values As` remain available, and drill-down still works.

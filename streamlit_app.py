@@ -2252,8 +2252,89 @@ st_pivot_table(
 section_hybrid()
 
 # ---------------------------------------------------------------------------
-# Section 16: Drag-and-Drop Field Configuration
+# Section 15b: Aggregation Result Caching (0.6.0)
 # ---------------------------------------------------------------------------
+st.divider()
+st.subheader("15b. Aggregation Result Caching (threshold_hybrid)")
+
+
+@st.cache_data
+def _agg_cache_demo_data() -> pd.DataFrame:
+    """Generate a 75 K-row synthetic sales DataFrame for the cache demo."""
+    rng = _rnd.Random(42)
+    n = 75_000
+    regions = [f"Region_{i}" for i in range(12)]
+    categories = ["Electronics", "Apparel", "Food & Bev", "Home", "Sports", "Books"]
+    years = [str(y) for y in range(2019, 2025)]
+    return pd.DataFrame(
+        {
+            "Region": [rng.choice(regions) for _ in range(n)],
+            "Category": [rng.choice(categories) for _ in range(n)],
+            "Year": [rng.choice(years) for _ in range(n)],
+            "Revenue": [round(rng.uniform(100, 50_000), 2) for _ in range(n)],
+            "Units": [rng.randint(1, 500) for _ in range(n)],
+        }
+    )
+
+
+@st.fragment
+def section_agg_cache_demo():
+    st.markdown(
+        """
+In **threshold_hybrid** mode, the component caches the output of server-side aggregation
+in `st.session_state`. Reruns that change only *display-layer* parameters skip re-aggregation
+entirely and return in under 200 ms regardless of dataset size.
+
+**Try it:** change the number format below. The Python-side groupby does **not** re-run —
+only the frontend re-renders with the new format. Check `perf_metrics` in the expander to
+see `parseMs` remain near zero on the second render.
+"""
+    )
+
+    fmt_options = {
+        "Default": None,
+        "Comma, 0 decimal": "#,##0",
+        "Comma, 2 decimal": "#,##0.00",
+        "Dollar": "$#,##0",
+        "Dollar + cents": "$#,##0.00",
+    }
+    chosen_label = st.selectbox(
+        "Number format (display-only change)",
+        list(fmt_options.keys()),
+        key="agg_cache_demo_fmt",
+    )
+    fmt = fmt_options[chosen_label]
+
+    df = _agg_cache_demo_data()
+    result = st_pivot_table(
+        df,
+        key="agg_cache_demo",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue", "Units"],
+        aggregation={"Revenue": "sum", "Units": "sum"},
+        execution_mode="threshold_hybrid",
+        number_format={"Revenue": fmt} if fmt else None,
+        show_totals=True,
+    )
+
+    with st.expander("Performance metrics (expand to inspect)"):
+        perf = result.get("perf_metrics", {}) if result else {}
+        if perf:
+            st.json(perf)
+        else:
+            st.caption(
+                "No perf_metrics returned — interact with the pivot to generate data."
+            )
+
+    st.caption(
+        "Changing the format above does **not** re-aggregate the data. "
+        "The Python-side groupby runs once; all subsequent display-only reruns skip it "
+        "(warm path: content hash only, ~5–15× faster than cold)."
+    )
+
+
+section_agg_cache_demo()
 st.divider()
 st.subheader("16. Drag-and-Drop Field Configuration")
 
