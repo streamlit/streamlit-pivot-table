@@ -44,6 +44,13 @@ export interface VirtualScrollProps {
   ) => ReactElement;
   renderHeader: (visibleColRange: [number, number]) => ReactElement[];
   renderTotalsRow?: (visibleColRange: [number, number]) => ReactElement | null;
+  /**
+   * Optional callback that returns a `<colgroup>` element for the visible
+   * column range. When provided, it is injected as the first child of all
+   * three internal `<table>` elements and `table-layout: fixed` is applied,
+   * ensuring that header, body, and totals rows share identical column widths.
+   */
+  renderColgroup?: (visibleColRange: [number, number]) => ReactElement | null;
   headerHeight: number;
   theadRef?: Ref<HTMLTableSectionElement>;
   /**
@@ -83,6 +90,7 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   renderRow,
   renderHeader,
   renderTotalsRow,
+  renderColgroup,
   headerHeight,
   theadRef,
   tableClassName,
@@ -212,8 +220,10 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
             width: "100%",
             borderCollapse: "separate",
             borderSpacing: 0,
+            ...(renderColgroup ? { tableLayout: "fixed" } : undefined),
           }}
         >
+          {renderColgroup?.(colRange)}
           <thead ref={theadRef}>{renderHeader(colRange)}</thead>
         </table>
 
@@ -232,8 +242,10 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
               width: "100%",
               borderCollapse: "separate",
               borderSpacing: 0,
+              ...(renderColgroup ? { tableLayout: "fixed" } : undefined),
             }}
           >
+            {renderColgroup?.(colRange)}
             <tbody>
               {Array.from({ length: endRow - startRow }, (_, i) =>
                 renderRow(startRow + i, colRange),
@@ -258,8 +270,10 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
                 width: "100%",
                 borderCollapse: "separate",
                 borderSpacing: 0,
+                ...(renderColgroup ? { tableLayout: "fixed" } : undefined),
               }}
             >
+              {renderColgroup?.(colRange)}
               <tbody>{renderTotalsRow(colRange)}</tbody>
             </table>
           </div>

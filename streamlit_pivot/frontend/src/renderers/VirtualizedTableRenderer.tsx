@@ -30,6 +30,7 @@ import {
   isSyntheticMeasure,
   isValuesOnRows,
   showColumnTotals,
+  showRowTotals,
   type CellClickPayload,
   type DateGrain,
   type DimensionFilter,
@@ -944,6 +945,78 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     columnWidth,
   ]);
 
+  // Builds a <colgroup> whose <col> elements cover every physical column in the
+  // table in three segments:
+  //   1. Row-header columns  (effectiveNumRowDims cols, always visible)
+  //   2. Visible data columns (windowed by colRange, N cols per slot in multi-value mode)
+  //   3. Row-total columns   (always visible, 0 or N cols depending on config)
+  // This callback is passed to VirtualScroll so all three tables share an
+  // identical column-width contract, eliminating header/body/totals drift.
+  // Defined after dataColWidth and variableColumnWidths to avoid the temporal
+  // dead zone — both are referenced in the dependency array below.
+  const renderColgroup = useCallback(
+    (colRange: [number, number]): ReactElement | null => {
+      const cols: ReactElement[] = [];
+      let key = 0;
+
+      // Segment 1: row-header columns
+      for (let idx = 0; idx < effectiveNumRowDims; idx++) {
+        const w =
+          resolveEffectiveWidth(
+            columnWidthMap.get(-(idx + 1)),
+            resolveFieldWidth(config, config.rows[idx]),
+          ) ?? DEFAULT_COL_WIDTH;
+        cols.push(<col key={key++} style={{ width: w, minWidth: w }} />);
+      }
+
+      // Segment 2: visible data columns (windowed by colRange)
+      const multiValueCols = hasMultipleValues && !valuesOnRows;
+      for (let i = colRange[0]; i < colRange[1]; i++) {
+        if (multiValueCols) {
+          // Each slot renders N physical <td> cells — one per value field.
+          // Use per-field widths from valFieldWidthMap, matching the logic in
+          // variableColumnWidths above.
+          for (let vfi = 0; vfi < renderedValueFields.length; vfi++) {
+            const w =
+              valFieldWidthMap.get(`${i}-${vfi}`) ??
+              resolveFieldWidth(config, renderedValueFields[vfi]) ??
+              columnWidth;
+            cols.push(<col key={key++} style={{ width: w, minWidth: w }} />);
+          }
+        } else {
+          const w = variableColumnWidths?.[i] ?? dataColWidth;
+          cols.push(<col key={key++} style={{ width: w, minWidth: w }} />);
+        }
+      }
+
+      // Segment 3: row-total columns (always visible, not part of colRange)
+      if (showRowTotals(config)) {
+        const rowTotalFields = hasMultipleValues
+          ? renderedValueFields
+          : renderedValueFields.slice(0, 1);
+        for (let vfi = 0; vfi < rowTotalFields.length; vfi++) {
+          const w =
+            resolveFieldWidth(config, rowTotalFields[vfi]) ?? columnWidth;
+          cols.push(<col key={key++} style={{ width: w, minWidth: w }} />);
+        }
+      }
+
+      return <colgroup>{cols}</colgroup>;
+    },
+    [
+      effectiveNumRowDims,
+      config,
+      columnWidthMap,
+      variableColumnWidths,
+      dataColWidth,
+      hasMultipleValues,
+      valuesOnRows,
+      renderedValueFields,
+      valFieldWidthMap,
+      columnWidth,
+    ],
+  );
+
   return (
     <>
       {isResizing && (
@@ -986,6 +1059,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
           renderRow={renderRow}
           renderHeader={renderHeader}
           renderTotalsRow={renderTotals}
+          renderColgroup={renderColgroup}
           headerHeight={effectiveHeaderHeight}
           theadRef={theadCallbackRef}
         />

@@ -184,6 +184,133 @@ describe("VirtualScroll - column windowing", () => {
   });
 });
 
+describe("VirtualScroll - colgroup injection", () => {
+  /** Builds a simple colgroup whose col count equals the visible range width. */
+  function makeColgroup(colRange: [number, number]): ReactElement {
+    return (
+      <colgroup>
+        {Array.from({ length: colRange[1] - colRange[0] }, (_, i) => (
+          <col key={i} style={{ width: 120, minWidth: 120 }} />
+        ))}
+      </colgroup>
+    );
+  }
+
+  it("injects colgroup into the header table when renderColgroup is provided", () => {
+    const { props } = makeProps(5, 120);
+    const { container } = render(
+      <VirtualScroll {...props} renderColgroup={makeColgroup} />,
+    );
+    // Header table is always the first <table> in the scroll container.
+    const tables = container.querySelectorAll("table");
+    expect(tables.length).toBeGreaterThanOrEqual(2);
+    expect(tables[0].querySelector("colgroup")).not.toBeNull();
+  });
+
+  it("injects colgroup into the body table when renderColgroup is provided", () => {
+    const { props } = makeProps(5, 120);
+    const { container } = render(
+      <VirtualScroll {...props} renderColgroup={makeColgroup} />,
+    );
+    const tables = container.querySelectorAll("table");
+    // Body table is the second <table>.
+    expect(tables[1].querySelector("colgroup")).not.toBeNull();
+  });
+
+  it("injects colgroup into the totals table when renderColgroup and renderTotalsRow are both provided", () => {
+    const { props } = makeProps(5, 120);
+    const renderTotalsRow = (_colRange: [number, number]): ReactElement => (
+      <tr>
+        <td>Grand Total</td>
+      </tr>
+    );
+    const { container } = render(
+      <VirtualScroll
+        {...props}
+        renderColgroup={makeColgroup}
+        renderTotalsRow={renderTotalsRow}
+      />,
+    );
+    const tables = container.querySelectorAll("table");
+    // Three tables: header, body, totals.
+    expect(tables).toHaveLength(3);
+    expect(tables[2].querySelector("colgroup")).not.toBeNull();
+  });
+
+  it("does not inject colgroup when renderColgroup is absent", () => {
+    const { props } = makeProps(5, 120);
+    const { container } = render(<VirtualScroll {...props} />);
+    expect(container.querySelectorAll("colgroup")).toHaveLength(0);
+  });
+
+  it("applies table-layout: fixed to all tables when renderColgroup is provided", () => {
+    const { props } = makeProps(5, 120);
+    const { container } = render(
+      <VirtualScroll {...props} renderColgroup={makeColgroup} />,
+    );
+    const tables = container.querySelectorAll("table");
+    expect(tables.length).toBeGreaterThanOrEqual(2);
+    for (const table of Array.from(tables)) {
+      expect((table as HTMLElement).style.tableLayout).toBe("fixed");
+    }
+  });
+
+  it("does not apply table-layout: fixed when renderColgroup is absent", () => {
+    const { props } = makeProps(5, 120);
+    const { container } = render(<VirtualScroll {...props} />);
+    const tables = container.querySelectorAll("table");
+    for (const table of Array.from(tables)) {
+      expect((table as HTMLElement).style.tableLayout).not.toBe("fixed");
+    }
+  });
+
+  it("passes the current colRange to every renderColgroup invocation", () => {
+    const { props } = makeProps(5, 120);
+    const capturedRanges: [number, number][] = [];
+    const trackingRenderColgroup = (
+      colRange: [number, number],
+    ): ReactElement => {
+      capturedRanges.push(colRange);
+      return makeColgroup(colRange);
+    };
+    render(
+      <VirtualScroll {...props} renderColgroup={trackingRenderColgroup} />,
+    );
+    expect(capturedRanges.length).toBeGreaterThan(0);
+    // Not scrolled, so the first column in every call should be 0.
+    for (const range of capturedRanges) {
+      expect(range[0]).toBe(0);
+      expect(range[1]).toBeGreaterThan(0);
+      expect(range[1]).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("all colgroups in all tables share the same col count", () => {
+    const { props } = makeProps(5, 120);
+    const renderTotalsRow = (_colRange: [number, number]): ReactElement => (
+      <tr>
+        <td>Total</td>
+      </tr>
+    );
+    const { container } = render(
+      <VirtualScroll
+        {...props}
+        renderColgroup={makeColgroup}
+        renderTotalsRow={renderTotalsRow}
+      />,
+    );
+    const colgroups = container.querySelectorAll("colgroup");
+    expect(colgroups.length).toBe(3);
+    const colCounts = Array.from(colgroups).map(
+      (cg) => cg.querySelectorAll("col").length,
+    );
+    // All three colgroups must have the same number of <col> elements.
+    expect(colCounts[0]).toBe(colCounts[1]);
+    expect(colCounts[1]).toBe(colCounts[2]);
+    expect(colCounts[0]).toBeGreaterThan(0);
+  });
+});
+
 describe("VirtualScroll - variable column widths (prefix-sum)", () => {
   it("uses columnWidths to calculate visible range", () => {
     const { props, headerCalls } = makeProps(20, 120);

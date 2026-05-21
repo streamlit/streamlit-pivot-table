@@ -1176,6 +1176,16 @@ Each check produces a machine-readable reason code (`auto:row_ceiling`, `auto:pa
 
 `row_layout` is supported in both execution paths. Switching between `table` and `hierarchy` does not by itself force a fallback out of `threshold_hybrid`.
 
+#### Frontend rendering budget
+
+Independent of execution mode, the frontend enforces a **5,000-cell DOM budget** on the rendered pivot grid (rows × columns × measures). When the cell count exceeds this threshold the component switches from a single-table renderer to a virtualized renderer that only renders the visible viewport. Column widths are kept in sync across the sticky header, scrolling body, and Grand Total rows in both rendering modes.
+
+When the cell count is *below* the virtualization threshold but the row count would push the total above 5,000 cells, the non-virtual renderer caps the displayed rows to fit within the budget and shows a warning banner:
+
+> Showing X of Y rows. Reduce dimensions or apply filters to display all rows.
+
+This banner also appears in `result["perf_metrics"]["warnings"]`. To display more rows without truncation, reduce column cardinality, add `source_filters`, or let `execution_mode="auto"` pre-aggregate the dataset so the post-aggregation cell count stays within budget.
+
 #### Aggregation result caching
 
 In `threshold_hybrid` mode (including `auto` when hybrid is selected), the component caches the output of each server-side aggregation in `st.session_state` keyed on a content hash of the aggregation-relevant columns plus the aggregation config. Subsequent reruns that change only display-layer parameters — `number_format`, `style`, `conditional_formatting`, `show_values_as`, `collapsed_groups`, layout options — skip re-aggregation entirely. The warm path recomputes a content hash over aggregation-relevant columns (O(n × relevant\_cols)) but skips the full groupby + sidecar work, resulting in a 5–15× latency reduction that scales with dataset size.

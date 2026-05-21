@@ -564,6 +564,23 @@ const PivotRoot: FC<PivotRootProps> = ({
     return checkBudgets(debugMetrics);
   }, [pivotData, computeMs, debugMetrics]);
 
+  const safeMaxRows = useMemo(() => {
+    if (!pivotData || !budget || budget.needsVirtualization) return undefined;
+    // Non-virtual path: cap rows from DOM budget using displayed column count
+    // (no legacy 200-cap when wide mode + virtualization; that path returns above).
+    const effectiveCols = budget.columnsTruncated
+      ? budget.truncatedColumnCount
+      : pivotData.uniqueColKeyCount;
+    const colsPerCell = Math.max(
+      getRenderedValueFields(currentConfig).length,
+      1,
+    );
+    const cellsPerRow = effectiveCols * colsPerCell;
+    if (cellsPerRow === 0) return undefined;
+    const maxRows = Math.floor(DEFAULT_BUDGETS.maxVisibleCells / cellsPerRow);
+    return maxRows < pivotData.uniqueRowKeyCount ? maxRows : undefined;
+  }, [pivotData, budget, currentConfig]);
+
   const allWarnings = useMemo(() => {
     const w = [...(budget?.warnings ?? [])];
     for (const pw of perfWarnings) {
@@ -575,8 +592,22 @@ const PivotRoot: FC<PivotRootProps> = ({
         "This table uses server pre-aggregated data for performance.";
       if (!w.includes(hybridInfo)) w.push(hybridInfo);
     }
+    if (safeMaxRows != null && pivotData) {
+      const msg =
+        `Showing ${safeMaxRows.toLocaleString()} of ` +
+        `${pivotData.uniqueRowKeyCount.toLocaleString()} rows. ` +
+        `Reduce dimensions or apply filters to display all rows.`;
+      if (!w.includes(msg)) w.push(msg);
+    }
     return w;
-  }, [budget, perfWarnings, execution_mode, server_mode_reason]);
+  }, [
+    budget,
+    perfWarnings,
+    execution_mode,
+    server_mode_reason,
+    safeMaxRows,
+    pivotData,
+  ]);
 
   const pendingFlushRef = useRef<PivotConfigV1 | null>(null);
 
@@ -863,23 +894,6 @@ const PivotRoot: FC<PivotRootProps> = ({
     },
     [currentConfig, handleConfigChange],
   );
-
-  const safeMaxRows = useMemo(() => {
-    if (!pivotData || !budget || budget.needsVirtualization) return undefined;
-    // Non-virtual path: cap rows from DOM budget using displayed column count
-    // (no legacy 200-cap when wide mode + virtualization; that path returns above).
-    const effectiveCols = budget.columnsTruncated
-      ? budget.truncatedColumnCount
-      : pivotData.uniqueColKeyCount;
-    const colsPerCell = Math.max(
-      getRenderedValueFields(currentConfig).length,
-      1,
-    );
-    const cellsPerRow = effectiveCols * colsPerCell;
-    if (cellsPerRow === 0) return undefined;
-    const maxRows = Math.floor(DEFAULT_BUDGETS.maxVisibleCells / cellsPerRow);
-    return maxRows < pivotData.uniqueRowKeyCount ? maxRows : undefined;
-  }, [pivotData, budget, currentConfig]);
 
   const containerRef = useRef<HTMLDivElement>(null);
 

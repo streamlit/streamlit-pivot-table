@@ -26,6 +26,136 @@ function makeArrowBytes(data: Record<string, unknown[]>): Uint8Array {
   return tableToIPC(tableFromArrays(data));
 }
 
+// ---------------------------------------------------------------------------
+// Rendering-budget boundary: < 5 000 cells → TableRenderer (non-virtual),
+// > 5 000 cells → VirtualizedTableRenderer (virtual-scroll-container present)
+// ---------------------------------------------------------------------------
+
+function makeBigArrowBytes(numRegions: number, numYears: number): Uint8Array {
+  const region: string[] = [];
+  const year: string[] = [];
+  const revenue: number[] = [];
+  for (let r = 0; r < numRegions; r++) {
+    for (let y = 0; y < numYears; y++) {
+      region.push(`R${r}`);
+      year.push(`Y${y}`);
+      revenue.push(r * numYears + y);
+    }
+  }
+  return makeArrowBytes({ region, year, revenue });
+}
+
+describe("PivotRoot - rendering budget (non-virtual vs virtual path)", () => {
+  it("small dataset (< 5 000 cells) uses non-virtual TableRenderer", async () => {
+    // 5 regions × 5 years = 25 cells — well below the 5 000-cell DOM budget.
+    const dataframe = makeBigArrowBytes(5, 5);
+    const config = makeConfig({ show_totals: false });
+
+    render(
+      <PivotRoot
+        config={config}
+        dataframe={dataframe}
+        height={null}
+        max_height={500}
+        execution_mode="client_only"
+        setStateValue={vi.fn()}
+        setTriggerValue={vi.fn()}
+      />,
+    );
+    await flush();
+
+    // Non-virtual path does not render a VirtualScroll container.
+    expect(
+      screen.queryByTestId("virtual-scroll-container"),
+    ).not.toBeInTheDocument();
+    // The standard (non-virtual) pivot table IS present.
+    expect(screen.getByTestId("pivot-table")).toBeInTheDocument();
+  });
+
+  it("large dataset (> 5 000 cells) uses VirtualizedTableRenderer", async () => {
+    // 100 regions × 51 years = 5 100 unique pivot cells — above the 5 000-cell budget.
+    const dataframe = makeBigArrowBytes(100, 51);
+    const config = makeConfig({ show_totals: false });
+
+    render(
+      <PivotRoot
+        config={config}
+        dataframe={dataframe}
+        height={null}
+        max_height={500}
+        execution_mode="client_only"
+        setStateValue={vi.fn()}
+        setTriggerValue={vi.fn()}
+      />,
+    );
+    await flush();
+
+    // Virtual path renders VirtualScroll which provides this container.
+    expect(screen.getByTestId("virtual-scroll-container")).toBeInTheDocument();
+  });
+
+  it("virtualized table has colgroup elements for column alignment", async () => {
+    // Same large dataset — verify the colgroup fix is wired end-to-end from
+    // PivotRoot → VirtualizedTableRenderer → VirtualScroll.
+    const dataframe = makeBigArrowBytes(100, 51);
+    const config = makeConfig({ show_totals: false });
+
+    const { container } = render(
+      <PivotRoot
+        config={config}
+        dataframe={dataframe}
+        height={null}
+        max_height={500}
+        execution_mode="client_only"
+        setStateValue={vi.fn()}
+        setTriggerValue={vi.fn()}
+      />,
+    );
+    await flush();
+
+    const colgroups = container.querySelectorAll(
+      "[data-testid=virtual-scroll-container] colgroup",
+    );
+    // At least 2 colgroups (header + body). Grand Total row adds a third.
+    expect(colgroups.length).toBeGreaterThanOrEqual(2);
+    // Every colgroup must have the same number of <col> elements.
+    const colCounts = Array.from(colgroups).map(
+      (cg) => cg.querySelectorAll("col").length,
+    );
+    const firstCount = colCounts[0];
+    expect(firstCount).toBeGreaterThan(0);
+    for (const count of colCounts) {
+      expect(count).toBe(firstCount);
+    }
+  });
+
+  it("all virtual-path tables have table-layout: fixed", async () => {
+    const dataframe = makeBigArrowBytes(100, 51);
+    const config = makeConfig({ show_totals: false });
+
+    const { container } = render(
+      <PivotRoot
+        config={config}
+        dataframe={dataframe}
+        height={null}
+        max_height={500}
+        execution_mode="client_only"
+        setStateValue={vi.fn()}
+        setTriggerValue={vi.fn()}
+      />,
+    );
+    await flush();
+
+    const tables = container.querySelectorAll(
+      "[data-testid=virtual-scroll-container] table",
+    );
+    expect(tables.length).toBeGreaterThanOrEqual(2);
+    for (const table of Array.from(tables)) {
+      expect((table as HTMLElement).style.tableLayout).toBe("fixed");
+    }
+  });
+});
+
 describe("PivotRoot - source_row_count metric", () => {
   it("uses source_row_count for sourceRows when provided (hybrid mode)", async () => {
     const dataframe = makeArrowBytes({

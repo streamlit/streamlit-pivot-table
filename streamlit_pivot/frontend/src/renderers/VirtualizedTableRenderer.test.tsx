@@ -586,6 +586,218 @@ describe("VirtualizedTableRenderer - column_config.field_widths", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Colgroup column-alignment: verifies that the <colgroup> injected into all
+// three VirtualScroll table sections has the correct col count and widths so
+// that header, body, and Grand Total rows cannot drift apart.
+// ---------------------------------------------------------------------------
+describe("VirtualizedTableRenderer - colgroup column alignment", () => {
+  /**
+   * Extracts the widths (as strings, e.g. "120px") of all <col> elements
+   * inside a <colgroup>. Returns null if no colgroup is found.
+   */
+  function colgroupWidths(table: Element): string[] | null {
+    const cg = table.querySelector("colgroup");
+    if (!cg) return null;
+    return Array.from(cg.querySelectorAll("col")).map(
+      (col) => (col as HTMLElement).style.width,
+    );
+  }
+
+  it("all pivot-table sections contain a colgroup", () => {
+    const records = makeRecords(5, 3);
+    const config = makeConfig({ show_totals: false });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const tables = container.querySelectorAll(
+      "[data-testid=virtual-scroll-container] table",
+    );
+    expect(tables.length).toBeGreaterThanOrEqual(2);
+    for (const table of Array.from(tables)) {
+      expect(table.querySelector("colgroup")).not.toBeNull();
+    }
+  });
+
+  it("applies table-layout: fixed to every pivot-table section", () => {
+    const records = makeRecords(5, 3);
+    const config = makeConfig({ show_totals: false });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const tables = container.querySelectorAll(
+      "[data-testid=virtual-scroll-container] table",
+    );
+    for (const table of Array.from(tables)) {
+      expect((table as HTMLElement).style.tableLayout).toBe("fixed");
+    }
+  });
+
+  it("colgroup col count = 1 row dim + data cols in single-value mode (no totals)", () => {
+    // 1 row dim (region) + 3 visible data cols (years) = 4 total cols.
+    const records = makeRecords(5, 3);
+    const config = makeConfig({ show_totals: false });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const tables = container.querySelectorAll(
+      "[data-testid=virtual-scroll-container] table",
+    );
+    // Header and body tables should both have 4 <col> elements (1 + 3).
+    for (const table of Array.from(tables)) {
+      const cols = table.querySelectorAll("colgroup col");
+      expect(cols).toHaveLength(4);
+    }
+  });
+
+  it("colgroup col count includes 1 row-total col when showRowTotals is active", () => {
+    // 1 row dim + 3 visible data cols + 1 row-total col = 5 total cols.
+    const records = makeRecords(5, 3);
+    const config = makeConfig({ show_totals: true });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const tables = container.querySelectorAll(
+      "[data-testid=virtual-scroll-container] table",
+    );
+    // show_totals=true → showRowTotals=true → 1 extra col; showColumnTotals=true → 3 tables.
+    expect(tables.length).toBe(3);
+    for (const table of Array.from(tables)) {
+      const cols = table.querySelectorAll("colgroup col");
+      expect(cols).toHaveLength(5);
+    }
+  });
+
+  it("colgroup expands to N cols per slot in multi-value mode", () => {
+    // 1 row dim + 3 slots × 2 measures = 7 total cols (no row totals).
+    const records: DataRecord[] = [];
+    for (let r = 0; r < 3; r++) {
+      for (let y = 0; y < 3; y++) {
+        records.push({
+          region: `R${r}`,
+          year: `Y${y}`,
+          revenue: r + y,
+          profit: r * 2 + y,
+        });
+      }
+    }
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["year"],
+      values: ["revenue", "profit"],
+      show_totals: false,
+    });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const tables = container.querySelectorAll(
+      "[data-testid=virtual-scroll-container] table",
+    );
+    for (const table of Array.from(tables)) {
+      const cols = table.querySelectorAll("colgroup col");
+      // 1 row dim + 3 slots × 2 measures = 7.
+      expect(cols).toHaveLength(7);
+    }
+  });
+
+  it("colgroup data-col widths reflect field_widths configuration", () => {
+    // Data cols should have width=200px as specified.
+    const records = makeRecords(5, 3);
+    const config = makeConfig({
+      show_totals: false,
+      field_widths: { revenue: 200 },
+    });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const headerTable = container.querySelector(
+      "[data-testid=virtual-scroll-container] table",
+    )!;
+    const cols = Array.from(headerTable.querySelectorAll("colgroup col"));
+    // Skip the first col (row dim at 120px default); data cols [1..3] should be 200px.
+    const dataCols = cols.slice(1);
+    for (const col of dataCols) {
+      expect((col as HTMLElement).style.width).toBe("200px");
+    }
+  });
+
+  it("all colgroups in header, body, and Grand Total tables have identical col widths", () => {
+    // This is the alignment contract: no drift between the three table sections.
+    const records = makeRecords(5, 3);
+    const config = makeConfig({
+      show_totals: true,
+      field_widths: { revenue: 160 },
+    });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const tables = Array.from(
+      container.querySelectorAll(
+        "[data-testid=virtual-scroll-container] table",
+      ),
+    );
+    expect(tables).toHaveLength(3);
+
+    const [headerWidths, bodyWidths, totalsWidths] = tables.map(colgroupWidths);
+    // Every section must have a colgroup.
+    expect(headerWidths).not.toBeNull();
+    expect(bodyWidths).not.toBeNull();
+    expect(totalsWidths).not.toBeNull();
+    // All three colgroups must have identical widths — this is the core alignment guarantee.
+    expect(bodyWidths).toEqual(headerWidths);
+    expect(totalsWidths).toEqual(headerWidths);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tier 2 column_config cell renderers through the virtualized body.
 // ---------------------------------------------------------------------------
 

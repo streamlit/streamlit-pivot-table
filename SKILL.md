@@ -666,6 +666,8 @@ All checks produce machine-readable reason codes (`auto:row_ceiling`, `auto:payl
 
 All 10 aggregations are supported in hybrid mode; non-decomposable aggregations use a server-computed sidecar for correct totals. Synthetic measures (including formulas) evaluate client-side, even in hybrid mode.
 
+**Frontend rendering budget:** Independently of execution mode, the frontend applies a 5,000-cell DOM budget (rows × columns × measures). Above this threshold the component switches to a virtualized renderer; column alignment is preserved in both modes. When the non-virtual path would exceed the budget the visible row count is capped and a warning banner is shown: "Showing X of Y rows. Reduce dimensions or apply filters to display all rows." This message also surfaces in `perf_metrics["warnings"]`. Fix by reducing column cardinality, adding `source_filters`, or letting `execution_mode="auto"` pre-aggregate so the post-aggregation cell count stays within budget.
+
 ### Locked Mode
 
 `locked=True` renders a viewer-mode experience: config controls are locked, but export, expand/collapse, drill-down, and header-menu sort/filter/show-values-as remain available.
