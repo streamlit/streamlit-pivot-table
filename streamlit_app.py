@@ -3521,6 +3521,163 @@ st_pivot_table(
 section_filter_bar()
 
 # ---------------------------------------------------------------------------
+# Section 23: Virtualization — column alignment repro (issue #8)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("23. Virtualization — Column Alignment Repro (issue #8)")
+st.markdown(
+    """
+Reproduces the configuration from
+[issue #8](https://github.com/streamlit/streamlit-pivot-table/issues/8):
+**two row dimensions in hierarchy layout · date column axis · >5 000 cells**.
+
+When the cell count exceeds the 5 000-cell DOM budget the component switches
+to a virtualised layout built from **three separate sticky `<table>` elements**
+(header, scrolling body, Grand Total row). Without explicit column-width
+coordination those three tables drift apart — scroll horizontally to observe
+the misalignment between headers, body cells, and the Grand Total row.
+
+Use the toggle to compare the virtual path (broken) with the non-virtual
+path (correct) so the difference is clear.
+"""
+)
+
+
+def section_virtualization_alignment() -> None:
+    # Realistic city names give the hierarchy column varied content widths
+    # across header / body / Grand-Total sections, making the three-table
+    # drift immediately visible without needing to scroll.
+    _state_cities: dict[str, list[str]] = {
+        "California": [
+            "Los Angeles",
+            "San Francisco",
+            "San Diego",
+            "Sacramento",
+            "San Jose",
+        ],
+        "Texas": ["Houston", "San Antonio", "Dallas", "Austin", "Fort Worth"],
+        "Florida": ["Jacksonville", "Miami", "Tampa", "Orlando", "St. Petersburg"],
+        "New York": ["New York City", "Buffalo", "Rochester", "Yonkers", "Syracuse"],
+        "Illinois": ["Chicago", "Aurora", "Naperville", "Joliet", "Rockford"],
+        "Pennsylvania": ["Philadelphia", "Pittsburgh", "Allentown", "Erie", "Reading"],
+        "Ohio": ["Columbus", "Cleveland", "Cincinnati", "Toledo", "Akron"],
+        "Georgia": ["Atlanta", "Augusta", "Columbus", "Macon", "Savannah"],
+        "North Carolina": [
+            "Charlotte",
+            "Raleigh",
+            "Greensboro",
+            "Durham",
+            "Winston-Salem",
+        ],
+        "Michigan": [
+            "Detroit",
+            "Grand Rapids",
+            "Warren",
+            "Sterling Heights",
+            "Ann Arbor",
+        ],
+    }
+    _rng_virt = np.random.default_rng(seed=99)
+    # 10 states × 5 cities = 50 leaf pairs; 120 monthly dates.
+    # checkRenderBudget uses uniqueRowKeyCount (≈60 incl. state subtotals) ×
+    # uniqueColKeyCount (120) = 7 200 > 5 000 → virtual path.
+    _monthly_dates = pd.date_range("2015-01-01", periods=120, freq="MS")
+
+    _rows: list[dict] = []
+    for state, cities in _state_cities.items():
+        for city in cities:
+            for dt in _monthly_dates:
+                _rows.append(
+                    {
+                        "Merchant_State": state,
+                        "Merchant_City": city,
+                        "dt": dt.date(),
+                        "Amount": int(_rng_virt.integers(1_000, 50_000)),
+                    }
+                )
+    df_virt = pd.DataFrame(_rows)
+
+    # Both paths use the same 120-month date range so the column structure is
+    # identical. The only difference is row count: many states → virtual,
+    # few states → non-virtual.
+    use_large = st.toggle(
+        "Use large dataset (> 5 000 cells — virtual path)",
+        value=True,
+        key="virt_alignment_toggle",
+    )
+
+    if use_large:
+        data = df_virt  # all 10 states × 5 cities × 120 months
+    else:
+        small_states = list(_state_cities.keys())[:1]  # 1 state × 5 cities × 120 months
+        data = df_virt[df_virt["Merchant_State"].isin(small_states)]
+
+    unique_pairs = data[["Merchant_State", "Merchant_City"]].drop_duplicates()
+    unique_dates = data["dt"].nunique()
+    cell_count = len(unique_pairs) * unique_dates
+    path_label = "**virtual path**" if use_large else "**non-virtual path**"
+    st.caption(
+        f"{path_label} · {len(data):,} records · "
+        f"{len(unique_pairs)} unique (State, City) pairs · "
+        f"{unique_dates} monthly dates · "
+        f"**≥{cell_count:,} pivot cells** (threshold: 5 000)"
+    )
+
+    result = st_pivot_table(
+        data,
+        key="issue_8_repro",
+        rows=["Merchant_State", "Merchant_City"],
+        columns=["dt"],
+        values=["Amount"],
+        aggregation="sum",
+        row_layout="hierarchy",
+        show_totals=True,
+        sticky_headers=True,
+        max_height=400,
+        execution_mode="client_only",
+    )
+
+    # Confirm whether the virtual path is active.
+    metrics = (result or {}).get("perf_metrics")
+    if metrics:
+        virtual = metrics.get("needsVirtualization", False)
+        rows_ = metrics.get("totalRows", "?")
+        cols_ = metrics.get("totalCols", "?")
+        cells_ = metrics.get("totalCells", "?")
+        st.caption(
+            f"perf_metrics → needsVirtualization=**{virtual}** · "
+            f"rows={rows_} · cols={cols_} · cells={cells_}"
+        )
+
+    st.markdown(
+        """
+**What to observe (virtual path, without the fix):**
+
+The misalignment is most visible in two ways:
+
+1. **Temporal-hierarchy colspans.** With `auto_date_hierarchy=True` (the
+   default), the header renders a *two-row* column header: a top row of
+   year cells (`colspan=12`) and a second row of individual month cells.
+   The body and Grand Total tables have no colspans — just individual cells.
+   Because `table-layout: auto` computes optimal widths independently for
+   each table, the year-colspan constraints produce a different column
+   distribution in the header than in the body. Scroll horizontally: the
+   month columns in the header will not line up with the data cells below.
+
+2. **Column resizing.** Drag any column handle to resize it. Without the
+   fix the `columnWidthMap` update reaches the body cells but the header
+   and Grand Total tables compute widths independently, so only one section
+   changes size and the three tables drift apart.
+
+Toggle to the non-virtual path to see a single `<table>` where alignment
+is guaranteed regardless of content.
+"""
+    )
+
+
+section_virtualization_alignment()
+
+# ---------------------------------------------------------------------------
 # Footer: Raw Data
 # ---------------------------------------------------------------------------
 st.divider()

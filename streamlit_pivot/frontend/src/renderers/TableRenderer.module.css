@@ -495,6 +495,7 @@
   width: 10px;
   height: 10px;
   border: none;
+  flex-shrink: 0;
   border-radius: 4px;
   background: transparent;
   color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
@@ -893,13 +894,16 @@
   flex-wrap: nowrap;
   gap: 0;
   white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .hierarchyBreadcrumb {
   display: inline-flex;
   align-items: center;
   gap: 0;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   position: relative;
 }
 
@@ -908,6 +912,7 @@
   opacity: 0.85;
   font-size: 13px;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .hierarchyBreadcrumbButton,
@@ -939,11 +944,24 @@
 
 .hierarchyBreadcrumbLabel {
   gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Text-only portion of a breadcrumb label — truncates with ellipsis. */
+.hierarchyBreadcrumbText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .hierarchyBreadcrumbToggleButton {
   color: color-mix(in srgb, var(--st-text-color) 66%, transparent);
+  flex-shrink: 0;
 }
+
 
 /* Column dimension label in corner area */
 .colDimLabel {

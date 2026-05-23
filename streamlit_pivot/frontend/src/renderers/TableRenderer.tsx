@@ -1091,13 +1091,26 @@ export function renderColumnHeaders(
                 }));
           const showRowDimToggle = canDimToggle && config.rows.length >= 2;
           const showTemporalRowLevelToggle = !!onConfigChange && !!pivotData;
+          const hierarchyResizeWidth = resolveEffectiveWidth(
+            columnWidthMap?.get(-1),
+            resolveFieldWidth(config, config.rows[0]),
+          );
+          const hierarchyResizeCellStyle: React.CSSProperties | undefined =
+            hierarchyResizeWidth != null
+              ? {
+                  ...stickyTop,
+                  width: hierarchyResizeWidth,
+                  minWidth: hierarchyResizeWidth,
+                  maxWidth: hierarchyResizeWidth,
+                }
+              : stickyTop;
           cells.push(
             <th
               key="row-dim-hierarchy"
               className={`${styles.headerCell} ${styles.rowHeaderPrimary} ${styles.headerRowPinned}`}
               rowSpan={cornerFullRowSpan}
               data-testid="pivot-row-dim-label-hierarchy"
-              style={stickyTop}
+              style={hierarchyResizeCellStyle}
             >
               <div
                 className={styles.headerCellInner}
@@ -1162,7 +1175,9 @@ export function renderColumnHeaders(
                               }
                               variant="breadcrumb"
                             />
-                            {label}
+                            <span className={styles.hierarchyBreadcrumbText}>
+                              {label}
+                            </span>
                             {hasMenu && (
                               <MenuTriggerButton
                                 dimension={dim}
@@ -1180,7 +1195,9 @@ export function renderColumnHeaders(
                             className={styles.hierarchyBreadcrumbLabel}
                             data-testid={`pivot-row-dim-breadcrumb-${slugify(dim)}-${rowHeaderIdx}`}
                           >
-                            {label}
+                            <span className={styles.hierarchyBreadcrumbText}>
+                              {label}
+                            </span>
                             {hasMenu && (
                               <MenuTriggerButton
                                 dimension={dim}
@@ -1199,6 +1216,23 @@ export function renderColumnHeaders(
                   })}
                 </div>
               </div>
+              {onResizeMouseDown && (
+                <div
+                  className={styles.resizeHandle}
+                  data-testid="resize-handle-row-dim-hierarchy"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    onResizeMouseDown(-1, e);
+                  }}
+                  onDoubleClick={
+                    onResizeDoubleClick
+                      ? (e) => onResizeDoubleClick(-1, e)
+                      : undefined
+                  }
+                  onMouseEnter={elevateCell}
+                  onMouseLeave={resetCell}
+                />
+              )}
             </th>,
           );
         } else {
