@@ -121,6 +121,8 @@ export interface ToolbarProps {
   isFullscreen?: boolean;
   /** Toggle fullscreen mode on/off. */
   onToggleFullscreen?: () => void;
+  /** Opens the GroupManagerDialog for a row/col dimension field. */
+  onOpenGroupManager?: (field: string) => void;
 }
 
 function configsEqual(a: PivotConfigV1, b: PivotConfigV1): boolean {
@@ -436,6 +438,7 @@ const Toolbar: FC<ToolbarProps> = ({
   onCollapseChange,
   isFullscreen,
   onToggleFullscreen,
+  onOpenGroupManager,
 }): ReactElement => {
   const emitIfChanged = useCallback(
     (updated: PivotConfigV1) => {
@@ -793,6 +796,14 @@ const Toolbar: FC<ToolbarProps> = ({
     if (!config.filters) return 0;
     return Object.keys(config.filters).length;
   }, [config.filters]);
+  const activeGroupCount = useMemo(
+    () => (config.member_groups ?? []).length,
+    [config.member_groups],
+  );
+  // When section cards are visible and filter/group state is already surfaced in
+  // dedicated cards, hide per-field red-dot indicators to reduce duplicate signals.
+  const suppressPerFieldIndicators =
+    sectionsExpanded && (activeFilterCount > 0 || activeGroupCount > 0);
 
   // Zone card content helpers
   const syntheticMeasures = config.synthetic_measures ?? [];
@@ -824,13 +835,19 @@ const Toolbar: FC<ToolbarProps> = ({
           <span className={styles.compactSummaryText}>
             {compactSummaryText}
           </span>
-          {activeFilterCount > 0 && (
+          {(activeFilterCount > 0 || activeGroupCount > 0) && (
             <>
               <div className={styles.filterDot} />
               <span className={styles.filterDotLabel}>
-                {activeFilterCount === 1
-                  ? "1 filter"
-                  : `${activeFilterCount} filters`}
+                {activeFilterCount > 0 &&
+                  (activeFilterCount === 1
+                    ? "1 filter"
+                    : `${activeFilterCount} filters`)}
+                {activeFilterCount > 0 && activeGroupCount > 0 && " \u00b7 "}
+                {activeGroupCount > 0 &&
+                  (activeGroupCount === 1
+                    ? "1 group"
+                    : `${activeGroupCount} groups`)}
               </span>
             </>
           )}
@@ -864,6 +881,7 @@ const Toolbar: FC<ToolbarProps> = ({
                 adaptiveDateGrains?.[field],
               )
             }
+            showFilterIndicators={!suppressPerFieldIndicators}
           />
           <ZoneCard
             label="Columns"
@@ -886,6 +904,7 @@ const Toolbar: FC<ToolbarProps> = ({
                 adaptiveDateGrains?.[field],
               )
             }
+            showFilterIndicators={!suppressPerFieldIndicators}
           />
           <ZoneCard
             label="Values"
@@ -1177,6 +1196,7 @@ const Toolbar: FC<ToolbarProps> = ({
             pivotData={pivotData}
             filterFieldValues={filterFieldValues}
             pickerPortalTarget={pickerPortalTarget}
+            onOpenGroupManager={onOpenGroupManager}
           />
         </div>
       </div>
@@ -1216,6 +1236,7 @@ interface ZoneCardProps {
   displayLabelForField?: (field: string) => string;
   isValues?: boolean;
   emptyHint?: string;
+  showFilterIndicators?: boolean;
 }
 
 const ZoneCard: FC<ZoneCardProps> = ({
@@ -1242,6 +1263,7 @@ const ZoneCard: FC<ZoneCardProps> = ({
   displayLabelForField,
   isValues,
   emptyHint,
+  showFilterIndicators = true,
 }): ReactElement => {
   const resolvedEmptyHint =
     emptyHint ?? (disabled ? undefined : "Drag fields here");
@@ -1334,6 +1356,7 @@ const ZoneCard: FC<ZoneCardProps> = ({
               const col = id;
               const isFrozen = frozenColumns?.has(col);
               const hasFilter =
+                showFilterIndicators &&
                 filters?.[col] &&
                 ((filters[col].include && filters[col].include.length > 0) ||
                   (filters[col].exclude && filters[col].exclude.length > 0));

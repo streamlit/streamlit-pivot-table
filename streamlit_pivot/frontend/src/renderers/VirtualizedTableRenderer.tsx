@@ -96,6 +96,8 @@ export interface VirtualizedTableRendererProps {
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
   adaptiveDateGrains?: Record<string, DateGrain>;
   menuLimit?: number;
+  /** When set, exposes a "Groups…" entry in each dimension header menu. */
+  onOpenGroupManager?: (field: string) => void;
   /** When true, the wrapper becomes a flex item that fills remaining space. */
   scrollable?: boolean;
 }
@@ -121,6 +123,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   onCollapseChange,
   adaptiveDateGrains,
   menuLimit,
+  onOpenGroupManager,
   scrollable,
 }): ReactElement => {
   const effectiveRowHeight =
@@ -528,6 +531,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     menuOnDateDrill,
     menuSupportsPeriodComparison,
     menuFormatLabel,
+    menuGroupCount,
     handleCellKeyDown,
   } = useHeaderMenu({
     config,
@@ -1099,6 +1103,15 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
               onDateGrainChange={menuOnDateGrainChange}
               onDateDrill={menuOnDateDrill}
               supportsPeriodComparison={menuSupportsPeriodComparison}
+              onOpenGroupManager={
+                onOpenGroupManager && menuTarget.axis !== "value"
+                  ? () => {
+                      handleCloseMenu();
+                      onOpenGroupManager(menuTarget.dimension);
+                    }
+                  : undefined
+              }
+              groupCount={menuGroupCount}
               onClose={handleCloseMenu}
             />
           </div>

@@ -95,10 +95,36 @@
   flex: 1;
 }
 
+.menuItemIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .checkIcon {
   flex-shrink: 0;
   color: var(--st-primary-color);
   margin-left: auto;
+}
+
+/* Badge showing active group count on the "Groups…" nav row */
+.groupCountBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--st-primary-color) 12%, var(--st-background-color));
+  color: var(--st-text-color);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .sortValueConfig {

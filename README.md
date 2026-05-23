@@ -126,6 +126,7 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `filter_fields` | `list[str] \| None` | `None` | Ordered list of dimension fields to place in the Filters zone. Fields appear as interactive chips in the FilterBar (when sections are expanded) and in the Settings panel's Filters zone. A field can be in both `rows`/`columns` and `filter_fields` simultaneously (dual-role). |
 | `show_sections` | `bool \| None` | `True` | Whether the toolbar sections (Rows, Columns, Values cards and FilterBar) are expanded. `False` collapses them into a compact single-line summary that still shows active-filter count. Users can toggle interactively with the collapse/expand button. |
 | `source_filters` | `dict[str, dict[str, list[Any]]] \| None` | `None` | Server-only report-level filters applied before any pivot processing. `include` takes precedence over `exclude`. `None` matches null-like values, `""` matches only literal empty strings, and no type coercion is performed. |
+| `member_groups` | `list[MemberGroup] \| None` | `None` | *(0.6.0+)* Custom dimension-value groupings. Each entry combines one or more raw dimension members into a single named group that is shown in the pivot instead of the individual members. See [Custom Member Grouping](#custom-member-grouping-060). |
 
 #### Data Control
 
@@ -614,6 +615,65 @@ st_pivot_table(
 
 **Precedence.** For format fields: `explicit number_format / dimension_format` > `column_config` > `Styler`. For alignment: `explicit column_alignment` > `column_config.alignment` > default (right-aligned measures, left-aligned dimensions). The lower-priority sources only fill gaps — any field already present in an explicit format or alignment dict keeps the caller-supplied value. `label`, `help`, and `width` are `column_config`-driven only (no legacy kwargs). `pinned` **unions** with `frozen_columns` / `hidden_from_drag_drop`.
 
+### Custom Member Grouping (0.6.0+)
+
+`member_groups` lets you combine two or more raw dimension members into a single, named group — useful for custom territory roll-ups, product bundles, or ad-hoc segments that don't exist in your source data.
+
+```python
+st_pivot_table(
+    df,
+    key="grouped",
+    rows=["Region"],
+    columns=["Category"],
+    values=["Revenue"],
+    aggregation="sum",
+    member_groups=[
+        {
+            "field": "Region",
+            "name": "East Coast",
+            "members": ["Northeast", "Southeast"],
+        },
+        {
+            "field": "Region",
+            "name": "Mountain West",
+            "members": ["Colorado", "Utah", "Nevada"],
+        },
+    ],
+)
+```
+
+Each entry is a dict with three keys:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `field` | `str` | Dimension field to group (must be in `rows` or `columns`) |
+| `name` | `str` | Display name for the group |
+| `members` | `list[str]` | Raw member values to combine (resolved-value semantics — dates use the effective grain string) |
+
+**Key semantics:**
+
+- Grouped members are aggregated together and display under `name`. Ungrouped members are unaffected and still display individually.
+- Aggregation is re-computed: totals include grouped rows. Drilldown panels show the **original raw members** (e.g. "Northeast", not "East Coast"), preserving the ability to inspect source records.
+- `member_groups` invalidates the sidecar cache — changing groups triggers a server re-aggregate in `threshold_hybrid` mode.
+- Multiple groups can target the same field; group names must be unique per field.
+- Groups cannot reference values that are already group names (no groups-of-groups).
+- Each group must have at least two members.
+- A group name that matches an ungrouped raw member on the same field raises a `ValueError` (ambiguous label).
+
+**Validation rules:**
+
+- `field` must appear in `rows` or `columns`.
+- `name` must be a non-empty string.
+- `members` must be a list of strings with at least 2 entries.
+- Duplicate group names for the same field are rejected.
+- A member cannot appear in more than one group for the same field.
+
+**Interactive usage:** In an interactive pivot (`interactive=True`), each dimension header menu exposes a **Create Groups** / **Edit Groups** action. It opens a group manager dialog where you select two or more ungrouped members, type a group name, and add or remove groups. Active groups appear as chips in the FilterBar and as a list in the Settings Panel (with per-group remove buttons and a "Clear all" option per field).
+
+**Filter remapping:** When you add or modify a group that overlaps with an active filter for that field, the filter values are automatically remapped — members that now belong to the group are replaced by the group name, so your existing selections are preserved rather than cleared.
+
+---
+
 ### Analytical Filters: Top N / Value Filters
 
 _(0.5.0)_ Two new display-only filter types let you focus on the most (or least) relevant dimension members without re-aggregating totals.
@@ -621,7 +681,7 @@ _(0.5.0)_ Two new display-only filter types let you focus on the most (or least)
 **Key semantics:**
 
 - Filtering is **per-parent**: for a two-level hierarchy `[Region, Product]`, "Top 3 Products" keeps the 3 highest-revenue products **within each Region** independently.
-- Ranking always uses the **grand-total column context** (sum across all column values). Contextual column scoping (`col_key`) is deferred to 0.6.0.
+- Ranking always uses the **grand-total column context** (sum across all column values). Contextual column scoping (`col_key`) is not yet supported.
 - Grand totals and subtotals are **not recalculated** — they always reflect the full unfiltered dataset. This is a deliberate product choice (simpler, avoids re-aggregation cost). The UI surfaces a note: *"Totals include all data, not just visible members."*
 - Top N and value filters run **after** existing dimension member (include/exclude) filters.
 - Members with a **null** aggregated measure are ranked last / excluded before the top-N cutoff and treated as failing all value filter predicates.

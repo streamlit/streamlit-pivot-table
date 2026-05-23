@@ -32,6 +32,7 @@ import {
   getSyntheticSourceFields,
   type DimensionFilter,
   type HybridTotals,
+  type MemberGroup,
   type NullHandlingConfig,
   type NullHandlingMode,
   type PivotConfigV1,
@@ -193,6 +194,19 @@ export function buildSidecarFingerprint(
           },
         ]),
     ),
+    // member_groups affects groupby keys; include in fingerprint for sidecar
+    // freshness checks (must match Python's _build_sidecar_fingerprint).
+    // Placed alphabetically between "filters" and "null_handling".
+    member_groups: [...(config.member_groups ?? [])]
+      .sort(
+        (a, b) =>
+          a.field.localeCompare(b.field) || a.name.localeCompare(b.name),
+      )
+      .map((g) => ({
+        field: g.field,
+        name: g.name,
+        members: [...g.members].sort(),
+      })),
     null_handling: normalizeNullHandling(nullHandling),
     rows: config.rows,
     show_subtotals: normalizeShowSubtotals(config.show_subtotals),
@@ -395,6 +409,42 @@ function _applyValueFilters(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Member Group helpers (module-level; no `this` needed)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a two-level lookup for member groups:
+ *   field → Map<resolvedMemberKey, groupName>
+ *
+ * The inner key is the **resolved-string** canonical form produced by
+ * `_resolveDimKey` (null/empty → "(null)" or ""; temporal → bucketed ISO
+ * string). This must match the form used when building row/col keys so that
+ * grouped members are folded at the exact point `_resolveDimKey` returns.
+ *
+ * Groups for the same field are merged into a single Map; earlier entries
+ * win on key collision (though validation prevents overlapping members).
+ */
+function _buildMemberGroupLookup(
+  memberGroups: MemberGroup[] | undefined,
+): Map<string, Map<string, string>> {
+  const lookup = new Map<string, Map<string, string>>();
+  if (!memberGroups || memberGroups.length === 0) return lookup;
+  for (const group of memberGroups) {
+    let fieldMap = lookup.get(group.field);
+    if (!fieldMap) {
+      fieldMap = new Map<string, string>();
+      lookup.set(group.field, fieldMap);
+    }
+    for (const member of group.members) {
+      if (!fieldMap.has(member)) {
+        fieldMap.set(member, group.name);
+      }
+    }
+  }
+  return lookup;
+}
+
 /**
  * Core pivot computation engine.
  *
@@ -440,6 +490,12 @@ export class PivotData {
 
   /** Unique string values per column, built lazily by getUniqueValues(). */
   private _uniqueValuesCache: Map<string, string[]> | null = null;
+  /**
+   * Member group lookup: field → Map<resolvedMemberKey, groupName>.
+   * Built once from config.member_groups in the constructor.
+   * Used by _applyMemberGroup() in _processRecords() and getUniqueValues().
+   */
+  private readonly _memberGroupLookup: Map<string, Map<string, string>>;
   /** Precomputed record indexes by field/value for common interaction fields. */
   private readonly _recordIndexesByFieldValue: Map<
     string,
@@ -491,6 +547,7 @@ export class PivotData {
     this._config = config;
     this._options = options ?? {};
     this._columnTypes = options?.columnTypes;
+    this._memberGroupLookup = _buildMemberGroupLookup(config.member_groups);
     if (Array.isArray(input)) {
       const columns =
         input.length > 0 ? Object.keys(input[0] as DataRecord) : [];
@@ -776,6 +833,28 @@ export class PivotData {
   }
 
   /**
+   * Resolve a raw dimension value to its canonical string key, then apply any
+   * active member group mapping for that field.
+   *
+   * Use this instead of `_resolveDimKey` wherever the resolved key will be
+   * used as a row or column groupby key (i.e. building `rowKey` / `colKey`
+   * in `_processRecords`). Filter-checklist resolution and drilldown paths
+   * should also use this so that group names appear correctly.
+   *
+   * Sort order rule (canonical, documented so tests know what to assert):
+   * `getUniqueValues` resolves each raw value with this method, then sorts
+   * the remapped results with the same comparator used for keys today
+   * (mixedCompare / localeCompare), then deduplicates. A group name lands at
+   * the position of its alphabetically-earliest member in the sorted output.
+   */
+  private _resolveAndGroupDimKey(field: string, raw: unknown): string {
+    const resolved = this._resolveDimKey(field, raw);
+    const fieldMap = this._memberGroupLookup.get(field);
+    if (!fieldMap) return resolved;
+    return fieldMap.get(resolved) ?? resolved;
+  }
+
+  /**
    * Compute a formatted display label for a dimension value.
    * Uses the config's dimension_format if available, otherwise falls back
    * to auto-formatting based on column type.
@@ -958,11 +1037,21 @@ export class PivotData {
 
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
+      // Use _resolveAndGroupDimKey for axis fields so that member groups are
+      // applied: grouped members (e.g. "Northeast", "Southeast") produce the
+      // group name ("East Coast") as the key segment, causing them to be
+      // aggregated together.
       const rowKey = this._config.rows.map((r) =>
-        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveAndGroupDimKey(
+          r,
+          this._dataSource.getValue(recordIndex, r),
+        ),
       );
       const colKey = this._config.columns.map((c) =>
-        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveAndGroupDimKey(
+          c,
+          this._dataSource.getValue(recordIndex, c),
+        ),
       );
       const rowKeyStr = makeKeyString(rowKey);
       const colKeyStr = makeKeyString(colKey);
@@ -1034,11 +1123,17 @@ export class PivotData {
     }
 
     if (uniqueValueSets.size > 0) {
+      // Fields with active member groups are excluded from this pre-populated
+      // cache so that `getUniqueValues()` computes them lazily with the correct
+      // group-name mapping applied (via `_resolveAndGroupDimKey`). Pre-populated
+      // values here use raw resolved keys (no group mapping) which would be stale.
       this._uniqueValuesCache = new Map(
-        [...uniqueValueSets.entries()].map(([field, values]) => [
-          field,
-          [...values].sort((a, b) => this._compareDimKeys(field, a, b)),
-        ]),
+        [...uniqueValueSets.entries()]
+          .filter(([field]) => !this._memberGroupLookup.has(field))
+          .map(([field, values]) => [
+            field,
+            [...values].sort((a, b) => this._compareDimKeys(field, a, b)),
+          ]),
       );
     }
   }
@@ -1704,10 +1799,16 @@ export class PivotData {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const fullRowKey = rowDims.map((r) =>
-        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveAndGroupDimKey(
+          r,
+          this._dataSource.getValue(recordIndex, r),
+        ),
       );
       const colKey = this._config.columns.map((c) =>
-        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveAndGroupDimKey(
+          c,
+          this._dataSource.getValue(recordIndex, c),
+        ),
       );
       const colKeyStr = makeKeyString(colKey);
 
@@ -2093,10 +2194,16 @@ export class PivotData {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const rowKey = rowDims.map((r) =>
-        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveAndGroupDimKey(
+          r,
+          this._dataSource.getValue(recordIndex, r),
+        ),
       );
       const fullColKey = colDims.map((c) =>
-        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveAndGroupDimKey(
+          c,
+          this._dataSource.getValue(recordIndex, c),
+        ),
       );
       const rowKeyStr = makeKeyString(rowKey);
 
@@ -2315,10 +2422,16 @@ export class PivotData {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const rowKey = rowDims.map((r) =>
-        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveAndGroupDimKey(
+          r,
+          this._dataSource.getValue(recordIndex, r),
+        ),
       );
       const fullColKey = colDims.map((c) =>
-        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveAndGroupDimKey(
+          c,
+          this._dataSource.getValue(recordIndex, c),
+        ),
       );
       const rowKeyStr = makeKeyString(rowKey);
 
@@ -2490,10 +2603,16 @@ export class PivotData {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
       const fullRowKey = rowDims.map((r) =>
-        this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+        this._resolveAndGroupDimKey(
+          r,
+          this._dataSource.getValue(recordIndex, r),
+        ),
       );
       const colKey = colDims.map((c) =>
-        this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+        this._resolveAndGroupDimKey(
+          c,
+          this._dataSource.getValue(recordIndex, c),
+        ),
       );
       const colKeyStr = makeKeyString(colKey);
 
@@ -2652,14 +2771,42 @@ export class PivotData {
     }
     let cached = this._uniqueValuesCache.get(field);
     if (!cached) {
-      const set = new Set<string>();
       const n = this._dataSource.numRows;
-      for (let i = 0; i < n; i++) {
-        set.add(
-          this._resolveDimKey(field, this._dataSource.getValue(i, field)),
-        );
+      if (this._memberGroupLookup.has(field)) {
+        // When member groups are active for this field, apply the group
+        // mapping after resolving each raw value, then deduplicate.
+        // Sort order rule (canonical): sort the remapped values with the
+        // same comparator used today (mixedCompare/localeCompare), then
+        // deduplicate in sorted order. A group name lands at the position of
+        // its alphabetically-earliest member after sorting.
+        const allRemapped: string[] = [];
+        for (let i = 0; i < n; i++) {
+          allRemapped.push(
+            this._resolveAndGroupDimKey(
+              field,
+              this._dataSource.getValue(i, field),
+            ),
+          );
+        }
+        allRemapped.sort((a, b) => this._compareDimKeys(field, a, b));
+        const seen = new Set<string>();
+        const deduplicated: string[] = [];
+        for (const v of allRemapped) {
+          if (!seen.has(v)) {
+            seen.add(v);
+            deduplicated.push(v);
+          }
+        }
+        cached = deduplicated;
+      } else {
+        const set = new Set<string>();
+        for (let i = 0; i < n; i++) {
+          set.add(
+            this._resolveDimKey(field, this._dataSource.getValue(i, field)),
+          );
+        }
+        cached = [...set].sort((a, b) => this._compareDimKeys(field, a, b));
       }
-      cached = [...set].sort((a, b) => a.localeCompare(b));
       this._uniqueValuesCache.set(field, cached);
     }
     return cached;
@@ -2754,7 +2901,10 @@ export class PivotData {
 
       let matchesClick = true;
       for (const [field, value] of Object.entries(filters)) {
-        const recordVal = this._resolveDimKey(
+        // Use _resolveAndGroupDimKey so that cell-click filters referencing
+        // group names (e.g. "East Coast") match records whose raw dimension
+        // value is a constituent member (e.g. "Northeast").
+        const recordVal = this._resolveAndGroupDimKey(
           field,
           this._dataSource.getValue(recordIndex, field),
         );

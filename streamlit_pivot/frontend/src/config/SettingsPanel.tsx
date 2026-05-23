@@ -461,6 +461,8 @@ export interface SettingsPanelProps {
   /** Top-level portal target for picker popovers (should be PivotRoot's container so CSS vars
    *  are inherited and the picker escapes the Settings panel's stacking context). */
   pickerPortalTarget?: Element | null;
+  /** Opens the GroupManagerDialog for the given row/col dimension field. */
+  onOpenGroupManager?: (field: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +535,10 @@ interface ZoneChipProps {
   onRemove: (field: string) => void;
   menuItems: { label: string; action: () => void }[];
   aggregationControl?: ReactNode;
+  /** Number of active groups for this dimension (>0 shows badge). */
+  groupCount?: number;
+  /** Opens the GroupManagerDialog for this field when the badge is clicked. */
+  onOpenGroupManager?: () => void;
 }
 
 const ZoneChip: FC<ZoneChipProps> = ({
@@ -546,6 +552,8 @@ const ZoneChip: FC<ZoneChipProps> = ({
   onRemove,
   menuItems,
   aggregationControl,
+  groupCount,
+  onOpenGroupManager,
 }): ReactElement => {
   const [menuOpen, setMenuOpen] = useState(false);
   const chipRef = useRef<HTMLSpanElement>(null);
@@ -588,6 +596,21 @@ const ZoneChip: FC<ZoneChipProps> = ({
       {displayLabel ?? field}
       {isValues && aggLabel && (
         <span className={styles.chipAggLabel}>({aggLabel})</span>
+      )}
+      {groupCount !== undefined && groupCount > 0 && (
+        <button
+          type="button"
+          className={styles.chipGroupBadge}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenGroupManager?.();
+          }}
+          aria-label={`${groupCount} group${groupCount !== 1 ? "s" : ""} — click to manage`}
+          data-testid={`settings-${zone}-groups-${field}`}
+        >
+          <span className={styles.chipGroupBadgeIcon}>⊞</span>
+          <span className={styles.chipGroupBadgeCount}>{groupCount}</span>
+        </button>
       )}
       {aggregationControl}
       {!isFrozen && menuItems.length > 0 && (
@@ -1763,6 +1786,7 @@ const initialSyntheticState: SyntheticBuilderState = {
 };
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
 
@@ -1782,6 +1806,7 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
   pivotData,
   filterFieldValues,
   pickerPortalTarget,
+  onOpenGroupManager,
 }): ReactElement | null => {
   const panelRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -3208,18 +3233,29 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
               {localRows.length === 0 ? (
                 <span className={styles.zoneEmpty}>Drop fields here</span>
               ) : (
-                localRows.map((field) => (
-                  <ZoneChip
-                    key={field}
-                    id={makeZoneItemId("rows", field)}
-                    zone="rows"
-                    field={field}
-                    displayLabel={getDimensionLabel(config, field)}
-                    isFrozen={frozenColumns?.has(field)}
-                    onRemove={(f) => removeFromZone(f, "rows")}
-                    menuItems={[]}
-                  />
-                ))
+                localRows.map((field) => {
+                  const gc = (config.member_groups ?? []).filter(
+                    (g) => g.field === field,
+                  ).length;
+                  return (
+                    <ZoneChip
+                      key={field}
+                      id={makeZoneItemId("rows", field)}
+                      zone="rows"
+                      field={field}
+                      displayLabel={getDimensionLabel(config, field)}
+                      isFrozen={frozenColumns?.has(field)}
+                      onRemove={(f) => removeFromZone(f, "rows")}
+                      menuItems={[]}
+                      groupCount={gc}
+                      onOpenGroupManager={
+                        onOpenGroupManager && gc > 0
+                          ? () => onOpenGroupManager(field)
+                          : undefined
+                      }
+                    />
+                  );
+                })
               )}
             </SortableContext>
           </DropZone>
@@ -3238,18 +3274,29 @@ const SettingsPanel: FC<SettingsPanelProps> = ({
               {localCols.length === 0 ? (
                 <span className={styles.zoneEmpty}>Drop fields here</span>
               ) : (
-                localCols.map((field) => (
-                  <ZoneChip
-                    key={field}
-                    id={makeZoneItemId("columns", field)}
-                    zone="columns"
-                    field={field}
-                    displayLabel={getDimensionLabel(config, field)}
-                    isFrozen={frozenColumns?.has(field)}
-                    onRemove={(f) => removeFromZone(f, "columns")}
-                    menuItems={[]}
-                  />
-                ))
+                localCols.map((field) => {
+                  const gc = (config.member_groups ?? []).filter(
+                    (g) => g.field === field,
+                  ).length;
+                  return (
+                    <ZoneChip
+                      key={field}
+                      id={makeZoneItemId("columns", field)}
+                      zone="columns"
+                      field={field}
+                      displayLabel={getDimensionLabel(config, field)}
+                      isFrozen={frozenColumns?.has(field)}
+                      onRemove={(f) => removeFromZone(f, "columns")}
+                      menuItems={[]}
+                      groupCount={gc}
+                      onOpenGroupManager={
+                        onOpenGroupManager && gc > 0
+                          ? () => onOpenGroupManager(field)
+                          : undefined
+                      }
+                    />
+                  );
+                })
               )}
             </SortableContext>
           </DropZone>

@@ -146,6 +146,33 @@ export interface ValueFilter {
   axis?: "rows" | "columns";
 }
 
+// ---------------------------------------------------------------------------
+// 0.6.0: Custom Member Grouping
+// ---------------------------------------------------------------------------
+
+/**
+ * A named bucket that folds specific dimension members into a single label.
+ *
+ * `members` stores the **resolved-string** canonical form of each member —
+ * the same key produced by `_resolveDimKey` (TypeScript) or
+ * `_resolve_dim_value_series` (Python). Use `"(null)"` for null-handled
+ * values, ISO date strings for date-grain dimensions, etc.
+ *
+ * Members not found in the data are silently ignored, keeping the API robust
+ * when the underlying data changes between runs.
+ */
+export interface MemberGroup {
+  /** Dimension field this group belongs to (must be in rows or columns). */
+  field: string;
+  /** Display label shown in headers, filter checklists, and drilldown panels. */
+  name: string;
+  /**
+   * Resolved-string canonical keys of the members to fold into this group.
+   * Sort order within members is irrelevant — lookup uses a Map.
+   */
+  members: string[];
+}
+
 export interface PivotConfigV1 {
   version: 1;
   rows: string[];
@@ -241,6 +268,13 @@ export interface PivotConfigV1 {
    * Incompatible with temporal hierarchy and period comparison show_values_as modes.
    */
   values_axis?: "columns" | "rows";
+  /**
+   * 0.6.0: Custom member groups — fold specific dimension members into named buckets.
+   * Each group's `members` list contains resolved-string canonical keys (same format
+   * as the filter checklist). Multiple groups for the same field are supported.
+   * Groups are persisted in session state and round-tripped through Python.
+   */
+  member_groups?: MemberGroup[];
   /**
    * Per-field display-label override. Populated from column_config.label.
    * Display-only: does NOT rewrite canonical field ids in rows/columns/values.
@@ -1826,6 +1860,53 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
       );
     }
     result.values_axis = o.values_axis;
+  }
+
+  // member_groups: structural validation only; semantic checks (field in dims, no
+  // overlap, no duplicate names) are enforced on the Python side at call time.
+  if (o.member_groups !== undefined) {
+    if (!Array.isArray(o.member_groups)) {
+      throw new Error("'member_groups' must be an array");
+    }
+    const parsedGroups: MemberGroup[] = [];
+    for (let i = 0; i < o.member_groups.length; i++) {
+      const g = (o.member_groups as unknown[])[i];
+      if (typeof g !== "object" || g === null || Array.isArray(g)) {
+        throw new Error(`'member_groups[${i}]' must be an object`);
+      }
+      const obj = g as Record<string, unknown>;
+      if (typeof obj.field !== "string" || obj.field.trim() === "") {
+        throw new Error(
+          `'member_groups[${i}].field' must be a non-empty string`,
+        );
+      }
+      if (typeof obj.name !== "string" || obj.name.trim() === "") {
+        throw new Error(
+          `'member_groups[${i}].name' must be a non-empty string`,
+        );
+      }
+      if (
+        !Array.isArray(obj.members) ||
+        (obj.members as unknown[]).some((m) => typeof m !== "string")
+      ) {
+        throw new Error(
+          `'member_groups[${i}].members' must be an array of strings`,
+        );
+      }
+      if ((obj.members as string[]).length < 2) {
+        throw new Error(
+          `'member_groups[${i}].members' must have at least 2 members`,
+        );
+      }
+      parsedGroups.push({
+        field: obj.field,
+        name: obj.name,
+        members: obj.members as string[],
+      });
+    }
+    if (parsedGroups.length > 0) {
+      result.member_groups = parsedGroups;
+    }
   }
 
   return result;

@@ -97,6 +97,8 @@ export interface UseHeaderMenuResult {
   menuSupportsPeriodComparison: boolean;
   /** Format a canonical dimension key into a display label. */
   menuFormatLabel: ((key: string) => string) | undefined;
+  /** Number of active groups for the currently open menu's dimension (for badge). */
+  menuGroupCount: number;
   handleCellKeyDown: (
     e: KeyboardEvent,
     rowKey: readonly string[],
@@ -390,6 +392,13 @@ export function useHeaderMenu({
     [config, handleDateGrainChange, pivotData, adaptiveDateGrains],
   );
 
+  const menuGroupCount: number =
+    menuTarget && !isValueMenu
+      ? (config.member_groups ?? []).filter(
+          (g) => g.field === menuTarget.dimension,
+        ).length
+      : 0;
+
   const comparisonAxis = pivotData.getPeriodComparisonAxis();
   const menuSupportsPeriodComparison =
     menuTarget?.axis === "value" && comparisonAxis !== null;
@@ -450,6 +459,7 @@ export function useHeaderMenu({
         : undefined,
     menuSupportsPeriodComparison,
     menuFormatLabel,
+    menuGroupCount,
     handleCellKeyDown,
   };
 }

@@ -3521,24 +3521,22 @@ st_pivot_table(
 section_filter_bar()
 
 # ---------------------------------------------------------------------------
-# Section 23: Virtualization — column alignment repro (issue #8)
+# Section 23: Virtualization — Column Alignment Demo
 # ---------------------------------------------------------------------------
 st.divider()
-st.subheader("23. Virtualization — Column Alignment Repro (issue #8)")
+st.subheader("23. Virtualization — Column Alignment Demo")
 st.markdown(
     """
-Reproduces the configuration from
-[issue #8](https://github.com/streamlit/streamlit-pivot-table/issues/8):
+Demonstrates a high-cardinality virtualization scenario with
 **two row dimensions in hierarchy layout · date column axis · >5 000 cells**.
 
 When the cell count exceeds the 5 000-cell DOM budget the component switches
 to a virtualised layout built from **three separate sticky `<table>` elements**
-(header, scrolling body, Grand Total row). Without explicit column-width
-coordination those three tables drift apart — scroll horizontally to observe
-the misalignment between headers, body cells, and the Grand Total row.
+(header, scrolling body, Grand Total row), coordinated through shared column
+width management so headers, body cells, and grand totals stay aligned.
 
-Use the toggle to compare the virtual path (broken) with the non-virtual
-path (correct) so the difference is clear.
+Use the toggle to compare the virtual path with the non-virtual path while
+keeping the same date-axis structure.
 """
 )
 
@@ -3625,7 +3623,7 @@ def section_virtualization_alignment() -> None:
 
     result = st_pivot_table(
         data,
-        key="issue_8_repro",
+        key="virtualization_alignment_demo",
         rows=["Merchant_State", "Merchant_City"],
         columns=["dt"],
         values=["Amount"],
@@ -3651,31 +3649,143 @@ def section_virtualization_alignment() -> None:
 
     st.markdown(
         """
-**What to observe (virtual path, without the fix):**
+**What to observe:**
 
-The misalignment is most visible in two ways:
+In the virtual path:
 
 1. **Temporal-hierarchy colspans.** With `auto_date_hierarchy=True` (the
    default), the header renders a *two-row* column header: a top row of
    year cells (`colspan=12`) and a second row of individual month cells.
-   The body and Grand Total tables have no colspans — just individual cells.
-   Because `table-layout: auto` computes optimal widths independently for
-   each table, the year-colspan constraints produce a different column
-   distribution in the header than in the body. Scroll horizontally: the
-   month columns in the header will not line up with the data cells below.
+   The body and Grand Total tables still align with those month columns.
 
-2. **Column resizing.** Drag any column handle to resize it. Without the
-   fix the `columnWidthMap` update reaches the body cells but the header
-   and Grand Total tables compute widths independently, so only one section
-   changes size and the three tables drift apart.
+2. **Column resizing.** Drag any column handle to resize it. Header, body,
+   and Grand Total sections update together and stay aligned.
 
-Toggle to the non-virtual path to see a single `<table>` where alignment
-is guaranteed regardless of content.
+Toggle to the non-virtual path to compare against a single-table render.
 """
     )
 
 
 section_virtualization_alignment()
+
+
+# ---------------------------------------------------------------------------
+# Section 24: Custom Member Grouping (0.6.0+)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("24. Custom Member Grouping (0.6.0+)")
+
+
+@st.fragment
+def section_member_groups():
+    st.markdown(
+        """
+`member_groups` lets you combine two or more raw dimension members into a single named group.
+The grouped members are **aggregated together** and shown under the group name; ungrouped
+members continue to appear individually. Totals always reflect the full dataset.
+
+**Key behaviours:**
+- Each group must have at least 2 members and a unique name.
+- A group name that collides with an existing ungrouped member on the same field raises a
+  `ValueError` (ambiguous label).
+- In hybrid execution mode, changing `member_groups` invalidates the sidecar cache —
+  a server re-aggregate is triggered automatically.
+- **Drilldown** panels show the *raw* members (e.g. "North", not "Central US") so you can
+  still inspect the underlying records.
+- **Interactively**: click any dimension header → **Create Groups** (or **Edit Groups**
+  when groups already exist) to open the group manager dialog. Select two or more members,
+  type a name, and add the group. Groups appear as chips in the FilterBar and as a list in
+  the Settings Panel (with individual remove buttons and a "Clear all" option).
+- **Filter remapping**: when you add or edit a group that overlaps with an active filter,
+  filter values are automatically remapped to the new group name (not cleared).
+
+**Try it:**
+1. Expand the "Interactive" pivot on the right, click a Region header, then use **Create Groups**.
+2. Check the FilterBar for a "Groups" chip after creating a group.
+3. Click the cell for a group name to see raw members in the drilldown panel.
+"""
+    )
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.caption("Static — groups set in Python")
+        st_pivot_table(
+            df,
+            key="member_groups_static",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue", "Profit"],
+            aggregation="sum",
+            show_totals=True,
+            number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+            member_groups=[
+                {
+                    "field": "Region",
+                    "name": "Central US",
+                    "members": ["North", "South"],
+                }
+            ],
+        )
+
+    with col_right:
+        st.caption("Interactive — create groups via the column header menu")
+        st_pivot_table(
+            df,
+            key="member_groups_interactive",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue", "Profit"],
+            aggregation="sum",
+            show_totals=True,
+            enable_drilldown=True,
+            number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+        )
+
+    with st.expander("View Code"):
+        st.code(
+            """
+# Static: North + South → "Central US"; East and West remain as-is.
+st_pivot_table(
+    df,
+    key="member_groups_static",
+    rows=["Region"],
+    columns=["Category"],
+    values=["Revenue", "Profit"],
+    aggregation="sum",
+    show_totals=True,
+    number_format={"Revenue": "$,.0f", "Profit": "$,.0f"},
+    member_groups=[
+        {
+            "field": "Region",
+            "name": "Central US",
+            "members": ["North", "South"],
+        }
+    ],
+)
+
+# Multiple groups on the same field — or different fields:
+member_groups=[
+    {"field": "Region",   "name": "Americas", "members": ["North", "South", "East", "West"]},
+    {"field": "Category", "name": "Hard Goods", "members": ["Electronics", "Sports"]},
+]
+""",
+            language="python",
+        )
+
+    # Show live config from interactive demo
+    demo_state = st.session_state.get("member_groups_interactive", {})
+    if demo_state.get("config"):
+        cfg = demo_state["config"]
+        active_groups = cfg.get("member_groups") or []
+        if active_groups:
+            summary = "; ".join(
+                f"**{g['name']}** = {', '.join(g['members'])}" for g in active_groups
+            )
+            st.caption(f"Active groups: {summary}")
+
+
+section_member_groups()
 
 # ---------------------------------------------------------------------------
 # Footer: Raw Data

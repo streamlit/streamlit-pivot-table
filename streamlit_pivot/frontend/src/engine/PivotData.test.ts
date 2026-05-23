@@ -1812,6 +1812,7 @@ describe("PivotData - hybrid sidecar override", () => {
         columns: ["year"],
         date_grains: {},
         filters: {},
+        member_groups: [],
         null_handling: "zero",
         rows: ["region"],
         show_subtotals: false,
@@ -3240,5 +3241,171 @@ describe("PivotData - subtotal_position", () => {
     expect(pdTop.getGroupedRowKeys().every((g) => g.type === "data")).toBe(
       true,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Member grouping tests
+// ---------------------------------------------------------------------------
+
+const MEMBER_GROUP_DATA: DataRecord[] = [
+  { region: "Northeast", category: "A", revenue: 100 },
+  { region: "Southeast", category: "A", revenue: 150 },
+  { region: "West", category: "A", revenue: 200 },
+  { region: "Northeast", category: "B", revenue: 120 },
+  { region: "Southeast", category: "B", revenue: 80 },
+  { region: "West", category: "B", revenue: 60 },
+];
+
+describe("PivotData - member grouping", () => {
+  it("folds grouped members into group name in row keys", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    const rowKeys = pd.getRowKeys().map((k) => k[0]);
+    expect(rowKeys).toContain("East Coast");
+    expect(rowKeys).not.toContain("Northeast");
+    expect(rowKeys).not.toContain("Southeast");
+    expect(rowKeys).toContain("West");
+  });
+
+  it("aggregates grouped members correctly (sum)", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    // Northeast A=100 + Southeast A=150 = 250
+    expect(pd.getAggregator(["East Coast"], ["A"]).value()).toBe(250);
+    // Northeast B=120 + Southeast B=80 = 200
+    expect(pd.getAggregator(["East Coast"], ["B"]).value()).toBe(200);
+    // West unchanged
+    expect(pd.getAggregator(["West"], ["A"]).value()).toBe(200);
+  });
+
+  it("leaves ungrouped members unaffected", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    expect(pd.getAggregator(["West"], ["A"]).value()).toBe(200);
+  });
+
+  it("getUniqueValues returns group names not raw members", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    const vals = pd.getUniqueValues("region");
+    expect(vals).toContain("East Coast");
+    expect(vals).not.toContain("Northeast");
+    expect(vals).not.toContain("Southeast");
+    expect(vals).toContain("West");
+  });
+
+  it("getUniqueValues deduplicates group names", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    const vals = pd.getUniqueValues("region");
+    const eastCount = vals.filter((v) => v === "East Coast").length;
+    expect(eastCount).toBe(1);
+  });
+
+  it("getUniqueValues is sorted (remapped values)", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    const vals = pd.getUniqueValues("region");
+    const sorted = [...vals].sort((a, b) => a.localeCompare(b));
+    expect(vals).toEqual(sorted);
+  });
+
+  it("no member groups — getUniqueValues returns all raw values", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    const vals = pd.getUniqueValues("region");
+    expect(vals).toContain("Northeast");
+    expect(vals).toContain("Southeast");
+    expect(vals).toContain("West");
+  });
+
+  it("row total for group equals sum of constituent members", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      show_totals: true,
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    // East Coast row total: (100+150) + (120+80) = 450
+    expect(pd.getRowTotal(["East Coast"]).value()).toBe(450);
   });
 });

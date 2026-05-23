@@ -1108,6 +1108,231 @@ def test_filters_do_not_alter_sidecar_fingerprint(pivot_module, sample_df):
     ), "top_n_filters / value_filters must not alter the sidecar fingerprint"
 
 
+# ---------------------------------------------------------------------------
+# member_groups validation tests
+# ---------------------------------------------------------------------------
+
+
+def test_member_groups_field_not_in_rows_or_columns_raises(
+    pivot_module, sample_df, mount_recorder
+):
+    """member_groups field must be in rows or columns."""
+    mount_recorder()
+    with pytest.raises(ValueError, match="member_groups.*must be in rows or columns"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[
+                {"field": "Year", "name": "Recent", "members": ["2023", "2024"]}
+            ],
+        )
+
+
+def test_member_groups_empty_members_raises(pivot_module, sample_df, mount_recorder):
+    """member_groups with fewer than 2 members must raise."""
+    mount_recorder()
+    with pytest.raises(ValueError, match="member_groups.*members.*at least 2"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[{"field": "Region", "name": "All", "members": []}],
+        )
+
+
+def test_member_groups_single_member_raises(pivot_module, sample_df, mount_recorder):
+    """member_groups with exactly 1 member must raise."""
+    mount_recorder()
+    with pytest.raises(ValueError, match="member_groups.*members.*at least 2"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[{"field": "Region", "name": "Solo", "members": ["East"]}],
+        )
+
+
+def test_member_groups_empty_name_raises(pivot_module, sample_df, mount_recorder):
+    """member_groups with empty name must raise."""
+    mount_recorder()
+    with pytest.raises(ValueError, match="member_groups.*name.*non-empty"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[
+                {"field": "Region", "name": "", "members": ["East", "West"]}
+            ],
+        )
+
+
+def test_member_groups_whitespace_name_raises(pivot_module, sample_df, mount_recorder):
+    """member_groups with whitespace-only name must raise."""
+    mount_recorder()
+    with pytest.raises(ValueError, match="member_groups.*name.*non-empty"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[
+                {"field": "Region", "name": "   ", "members": ["East", "West"]}
+            ],
+        )
+
+
+def test_member_groups_duplicate_group_names_raises(
+    pivot_module, sample_df, mount_recorder
+):
+    """Duplicate group names within the same field must raise."""
+    mount_recorder()
+    with pytest.raises(ValueError, match="member_groups.*duplicate.*name"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[
+                {"field": "Region", "name": "All", "members": ["East", "West"]},
+                {"field": "Region", "name": "All", "members": ["North", "South"]},
+            ],
+        )
+
+
+def test_member_groups_overlapping_members_raises(
+    pivot_module, sample_df, mount_recorder
+):
+    """Overlapping members across groups for the same field must raise."""
+    mount_recorder()
+    with pytest.raises(ValueError, match="member_groups.*more than one group"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[
+                {"field": "Region", "name": "Group1", "members": ["East", "North"]},
+                {"field": "Region", "name": "Group2", "members": ["East", "West"]},
+            ],
+        )
+
+
+def test_member_groups_name_equals_ungrouped_member_raises(
+    pivot_module, sample_df, mount_recorder
+):
+    """Group name that equals an ungrouped member's resolved string must raise."""
+    mount_recorder()
+    # "West" is not in the group, so naming the group "West" is ambiguous.
+    with pytest.raises(ValueError, match="member_groups.*ambiguous"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Category"],
+            values=["Revenue"],
+            member_groups=[
+                {"field": "Region", "name": "West", "members": ["East", "North"]}
+            ],
+        )
+
+
+def test_member_groups_unrecognized_member_is_silent_noop(
+    pivot_module, sample_df, mount_recorder
+):
+    """Unrecognized member values in member_groups must be silently ignored."""
+    mount_recorder()
+    # "Midwest" doesn't exist in the data — should not raise.
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue"],
+        member_groups=[
+            {
+                "field": "Region",
+                "name": "East Coast",
+                "members": ["East", "Midwest"],
+            }
+        ],
+    )
+
+
+def test_member_groups_duplicate_within_group_is_silently_deduped(
+    pivot_module, sample_df, mount_recorder
+):
+    """Duplicate members within a single group must be silently deduplicated (no error)."""
+    mount_recorder()
+    # "East" appears twice — should not raise.
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Category"],
+        values=["Revenue"],
+        member_groups=[
+            {
+                "field": "Region",
+                "name": "East Coast",
+                "members": ["East", "East"],
+            }
+        ],
+    )
+
+
+def test_member_groups_sidecar_fingerprint_changes_with_groups(pivot_module):
+    """Fingerprint must change when member_groups is added."""
+    base_cfg = {
+        "rows": ["Region"],
+        "columns": ["Category"],
+        "values": ["Revenue"],
+        "aggregation": {"Revenue": "sum"},
+    }
+    grouped_cfg = {
+        **base_cfg,
+        "member_groups": [
+            {"field": "Region", "name": "East Coast", "members": ["East"]}
+        ],
+    }
+    base_fp = pivot_module._build_sidecar_fingerprint(base_cfg, None)
+    grouped_fp = pivot_module._build_sidecar_fingerprint(grouped_cfg, None)
+    assert base_fp != grouped_fp, "member_groups must change the sidecar fingerprint"
+
+
+def test_member_groups_sidecar_fingerprint_order_independent(pivot_module):
+    """Fingerprint must be independent of member list order."""
+    cfg_a = {
+        "rows": ["Region"],
+        "columns": ["Category"],
+        "values": ["Revenue"],
+        "aggregation": {"Revenue": "sum"},
+        "member_groups": [
+            {"field": "Region", "name": "East Coast", "members": ["East", "West"]}
+        ],
+    }
+    cfg_b = {
+        **cfg_a,
+        "member_groups": [
+            {"field": "Region", "name": "East Coast", "members": ["West", "East"]}
+        ],
+    }
+    assert pivot_module._build_sidecar_fingerprint(
+        cfg_a, None
+    ) == pivot_module._build_sidecar_fingerprint(cfg_b, None)
+
+
 def test_style_data_cell_by_measure_with_null_values_no_crash(
     pivot_module, mount_recorder
 ):

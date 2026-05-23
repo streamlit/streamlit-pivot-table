@@ -48,6 +48,7 @@ COLUMN_CONFIG_SCRIPT = Path(__file__).parent / "pivot_table_column_config_app.py
 STYLING_SCRIPT = Path(__file__).parent / "pivot_table_styling_app.py"
 FILTERS_SCRIPT = Path(__file__).parent / "pivot_table_filters_app.py"
 NEW_FEATURES_SCRIPT = Path(__file__).parent / "pivot_table_new_features_app.py"
+MEMBER_GROUPS_SCRIPT = Path(__file__).parent / "pivot_table_member_groups_app.py"
 
 PIVOT_KEYS = [
     "test_pivot",
@@ -227,6 +228,15 @@ APP_CONFIGS = {
             "test_pivot_rank",
             "test_pivot_multi_sort_asc",
             "test_pivot_multi_sort_desc",
+        ],
+    },
+    "pivot_table_member_groups_test.py": {
+        "script": MEMBER_GROUPS_SCRIPT,
+        "pivot_keys": [
+            "test_pivot_member_groups_static",
+            "test_pivot_member_groups_interactive",
+            "test_pivot_member_groups_ungroup",
+            "test_pivot_member_groups_drilldown",
         ],
     },
 }

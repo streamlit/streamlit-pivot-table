@@ -1,13 +1,13 @@
 ---
 name: streamlit-pivot
-description: "Build Streamlit apps with st_pivot_table — a BI-focused pivot table component supporting multi-dimensional pivoting, subtotals, conditional formatting, Excel/CSV/TSV export, drill-down, drag-and-drop, date hierarchies with period-over-period comparisons, synthetic measures (including formula measures), Top N / Bottom N and value-predicate analytical filters (0.5.0+), show-values-as analytical display modes (running total, rank, % of parent, index), values axis placement (values_axis rows/columns, 0.5.0+), multi-field chained sorting (0.5.0+), server-side pre-aggregation for large datasets, and aggregation result memoization for significant latency reduction on display-only reruns (number_format, style, show_values_as — groupby is skipped on repeat renders in threshold_hybrid mode). Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot / st_pivot_table, needs interactive data summarization, Top N filter, value filter, running total, rank, income statement layout, values on rows, financial report, or wants to deploy to Streamlit Community Cloud or Streamlit in Snowflake (SiS) on SPCS (installed from PyPI via PYPI_ACCESS_INTEGRATION). Triggers: pivot table, streamlit_pivot, st_pivot_table, pivot, crosstab, data summarization, top N, top n filter, value filter, running total, rank, values on rows, income statement, financial layout, SiS, SiS on SPCS, Snowflake streamlit, PYPI_ACCESS_INTEGRATION, Streamlit Community Cloud, aggregation cache, memoization, display-only rerun, near-zero latency."
+description: "Build Streamlit apps with st_pivot_table — a BI-focused pivot table component supporting multi-dimensional pivoting, subtotals, conditional formatting, Excel/CSV/TSV export, drill-down, drag-and-drop, date hierarchies with period-over-period comparisons, synthetic measures (including formula measures), Top N / Bottom N and value-predicate analytical filters (0.5.0+), show-values-as analytical display modes (running total, rank, % of parent, index), values axis placement (values_axis rows/columns, 0.5.0+), multi-field chained sorting (0.5.0+), custom member grouping — combine multiple dimension values into a named group for cleaner rollups (member_groups, 0.6.0+), server-side pre-aggregation for large datasets, and aggregation result memoization for significant latency reduction on display-only reruns (number_format, style, show_values_as — groupby is skipped on repeat renders in threshold_hybrid mode). Use when: user wants a pivot table in Streamlit, mentions streamlit_pivot / st_pivot_table, needs interactive data summarization, Top N filter, value filter, running total, rank, income statement layout, values on rows, financial report, wants to group dimension members (e.g. combine regions, bundle categories), or wants to deploy to Streamlit Community Cloud or Streamlit in Snowflake (SiS) on SPCS (installed from PyPI via PYPI_ACCESS_INTEGRATION). Triggers: pivot table, streamlit_pivot, st_pivot_table, pivot, crosstab, data summarization, top N, top n filter, value filter, running total, rank, values on rows, income statement, financial layout, member group, group members, combine regions, bundle categories, custom grouping, SiS, SiS on SPCS, Snowflake streamlit, PYPI_ACCESS_INTEGRATION, Streamlit Community Cloud, aggregation cache, memoization, display-only rerun, near-zero latency."
 ---
 
 # Streamlit Pivot Table Component
 
 `streamlit-pivot` provides `st_pivot_table` — a BI-focused pivot table component built with Streamlit Components V2, React, and TypeScript. It supports multi-dimensional pivoting, interactive sorting/filtering, subtotals with collapse/expand, conditional formatting, Excel/CSV/TSV/clipboard export, drill-down detail panels, drag-and-drop field configuration, synthetic (derived) measures with a formula engine, date/time hierarchies with period-over-period comparisons, hierarchical row layouts, values axis placement (put measures on rows for income-statement-style reports), multi-field chained sorting, Top N / Bottom N and value-predicate analytical filters, column resize, fullscreen mode, and server-side pre-aggregation for large datasets.
 
-**Current version:** 0.5.0
+**Current version:** 0.6.0
 **Requirements:** Python >= 3.10, Streamlit >= 1.51
 
 ## When to Use
@@ -15,6 +15,7 @@ description: "Build Streamlit apps with st_pivot_table — a BI-focused pivot ta
 - User wants to add a pivot table to a Streamlit app
 - User mentions `streamlit_pivot` or `st_pivot_table`
 - User needs interactive data summarization with row/column dimensions and aggregated measures
+- User wants to **group dimension members** — e.g. combine "Northeast" + "Southeast" into "East Coast", or bundle product SKUs into a custom segment (`member_groups`, 0.6.0+)
 - User wants to deploy a Streamlit app that includes the pivot table, whether locally, on **Streamlit Community Cloud**, in a **container** (Docker / ECS / Cloud Run / Kubernetes), or as **Streamlit in Snowflake (SiS) on SPCS**
 
 ## Table of Contents
@@ -1107,7 +1108,7 @@ sales_pivot()
 - Keep random / non-deterministic data generation outside the fragment.
 - `on_config_change` and `on_cell_click` fire on fragment reruns — as expected.
 
-The reference example app (`streamlit_app.py` in this repo) has 22 numbered sections, each wrapped in `@st.fragment`.
+The reference example app (`streamlit_app.py` in this repo) has 23 numbered sections, each wrapped in `@st.fragment`.
 
 ---
 
@@ -1433,6 +1434,7 @@ Before telling the user "replicated," walk through this checklist. If any item i
 
 | Source feature | Supported? | Workaround |
 |---|---|---|
+| **Custom groupings / territories / bundles** (e.g. Sigma's custom group, Tableau's Group by, Excel's group selection) | **Yes (0.6.0+)** | Use `member_groups=[{"field": "Region", "name": "East Coast", "members": ["Northeast", "Southeast"]}]`. Also available interactively via **Create Groups / Edit Groups** in the dimension header menu (opens the group manager dialog). |
 | **Running Total In / % Running Total** | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "running_total"}` or `"pct_running_total"`. |
 | **Rank (Smallest to Largest / Largest to Smallest)** | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "rank"}` (competition rank, largest first). |
 | **Index** (Excel's Show Values As → Index) | **Yes (0.5.0+)** | Use `show_values_as={"Revenue": "index"}`. |
@@ -1593,6 +1595,23 @@ with st.sidebar:
 filtered = df if not regions else df[df["Region"].isin(regions)]
 
 st_pivot_table(filtered, key="p", rows=["Region", "Category"], values=["Revenue"])
+```
+
+**Custom member grouping (0.6.0+)**
+
+```python
+# Combine Northeast + Southeast into "East Coast"; West stays as-is.
+st_pivot_table(
+    df,
+    key="grouped",
+    rows=["Region"],
+    columns=["Category"],
+    values=["Revenue"],
+    aggregation="sum",
+    member_groups=[
+        {"field": "Region", "name": "East Coast", "members": ["Northeast", "Southeast"]},
+    ],
+)
 ```
 
 **Persisting user layout**

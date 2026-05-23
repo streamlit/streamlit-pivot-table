@@ -98,6 +98,16 @@ export interface HeaderMenuProps {
   valueFilter?: ValueFilter;
   /** Callback to set/clear the value filter for this dimension. */
   onValueFilterChange?: (filter: ValueFilter | undefined) => void;
+  /**
+   * When set, a "Groups…" nav row is shown. Clicking it opens the GroupManagerDialog
+   * for this dimension (managed by PivotRoot). The callback also closes the menu.
+   */
+  onOpenGroupManager?: () => void;
+  /**
+   * Number of active groups for this dimension, shown as a badge on the nav row.
+   * Only relevant when onOpenGroupManager is set.
+   */
+  groupCount?: number;
   onClose: () => void;
 }
 
@@ -141,6 +151,8 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
   onTopNFilterChange,
   valueFilter,
   onValueFilterChange,
+  onOpenGroupManager,
+  groupCount = 0,
   onClose,
 }): ReactElement => {
   // Derive filter axis ("rows"/"columns") from the existing "row"/"col" axis prop.
@@ -824,6 +836,117 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
         </>
       )}
 
+      {/* Groups nav row (dimension headers only, when group manager is wired up) */}
+      {onOpenGroupManager && (
+        <>
+          <div className={styles.sortSection}>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              tabIndex={-1}
+              data-menu-nav
+              onClick={onOpenGroupManager}
+              aria-label={`Manage groups for ${dimension}`}
+              data-testid="header-menu-groups-nav"
+            >
+              <span className={styles.menuItemIcon}>
+                <GroupsIcon />
+              </span>
+              <span className={styles.menuItemLabel}>
+                {groupCount > 0 ? "Edit Groups" : "Create Groups"}
+              </span>
+              {groupCount > 0 && (
+                <span className={styles.groupCountBadge}>{groupCount}</span>
+              )}
+            </button>
+          </div>
+          {showFilter && <div className={styles.divider} />}
+        </>
+      )}
+
+      {/* Filter Values section */}
+      {showFilter && (
+        <div className={styles.filterSection} data-testid="header-menu-filter">
+          <span
+            className={`${styles.menuSectionLabel}${filter?.include?.length || filter?.exclude?.length ? ` ${styles.activeSection}` : ""}`}
+          >
+            Filter Values
+          </span>
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder="Filter values..."
+            value={search}
+            data-menu-nav
+            tabIndex={-1}
+            onChange={(e) => setSearch(e.target.value)}
+            data-testid={`header-filter-search-${dimension}`}
+          />
+          <div className={styles.actionRow}>
+            <button
+              type="button"
+              className={styles.actionButton}
+              data-menu-nav
+              tabIndex={-1}
+              onClick={selectAll}
+            >
+              Select All
+            </button>
+            <button
+              type="button"
+              className={styles.actionButton}
+              data-menu-nav
+              tabIndex={-1}
+              onClick={clearAll}
+            >
+              Clear All
+            </button>
+          </div>
+          <div
+            className={styles.itemList}
+            role="group"
+            aria-label={`Filter values for ${dimension}`}
+          >
+            {visibleValues.map((val) => (
+              <label
+                key={val}
+                className={styles.filterItem}
+                role="menuitemcheckbox"
+                aria-checked={isChecked(val)}
+                data-menu-nav
+                tabIndex={-1}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleValue(val);
+                  }
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked(val)}
+                  onChange={() => toggleValue(val)}
+                  tabIndex={-1}
+                />
+                <span>{(formatLabel?.(val) ?? val) || "(empty)"}</span>
+              </label>
+            ))}
+            {overflowCount > 0 && (
+              <div className={styles.moreIndicator}>
+                and {overflowCount} more...
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Divider before analytical filters (when Filter Values and at least one analytic section are shown) */}
+      {showFilter &&
+        (onTopNFilterChange || onValueFilterChange) &&
+        valueFields &&
+        valueFields.length > 0 && <div className={styles.divider} />}
+
       {/* Top N / Bottom N section (dimension headers only, when value fields available) */}
       {onTopNFilterChange && valueFields && valueFields.length > 0 && (
         <>
@@ -1073,88 +1196,6 @@ const HeaderMenu: FC<HeaderMenuProps> = ({
           </div>
         </>
       )}
-
-      {/* Divider between analytical filters and Filter Values checklist (only when both present) */}
-      {showFilter &&
-        onValueFilterChange &&
-        valueFields &&
-        valueFields.length > 0 && <div className={styles.divider} />}
-
-      {/* Filter section */}
-      {showFilter && (
-        <div className={styles.filterSection} data-testid="header-menu-filter">
-          <span
-            className={`${styles.menuSectionLabel}${filter?.include?.length || filter?.exclude?.length ? ` ${styles.activeSection}` : ""}`}
-          >
-            Filter Values
-          </span>
-          <input
-            type="text"
-            className={styles.searchInput}
-            placeholder="Filter values..."
-            value={search}
-            data-menu-nav
-            tabIndex={-1}
-            onChange={(e) => setSearch(e.target.value)}
-            data-testid={`header-filter-search-${dimension}`}
-          />
-          <div className={styles.actionRow}>
-            <button
-              type="button"
-              className={styles.actionButton}
-              data-menu-nav
-              tabIndex={-1}
-              onClick={selectAll}
-            >
-              Select All
-            </button>
-            <button
-              type="button"
-              className={styles.actionButton}
-              data-menu-nav
-              tabIndex={-1}
-              onClick={clearAll}
-            >
-              Clear All
-            </button>
-          </div>
-          <div
-            className={styles.itemList}
-            role="group"
-            aria-label={`Filter values for ${dimension}`}
-          >
-            {visibleValues.map((val) => (
-              <label
-                key={val}
-                className={styles.filterItem}
-                role="menuitemcheckbox"
-                aria-checked={isChecked(val)}
-                data-menu-nav
-                tabIndex={-1}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    toggleValue(val);
-                  }
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isChecked(val)}
-                  onChange={() => toggleValue(val)}
-                  tabIndex={-1}
-                />
-                <span>{(formatLabel?.(val) ?? val) || "(empty)"}</span>
-              </label>
-            ))}
-            {overflowCount > 0 && (
-              <div className={styles.moreIndicator}>
-                and {overflowCount} more...
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -1213,6 +1254,25 @@ const DisplayIcon: FC<{ mode: ShowValuesAs }> = ({ mode }) => {
 };
 
 // ---- SVG Icons ----
+
+const GroupsIcon: FC = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <rect x="2" y="3" width="8" height="7" rx="1" />
+    <rect x="14" y="3" width="8" height="7" rx="1" />
+    <rect x="2" y="14" width="8" height="7" rx="1" />
+    <rect x="14" y="14" width="8" height="7" rx="1" />
+  </svg>
+);
 
 const CheckIcon: FC = () => (
   <svg

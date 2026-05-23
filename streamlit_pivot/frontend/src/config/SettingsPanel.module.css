@@ -361,6 +361,43 @@
   opacity: 0.6;
 }
 
+/* Badge button showing active group count on a row/col ZoneChip */
+.chipGroupBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  border: none;
+  background: var(--st-primary-color);
+  color: #fff;
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1.1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.1s;
+}
+
+.chipGroupBadgeIcon {
+  font-size: 1.2em;
+  line-height: 1;
+}
+
+.chipGroupBadgeCount {
+  font-size: 1.08em;
+  line-height: 1;
+}
+
+.chipGroupBadge:hover {
+  opacity: 0.82;
+}
+
+.chipGroupBadge:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-primary-color) 50%, transparent);
+}
+
 .chipRemoveBtn {
   cursor: pointer;
   border: none;

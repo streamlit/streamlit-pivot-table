@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
 import re
 import warnings
 from collections import OrderedDict
@@ -29,6 +30,8 @@ from math import prod
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import pandas as pd
+
+_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,6 +104,25 @@ class ValueFilterFull(ValueFilter, total=False):
 
     value2: float  # upper bound for "between"
     axis: str  # "rows" | "columns" (default "rows")
+
+
+class MemberGroup(TypedDict):
+    """A named bucket that folds specific dimension members into a single label.
+
+    ``members`` stores the **resolved-string** form of each member — the same
+    canonical string produced by ``_resolve_dim_value_series`` for that field
+    (e.g. ``"2024-01-01"`` for a date-grain dim, ``"(null)"`` for null-handled
+    values, ``"2024"`` for an integer Year column).
+
+    Members not found in the DataFrame are silently ignored so the API stays
+    robust when data changes between runs.  Set the module-level log level to
+    DEBUG (``logging.getLogger("streamlit_pivot").setLevel(logging.DEBUG)``) to
+    surface unmatched members during development.
+    """
+
+    field: str  # dimension field, e.g. "Region"
+    name: str  # bucket display name, e.g. "East Coast"
+    members: list[str]  # resolved-string member keys, e.g. ["Northeast", "Southeast"]
 
 
 class RegionStyle(TypedDict, total=False):
@@ -437,6 +459,7 @@ class PivotConfig(TypedDict, total=False):
     top_n_filters: list[TopNFilterFull]
     value_filters: list[ValueFilterFull]
     values_axis: str
+    member_groups: list[MemberGroup]
 
 
 VALID_AGGREGATIONS = frozenset(
@@ -678,6 +701,103 @@ def _apply_source_filters(
         elif exclude:
             mask &= ~_match_source_filter_values(col, exclude)
     return df[mask]
+
+
+def _apply_member_groups(
+    df: Any,
+    member_groups: list[MemberGroup] | None,
+    column_types: dict[str, str] | None = None,
+    null_handling: Any = None,
+    rows: list[str] | None = None,
+    columns: list[str] | None = None,
+    date_grains: dict[str, str | None] | None = None,
+    adaptive_grains: dict[str, str] | None = None,
+) -> tuple[Any, set[str]]:
+    """Remap dimension column values according to ``member_groups``.
+
+    Produces a **copy** of ``df`` where each grouped member value is replaced by
+    its group name.  Ungrouped values are also resolved to their canonical
+    string form so that downstream ``_resolve_dim_value_series`` calls (for
+    date-grain dimensions) do not fail when they encounter string group names
+    mixed with raw temporal values.
+
+    Returns ``(remapped_df, remapped_fields)`` where ``remapped_fields`` is the
+    set of column names that were resolved to strings. The call site must remove
+    these fields from ``column_types`` before passing to helpers that would
+    otherwise re-apply temporal resolution (e.g. ``_prepare_threshold_hybrid_frame``).
+
+    Returns ``(df, set())`` unchanged (not a copy) when ``member_groups`` is
+    empty or None.
+
+    The lookup keys are the canonical resolved-string form produced by
+    ``_resolve_dim_value_series`` for each field — the same strings that appear
+    in the filter checklist and drilldown path filters.  This ensures that
+    date-grain fields, integer dimensions, and null-containing dimensions all
+    resolve consistently in both hybrid and client-only modes.
+
+    Unrecognised member values (members present in the group definition but not
+    found in the DataFrame) are silently ignored; ``mapping.get(v, v)`` returns
+    ``v`` unchanged so the row is left as-is.  A ``DEBUG``-level log line is
+    emitted per unmatched (field, member, group_name) triple so developers can
+    diagnose typos without any Streamlit UI surface.
+    """
+    if not member_groups:
+        return df, set()
+
+    # Build {field -> {resolved_member_key -> group_name}} lookup.
+    field_mappings: dict[str, dict[str, str]] = {}
+    for group in member_groups:
+        field = group["field"]
+        name = group["name"]
+        if field not in field_mappings:
+            field_mappings[field] = {}
+        for member in group["members"]:
+            field_mappings[field][member] = name
+
+    # Only copy the columns that will change.
+    changed_cols = [f for f in field_mappings if f in df.columns]
+    if not changed_cols:
+        return df, set()
+
+    df_copy = df.copy()
+    remapped_fields: set[str] = set()
+    for field in changed_cols:
+        mapping = field_mappings[field]
+        mode = _get_null_mode(field, null_handling)
+        col_type = column_types.get(field) if column_types else None
+        grain = _get_effective_date_grain(
+            field,
+            rows,
+            columns,
+            date_grains,
+            auto_date_hierarchy=True,
+            column_types=column_types,
+            adaptive_grains=adaptive_grains,
+        )
+        # Fully resolve the column to canonical strings using the same logic as
+        # _resolve_and_filter.  This is necessary for date-grain fields where
+        # the raw values are datetime objects — group names (strings) and
+        # resolved date strings must both appear in the output column so that
+        # downstream helpers that call _resolve_dim_value_series on the column
+        # do not fail on mixed datetime/string values.
+        resolved_series = _resolve_dim_value_series(
+            df_copy[field], col_type, mode, grain
+        )
+        # Emit DEBUG diagnostics for member keys not present in the column.
+        if _logger.isEnabledFor(logging.DEBUG):
+            present_keys = set(resolved_series.unique())
+            for member_key, group_name in mapping.items():
+                if member_key not in present_keys:
+                    _logger.debug(
+                        "_apply_member_groups: unmatched member %r in field %r "
+                        "for group %r — value not found in DataFrame column",
+                        member_key,
+                        field,
+                        group_name,
+                    )
+        df_copy[field] = resolved_series.map(lambda v, m=mapping: m.get(v, v))
+        remapped_fields.add(field)
+    return df_copy, remapped_fields
 
 
 def _can_use_threshold_hybrid(config: PivotConfig) -> tuple[bool, str]:
@@ -1748,6 +1868,20 @@ def _build_sidecar_fingerprint(
         ],
         key=lambda x: (x["id"], x["operation"]),
     )
+    # member_groups affects groupby keys just like rows/columns/filters.
+    # Serialize in a stable order: sort groups by (field, name), members sorted.
+    member_groups_list = config.get("member_groups") or []
+    obj["member_groups"] = sorted(
+        [
+            {
+                "field": g.get("field", ""),
+                "name": g.get("name", ""),
+                "members": sorted(g.get("members") or []),
+            }
+            for g in member_groups_list
+        ],
+        key=lambda x: (x["field"], x["name"]),
+    )
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
 
@@ -1824,11 +1958,21 @@ def _materialize_threshold_hybrid_cached(
     original_column_types: dict | None,
     adaptive_date_grains: dict[str, str] | None,
     agg_cache: "OrderedDict[tuple, _AggCacheEntry]",
+    remapped_data: Any | None = None,
+    remapped_column_types: dict | None = None,
 ) -> _AggCacheEntry:
     """Lookup or compute all three server-side aggregation results.
 
     On a cache miss, runs all three computations and stores the combined entry.
     On a hit, refreshes LRU order and returns the cached entry immediately.
+
+    ``remapped_data`` is the output of ``_apply_member_groups`` — the DataFrame
+    with grouped member values replaced by group names.  When provided,
+    ``_prepare_threshold_hybrid_frame`` and ``_compute_hybrid_totals`` operate
+    on it instead of ``filtered_data``.  ``remapped_column_types`` is a copy of
+    ``original_column_types`` with date types removed for any field that was
+    fully resolved to strings by ``_apply_member_groups``, so those helpers do
+    not attempt to re-apply temporal bucketing to group-name strings.
 
     INVARIANT: must only be called when use_threshold_hybrid is True.
     Calling on a client_only path would store pre-aggregated frames and risk
@@ -1845,18 +1989,24 @@ def _materialize_threshold_hybrid_cached(
     if entry is not None:
         agg_cache.move_to_end(key)
         return entry
+    agg_df = remapped_data if remapped_data is not None else filtered_data
+    agg_types = (
+        remapped_column_types
+        if remapped_column_types is not None
+        else original_column_types
+    )
     materialized = _prepare_threshold_hybrid_frame(
-        filtered_data,
+        agg_df,
         config,
         null_handling,
-        original_column_types,
+        agg_types,
         adaptive_grains=adaptive_date_grains,
     )
     totals = _compute_hybrid_totals(
-        filtered_data,
+        agg_df,
         config,
         null_handling,
-        original_column_types,
+        agg_types,
         adaptive_grains=adaptive_date_grains,
     )
     filter_vals = _compute_filter_field_values(
@@ -2535,6 +2685,7 @@ def _compute_hybrid_drilldown(
     auto_date_hierarchy: bool = True,
     date_grains: dict[str, str | None] | None = None,
     adaptive_grains: dict[str, str] | None = None,
+    member_groups: list[MemberGroup] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], int, int]:
     """Filter the original DataFrame for a hybrid-mode drill-down request.
 
@@ -2543,8 +2694,139 @@ def _compute_hybrid_drilldown(
     null_handling modes.  Applies config-level dimension filters first
     (matching _shouldIncludeRow), then cell-click filters.
 
+    When ``member_groups`` is provided, uses the positional-mask approach so
+    that the drilldown panel shows the original raw member values (e.g.
+    "Northeast", "Southeast") rather than the group name ("East Coast"):
+      1. Build ``remapped`` from ``df`` via ``_apply_member_groups``.
+      2. Apply ``_resolve_and_filter`` on ``remapped`` (config-level filters
+         reference group names, which are already in the remapped column).
+      3. Apply the cell-path filter mask on the remapped frame to locate
+         matching row *positions*.
+      4. Return ``df.iloc[kept_positions]`` — raw original rows — so raw
+         member values appear in the drilldown panel.
+    This avoids ``isin`` expansion and is safe for non-unique DataFrame indices.
+
     Returns (records_list, column_names, total_matching_count, page).
     """
+    filters: dict[str, str] = drilldown_request.get("filters", {})
+    page: int = max(0, int(drilldown_request.get("page", 0)))
+    sort_column = drilldown_request.get("sortColumn")
+    sort_direction = drilldown_request.get("sortDirection")
+
+    if member_groups:
+        # --- Positional-mask approach ---
+        # remapped is a copy; df is not mutated.
+        remapped, remapped_fields = _apply_member_groups(
+            df,
+            member_groups,
+            column_types=column_types,
+            null_handling=null_handling,
+            rows=rows,
+            columns=columns,
+            date_grains=date_grains,
+            adaptive_grains=adaptive_grains,
+        )
+        # Build column_types view with date types removed for remapped fields
+        # so _resolve_and_filter doesn't fail on group-name strings.
+        remapped_col_types = (
+            {k: v for k, v in column_types.items() if k not in remapped_fields}
+            if column_types and remapped_fields
+            else column_types
+        )
+        # Attach positional index BEFORE filtering so positions stay aligned.
+        pos_range = pd.RangeIndex(len(df))
+        remapped_with_pos = remapped.assign(__row_pos__=pos_range.values)
+
+        # Apply config-level filters on remapped (filter values reference group names).
+        remapped_filtered = _resolve_and_filter(
+            remapped_with_pos,
+            config_filters or {},
+            null_handling,
+            column_types=remapped_col_types,
+            rows=rows,
+            columns=columns,
+            auto_date_hierarchy=auto_date_hierarchy,
+            date_grains=date_grains,
+            adaptive_grains=adaptive_grains,
+        )
+
+        # Apply cell-path mask on remapped_filtered.
+        cell_mask = pd.Series(True, index=remapped_filtered.index)
+        for col, val in filters.items():
+            if col not in remapped_filtered.columns:
+                continue
+            mode = _get_null_mode(col, null_handling)
+            # Use remapped_col_types so group-name string cols are not re-bucketed.
+            col_type = remapped_col_types.get(col) if remapped_col_types else None
+            grain = _get_effective_date_grain(
+                col,
+                rows,
+                columns,
+                date_grains,
+                auto_date_hierarchy,
+                remapped_col_types,
+                adaptive_grains=adaptive_grains,
+            )
+            resolved = _resolve_dim_value_series(
+                remapped_filtered[col], col_type, mode, grain
+            )
+            cell_mask &= resolved == str(val)
+
+        matched = remapped_filtered[cell_mask]
+        kept_positions = matched["__row_pos__"].values.astype(int)
+        total_count = len(kept_positions)
+
+        # Return raw rows from df using positional indexing (safe for any index).
+        filtered = df.iloc[kept_positions].reset_index(drop=True)
+
+        # Sort on the raw filtered frame (raw values, not group names).
+        if (
+            sort_column
+            and sort_direction in ("asc", "desc")
+            and sort_column in filtered.columns
+        ):
+            sort_key = sort_column
+            temp_sort_column: str | None = None
+            raw_col_type = column_types.get(sort_column) if column_types else None
+            if raw_col_type in ("date", "datetime"):
+                temp_sort_column = "__drilldown_sort_key__"
+                while temp_sort_column in filtered.columns:
+                    temp_sort_column += "_"
+                filtered = filtered.assign(
+                    **{
+                        temp_sort_column: pd.to_datetime(
+                            filtered[sort_column], errors="coerce"
+                        )
+                    }
+                )
+                sort_key = temp_sort_column
+            elif raw_col_type in ("integer", "float"):
+                temp_sort_column = "__drilldown_sort_key__"
+                while temp_sort_column in filtered.columns:
+                    temp_sort_column += "_"
+                filtered = filtered.assign(
+                    **{
+                        temp_sort_column: pd.to_numeric(
+                            filtered[sort_column], errors="coerce"
+                        )
+                    }
+                )
+                sort_key = temp_sort_column
+            filtered = filtered.sort_values(
+                by=sort_key,
+                ascending=sort_direction == "asc",
+                kind="mergesort",
+                na_position="last",
+            )
+            if temp_sort_column is not None:
+                filtered = filtered.drop(columns=[temp_sort_column])
+
+        offset = page * page_size
+        page_slice = filtered.iloc[offset : offset + page_size]
+        records = json.loads(page_slice.to_json(orient="records", date_format="iso"))
+        return records, list(page_slice.columns), total_count, page
+
+    # --- Standard (no member_groups) path ---
     working = _resolve_and_filter(
         df,
         config_filters or {},
@@ -2556,11 +2838,6 @@ def _compute_hybrid_drilldown(
         date_grains=date_grains,
         adaptive_grains=adaptive_grains,
     )
-
-    filters: dict[str, str] = drilldown_request.get("filters", {})
-    page: int = max(0, int(drilldown_request.get("page", 0)))
-    sort_column = drilldown_request.get("sortColumn")
-    sort_direction = drilldown_request.get("sortDirection")
 
     mask = pd.Series(True, index=working.index)
     for col, val in filters.items():
@@ -3002,6 +3279,7 @@ def _default_config(
     top_n_filters: list[TopNFilterFull] | None = None,
     value_filters: list[ValueFilterFull] | None = None,
     values_axis: Literal["columns", "rows"] = "columns",
+    member_groups: list[MemberGroup] | None = None,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -3115,6 +3393,8 @@ def _default_config(
         cfg["value_filters"] = value_filters
     if values_axis != "columns":
         cfg["values_axis"] = values_axis
+    if member_groups:
+        cfg["member_groups"] = member_groups
     return cfg
 
 
@@ -3272,6 +3552,8 @@ def st_pivot_table(
     value_filters: list[ValueFilterFull] | None = None,
     # 0.5.0: values axis placement
     values_axis: Literal["columns", "rows"] = "columns",
+    # 0.6.0: custom member grouping
+    member_groups: list[MemberGroup] | None = None,
     # Format hints from Streamlit column_config / dimension_format
     column_config: dict[str, Any] | None = None,
     dimension_format: str | dict[str, str] | None = None,
@@ -3496,6 +3778,33 @@ def st_pivot_table(
         (``auto_date_hierarchy=True`` or ``date_grains`` targeting an axis
         field) when those features would actively expand a date/datetime
         field on rows or columns.
+    member_groups : list[dict] or None
+        Group specific dimension members into named buckets. Each dict must
+        contain ``"field"`` (a dimension in ``rows`` or ``columns``),
+        ``"name"`` (the bucket display label), and ``"members"`` (a list of
+        canonical resolved-string member values to fold into the bucket —
+        use the same string keys that appear in the filter checklist, e.g.
+        ``"(null)"`` for null values, ISO date strings for date-grain dims).
+        Multiple groups for the same field are allowed. Within a field,
+        member values may not appear in more than one group and group names
+        may not duplicate each other.
+
+        Member values not found in the DataFrame are silently ignored so
+        the API stays robust when data changes between runs. Enable
+        ``DEBUG`` logging on the ``streamlit_pivot`` logger to surface
+        unmatched members during development.
+
+        Users can also create and remove groups interactively via the
+        column header menu when ``interactive=True`` (default).
+
+        Example::
+
+            member_groups=[
+                {"field": "Region", "name": "East Coast",
+                 "members": ["Northeast", "Southeast"]},
+                {"field": "Region", "name": "West Coast",
+                 "members": ["Northwest", "Southwest"]},
+            ]
     conditional_formatting : list[dict] or None
         List of conditional formatting rules applied to value cells.
         Each rule is a dict with ``"type"`` (``"color_scale"``,
@@ -4151,6 +4460,65 @@ def st_pivot_table(
                     f"{sorted(VALID_FILTER_AXES)}, got {axis!r}"
                 )
 
+    # --- member_groups validation (basic checks; ambiguous-name check runs later
+    #     after original_column_types and adaptive_date_grains are available) ---
+    if member_groups is not None:
+        if not isinstance(member_groups, list):
+            raise TypeError(
+                f"member_groups must be a list or None, got {type(member_groups).__name__}"
+            )
+        _dim_fields = set(resolved_rows or []) | set(resolved_columns or [])
+        for i, g in enumerate(member_groups):
+            if not isinstance(g, dict):
+                raise TypeError(f"member_groups[{i}] must be a dict")
+            _mg_field = g.get("field")
+            _mg_name = g.get("name")
+            _mg_members = g.get("members")
+            if not isinstance(_mg_field, str) or not _mg_field.strip():
+                raise ValueError(
+                    f"member_groups[{i}]['field'] must be a non-empty string"
+                )
+            if _mg_field not in _dim_fields:
+                raise ValueError(
+                    f"member_groups[{i}]['field'] {_mg_field!r} must be in rows or columns. "
+                    f"Available dimension fields: {sorted(_dim_fields)}"
+                )
+            if not isinstance(_mg_name, str) or not _mg_name.strip():
+                raise ValueError(
+                    f"member_groups[{i}]['name'] must be a non-empty string"
+                )
+            if not isinstance(_mg_members, list) or len(_mg_members) < 2:
+                raise ValueError(
+                    f"member_groups[{i}]['members'] must have at least 2 members"
+                )
+            if not all(isinstance(m, str) for m in _mg_members):
+                raise TypeError(f"member_groups[{i}]['members'] items must be strings")
+        # Cross-group validation per field: no member overlap, no duplicate names.
+        from collections import defaultdict as _defaultdict
+
+        _groups_by_field: dict[str, list[dict]] = _defaultdict(list)
+        for g in member_groups:
+            _groups_by_field[g["field"]].append(g)
+        for _mg_field, _field_groups in _groups_by_field.items():
+            _seen_names: set[str] = set()
+            _seen_members: dict[str, str] = {}
+            for g in _field_groups:
+                _mg_name = g["name"]
+                unique_members = list(dict.fromkeys(g["members"]))
+                if _mg_name in _seen_names:
+                    raise ValueError(
+                        f"member_groups: duplicate group name {_mg_name!r} for field {_mg_field!r}"
+                    )
+                _seen_names.add(_mg_name)
+                for member in unique_members:
+                    if member in _seen_members:
+                        raise ValueError(
+                            f"member_groups: member {member!r} appears in more than one "
+                            f"group for field {_mg_field!r} "
+                            f"(groups {_seen_members[member]!r} and {_mg_name!r})"
+                        )
+                    _seen_members[member] = _mg_name
+
     if conditional_formatting is not None:
         if not isinstance(conditional_formatting, list):
             raise TypeError(
@@ -4402,6 +4770,44 @@ def st_pivot_table(
         adaptive_grains=adaptive_date_grains,
     )
 
+    # --- member_groups ambiguous-name check ---
+    # Requires original_column_types and adaptive_date_grains (computed above).
+    if member_groups:
+        from collections import defaultdict as _defaultdict2
+
+        _mg_by_field: dict[str, list[dict]] = _defaultdict2(list)
+        for g in member_groups:
+            _mg_by_field[g["field"]].append(g)
+        for _mg_field, _field_groups in _mg_by_field.items():
+            if _mg_field not in filtered_data.columns:
+                continue
+            _all_group_members: set[str] = set()
+            for g in _field_groups:
+                _all_group_members.update(g["members"])
+            _mode = _get_null_mode(_mg_field, null_handling)
+            _col_type = original_column_types.get(_mg_field)
+            _grain = _get_effective_date_grain(
+                _mg_field,
+                resolved_rows,
+                resolved_columns,
+                normalized_date_grains,
+                auto_date_hierarchy,
+                original_column_types,
+                adaptive_grains=adaptive_date_grains,
+            )
+            _resolved = _resolve_dim_value_series(
+                filtered_data[_mg_field], _col_type, _mode, _grain
+            )
+            _all_resolved: set[str] = set(_resolved.unique())
+            _ungrouped_resolved = _all_resolved - _all_group_members
+            for g in _field_groups:
+                if g["name"] in _ungrouped_resolved:
+                    raise ValueError(
+                        f"member_groups: group name {g['name']!r} for field {_mg_field!r} "
+                        f"is ambiguous — it matches an ungrouped member value. "
+                        f"Choose a group name that does not appear as a raw member in the data."
+                    )
+
     initial_config = _default_config(
         rows=resolved_rows,
         columns=resolved_columns,
@@ -4429,6 +4835,7 @@ def st_pivot_table(
         dimension_format=dimension_format
         if isinstance(dimension_format, dict)
         else None,
+        member_groups=member_groups,
         field_labels=cc_field_labels,
         field_help=cc_field_help,
         field_widths=cc_field_widths,
@@ -4472,6 +4879,41 @@ def st_pivot_table(
         st.session_state[_agg_ss_key] = OrderedDict()
     _agg_cache: OrderedDict[tuple, _AggCacheEntry] = st.session_state[_agg_ss_key]
 
+    # Compute remapped_data once for member_groups.  In hybrid mode this is
+    # passed to the aggregation helpers.  In client_only mode the raw
+    # filtered_data is sent to the frontend which applies groups itself via
+    # _buildMemberGroupLookup.
+    _active_member_groups: list[MemberGroup] | None = (
+        config_to_send.get("member_groups") or None
+    )
+    if _active_member_groups and use_threshold_hybrid:
+        _remapped_data, _remapped_fields = _apply_member_groups(
+            filtered_data,
+            _active_member_groups,
+            column_types=original_column_types,
+            null_handling=null_handling,
+            rows=config_to_send.get("rows"),
+            columns=config_to_send.get("columns"),
+            date_grains=config_to_send.get("date_grains"),
+            adaptive_grains=adaptive_date_grains,
+        )
+        # Remove date/datetime classification for fields that were fully resolved
+        # to strings by _apply_member_groups so that downstream helpers do not
+        # try to re-apply temporal bucketing to group-name strings.
+        _remapped_column_types: dict[str, str] | None = (
+            {
+                k: v
+                for k, v in original_column_types.items()
+                if k not in _remapped_fields
+            }
+            if original_column_types and _remapped_fields
+            else original_column_types
+        )
+    else:
+        _remapped_data = None
+        _remapped_fields = set()
+        _remapped_column_types = None
+
     # INVARIANT: _materialize_threshold_hybrid_cached is called only when
     # use_threshold_hybrid is True.  Must not be hoisted above
     # _should_use_threshold_hybrid — a client_only rerun sharing a cache key
@@ -4484,6 +4926,8 @@ def st_pivot_table(
             original_column_types,
             adaptive_date_grains,
             _agg_cache,
+            remapped_data=_remapped_data,
+            remapped_column_types=_remapped_column_types,
         )
         materialized_data = _entry.materialized_data
         totals_sidecar = _entry.hybrid_totals
@@ -4590,6 +5034,7 @@ def st_pivot_table(
                 auto_date_hierarchy=config_to_send.get("auto_date_hierarchy", True),
                 date_grains=config_to_send.get("date_grains"),
                 adaptive_grains=adaptive_date_grains,
+                member_groups=_active_member_groups or None,
             )
             data_payload["drilldown_records"] = records
             data_payload["drilldown_columns"] = columns

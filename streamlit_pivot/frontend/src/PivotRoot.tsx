@@ -32,6 +32,7 @@ import {
   type ColumnTypeMap,
   type DateGrain,
   type DimensionFilter,
+  type MemberGroup,
   DEFAULT_CONFIG,
   getEffectiveDateGrain,
   getExplicitDateGrain,
@@ -67,6 +68,7 @@ import TableRenderer from "./renderers/TableRenderer";
 import VirtualizedTableRenderer from "./renderers/VirtualizedTableRenderer";
 import Toolbar from "./config/Toolbar";
 import { FilterBar } from "./config/FilterBar";
+import GroupManagerDialog from "./config/GroupManagerDialog";
 import DrilldownPanel from "./renderers/DrilldownPanel";
 import WarningBanner from "./shared/WarningBanner";
 
@@ -887,6 +889,107 @@ const PivotRoot: FC<PivotRootProps> = ({
     [currentConfig, handleConfigChange],
   );
 
+  const handleClearFieldGroups = useCallback(
+    (field: string) => {
+      const nextGroups = (currentConfig.member_groups ?? []).filter(
+        (g) => g.field !== field,
+      );
+      // When all groups for a field are cleared, the group names that were in
+      // that field's filter are now stale keys. Drop the filter for that field
+      // so the user doesn't end up with a silent empty-match filter.
+      const nextFilters = { ...(currentConfig.filters ?? {}) };
+      delete nextFilters[field];
+      handleConfigChange({
+        ...currentConfig,
+        member_groups: nextGroups.length > 0 ? nextGroups : undefined,
+        filters: Object.keys(nextFilters).length > 0 ? nextFilters : undefined,
+      });
+    },
+    [currentConfig, handleConfigChange],
+  );
+
+  // --- Group Manager dialog state ---
+  const [groupManagerField, setGroupManagerField] = useState<string | null>(
+    null,
+  );
+
+  const handleOpenGroupManager = useCallback((field: string) => {
+    setGroupManagerField(field);
+  }, []);
+
+  const handleCloseGroupManager = useCallback(() => {
+    setGroupManagerField(null);
+  }, []);
+
+  /**
+   * Update groups for a single field. The new `fieldGroups` replaces all
+   * existing groups for that field. Existing filters are remapped so that raw
+   * member values that now belong to a group become the group name, using the
+   * same include-wins deduplication strategy as useHeaderMenu.
+   */
+  const handleGroupsChangeForField = useCallback(
+    (field: string, fieldGroups: MemberGroup[]) => {
+      const otherGroups = (currentConfig.member_groups ?? []).filter(
+        (g) => g.field !== field,
+      );
+      const nextGroups = [...otherGroups, ...fieldGroups];
+
+      const newMemberToGroup = new Map<string, string>();
+      for (const g of fieldGroups) {
+        for (const member of g.members) {
+          if (!newMemberToGroup.has(member)) {
+            newMemberToGroup.set(member, g.name);
+          }
+        }
+      }
+
+      const remapList = (values: string[]): string[] => {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const v of values) {
+          const mapped = newMemberToGroup.get(v) ?? v;
+          if (!seen.has(mapped)) {
+            seen.add(mapped);
+            out.push(mapped);
+          }
+        }
+        return out;
+      };
+
+      const currentFilter = currentConfig.filters?.[field];
+      let nextFilter: DimensionFilter | undefined;
+      if (currentFilter) {
+        let include = currentFilter.include
+          ? remapList(currentFilter.include)
+          : undefined;
+        let exclude = currentFilter.exclude
+          ? remapList(currentFilter.exclude)
+          : undefined;
+        if (include && exclude) {
+          const includeSet = new Set(include);
+          exclude = exclude.filter((v) => !includeSet.has(v));
+          if (exclude.length === 0) exclude = undefined;
+        }
+        if (include?.length === 0) include = undefined;
+        nextFilter =
+          include !== undefined || exclude !== undefined
+            ? { include, exclude }
+            : undefined;
+      }
+
+      const nextFilters = { ...(currentConfig.filters ?? {}) };
+      if (nextFilter) nextFilters[field] = nextFilter;
+      else delete nextFilters[field];
+
+      handleConfigChange({
+        ...currentConfig,
+        member_groups: nextGroups.length > 0 ? nextGroups : undefined,
+        filters: Object.keys(nextFilters).length > 0 ? nextFilters : undefined,
+      });
+    },
+    [currentConfig, handleConfigChange],
+  );
+
   const handleCollapseChange = useCallback(
     (axis: "row" | "col", collapsed: string[]) => {
       const key = axis === "row" ? "collapsed_groups" : "collapsed_col_groups";
@@ -1008,14 +1111,19 @@ const PivotRoot: FC<PivotRootProps> = ({
             }
             isFullscreen={isFullscreen}
             onToggleFullscreen={handleToggleFullscreen}
+            onOpenGroupManager={
+              currentConfig.interactive ? handleOpenGroupManager : undefined
+            }
           />
         )}
 
-        {(currentConfig.filter_fields?.length ?? 0) > 0 &&
+        {((currentConfig.filter_fields?.length ?? 0) > 0 ||
+          Object.keys(currentConfig.filters ?? {}).length > 0 ||
+          (currentConfig.member_groups?.length ?? 0) > 0) &&
           currentConfig.show_sections !== false &&
           pivotData && (
             <FilterBar
-              filterFields={currentConfig.filter_fields!}
+              filterFields={currentConfig.filter_fields ?? []}
               filters={currentConfig.filters}
               pivotData={pivotData}
               config={currentConfig}
@@ -1025,6 +1133,9 @@ const PivotRoot: FC<PivotRootProps> = ({
               onRemoveField={handleRemoveFilterField}
               menuLimit={menu_limit}
               portalTarget={containerRef.current}
+              memberGroups={currentConfig.member_groups}
+              onClearFieldGroups={handleClearFieldGroups}
+              onOpenGroupManager={handleOpenGroupManager}
             />
           )}
 
@@ -1075,6 +1186,9 @@ const PivotRoot: FC<PivotRootProps> = ({
                 onCollapseChange={
                   currentConfig.interactive ? handleCollapseChange : undefined
                 }
+                onOpenGroupManager={
+                  currentConfig.interactive ? handleOpenGroupManager : undefined
+                }
                 menuLimit={menu_limit}
                 scrollable={isFullscreen}
               />
@@ -1116,6 +1230,9 @@ const PivotRoot: FC<PivotRootProps> = ({
                 }
                 onCollapseChange={
                   currentConfig.interactive ? handleCollapseChange : undefined
+                }
+                onOpenGroupManager={
+                  currentConfig.interactive ? handleOpenGroupManager : undefined
                 }
                 menuLimit={menu_limit}
                 scrollable={isFullscreen}
@@ -1204,6 +1321,28 @@ const PivotRoot: FC<PivotRootProps> = ({
           </div>
         )}
       </div>
+
+      {/* Group Manager Dialog — rendered via portal, managed by PivotRoot */}
+      {groupManagerField && pivotData && (
+        <GroupManagerDialog
+          field={groupManagerField}
+          fieldLabel={
+            currentConfig.field_labels?.[groupManagerField] ?? groupManagerField
+          }
+          memberGroups={(currentConfig.member_groups ?? []).filter(
+            (g) => g.field === groupManagerField,
+          )}
+          uniqueValues={pivotData.getUniqueValues(groupManagerField)}
+          formatLabel={(key) =>
+            pivotData.formatDimLabel(groupManagerField, key)
+          }
+          onGroupsChange={(groups) =>
+            handleGroupsChangeForField(groupManagerField, groups)
+          }
+          onClose={handleCloseGroupManager}
+          portalTarget={containerRef.current}
+        />
+      )}
     </ErrorBoundary>
   );
 };

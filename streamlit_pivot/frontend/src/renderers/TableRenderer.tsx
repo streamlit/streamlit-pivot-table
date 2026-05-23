@@ -323,6 +323,9 @@ export interface TableRendererProps {
   onCollapseChange?: (axis: "row" | "col", collapsed: string[]) => void;
   adaptiveDateGrains?: Record<string, DateGrain>;
   menuLimit?: number;
+  /** When set, exposes a "Groups…" entry in each dimension header menu that
+   *  opens the GroupManagerDialog for that field. Wired by PivotRoot. */
+  onOpenGroupManager?: (field: string) => void;
   /** When true, the wrapper becomes a flex item that fills remaining space
    *  in a flex-column parent, enabling a single internal scrollbar. */
   scrollable?: boolean;
@@ -783,6 +786,11 @@ export function renderColumnHeaders(
     ? effectiveHeaderLevels.length
     : Math.max(config.columns.length, 1);
   const hasMenu = !!onOpenMenu;
+  const showHeaderFilteredMarkers = !(
+    config.show_sections !== false &&
+    (Object.keys(config.filters ?? {}).length > 0 ||
+      (config.member_groups?.length ?? 0) > 0)
+  );
 
   const elevateCell = (e: React.MouseEvent<HTMLDivElement>) => {
     const th = (e.target as HTMLElement).closest("th");
@@ -1425,7 +1433,13 @@ export function renderColumnHeaders(
                   {canToggleThisDim && (
                     <DimToggleIcon collapsed={visualRowDimCollapsed} />
                   )}
-                  <span className={isFiltered ? styles.headerFiltered : ""}>
+                  <span
+                    className={
+                      isFiltered && showHeaderFilteredMarkers
+                        ? styles.headerFiltered
+                        : ""
+                    }
+                  >
                     {rowLevel.isTemporal
                       ? `${DATE_GRAIN_LABELS[rowLevel.grain]}`
                       : getDimensionLabel(
@@ -1796,7 +1810,13 @@ export function renderColumnHeaders(
                     )}
                   </svg>
                 )}
-                <span className={isFiltered ? styles.headerFiltered : ""}>
+                <span
+                  className={
+                    isFiltered && showHeaderFilteredMarkers
+                      ? styles.headerFiltered
+                      : ""
+                  }
+                >
                   {(val
                     ? (pivotData?.formatDimLabel(dimName, val) ?? val)
                     : "") || "(empty)"}
@@ -4455,6 +4475,7 @@ const TableRenderer: FC<TableRendererProps> = ({
   onCollapseChange,
   adaptiveDateGrains,
   menuLimit,
+  onOpenGroupManager,
   scrollable,
   maxHeight,
   onOverflowChange,
@@ -5073,6 +5094,7 @@ const TableRenderer: FC<TableRendererProps> = ({
     menuOnDateDrill,
     menuSupportsPeriodComparison,
     menuFormatLabel,
+    menuGroupCount,
     handleCellKeyDown,
   } = useHeaderMenu({
     config,
@@ -5476,6 +5498,15 @@ const TableRenderer: FC<TableRendererProps> = ({
                 ? handleMenuValueFilterChange
                 : undefined
             }
+            onOpenGroupManager={
+              onOpenGroupManager && menuTarget.axis !== "value"
+                ? () => {
+                    handleCloseMenu();
+                    onOpenGroupManager(menuTarget.dimension);
+                  }
+                : undefined
+            }
+            groupCount={menuGroupCount}
             onClose={handleCloseMenu}
           />
         </div>
