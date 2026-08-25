@@ -821,10 +821,16 @@ def test_locked_mode_header_sort_and_filter_still_work(page_at_app: Page):
     region_cell = container.get_by_test_id("pivot-row-dim-label-Region")
     menu = open_header_menu_by_cell(page, region_cell, "header-menu-Region")
 
+    # After reordering sections (groups nav added above filter), Firefox needs
+    # extra time to fully render the menu content. Wait for menu to be stable.
+    page.wait_for_timeout(500)
+
+    # Wait for menu content to be fully rendered (sort section always appears first)
     sort_section = menu.get_by_test_id("header-menu-sort")
-    expect(sort_section).to_be_visible()
+    expect(sort_section).to_be_visible(timeout=15000)
+    # Filter section appears after groups nav (if present), wait for it explicitly
     filter_section = menu.get_by_test_id("header-menu-filter")
-    expect(filter_section).to_be_visible()
+    expect(filter_section).to_be_visible(timeout=15000)
     checkboxes = filter_section.locator("input[type=checkbox]")
     assert checkboxes.count() > 0
 

@@ -2881,6 +2881,10 @@ export class PivotData {
     for (const [field, value] of Object.entries(filters)) {
       const indexed = this._recordIndexesByFieldValue.get(field)?.get(value);
       if (!indexed) {
+        // Group names (e.g. "East Coast") are synthetic labels that do not
+        // exist in the raw-value index; fall back to scan-based matching where
+        // `_resolveAndGroupDimKey` can map raw members to group labels.
+        if (this._memberGroupLookup.has(field)) continue;
         candidateIndexes = [];
         break;
       }

@@ -3408,4 +3408,33 @@ describe("PivotData - member grouping", () => {
     // East Coast row total: (100+150) + (120+80) = 450
     expect(pd.getRowTotal(["East Coast"]).value()).toBe(450);
   });
+
+  it("drilldown matching resolves group labels to raw records", () => {
+    const config = makeConfig({
+      rows: ["region"],
+      columns: ["category"],
+      values: ["revenue"],
+      member_groups: [
+        {
+          field: "region",
+          name: "East Coast",
+          members: ["Northeast", "Southeast"],
+        },
+      ],
+    });
+    const pd = new PivotData(MEMBER_GROUP_DATA, config);
+    const { records, totalCount } = pd.getMatchingRecords(
+      {
+        region: "East Coast",
+        category: "A",
+      },
+      Infinity,
+    );
+    expect(totalCount).toBe(2);
+    expect(records).toHaveLength(2);
+    expect(records.map((r) => String(r.region)).sort()).toEqual([
+      "Northeast",
+      "Southeast",
+    ]);
+  });
 });

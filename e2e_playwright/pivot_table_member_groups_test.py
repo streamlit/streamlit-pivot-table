@@ -85,7 +85,7 @@ def _close_header_menu(page: Page, menu_test_id: str) -> None:
 
 
 def _open_group_manager_via_menu(page: Page, cell_locator, menu_test_id: str):
-    """Open the GroupManagerDialog via the 'Groups…' nav row in a header menu."""
+    """Open the GroupManagerDialog via the groups nav row in a header menu."""
     menu = _open_header_menu(page, cell_locator, menu_test_id)
     groups_nav = menu.get_by_test_id("header-menu-groups-nav")
     expect(groups_nav).to_be_visible(timeout=5000)
@@ -159,7 +159,7 @@ def test_create_group_interactively(page_at_app: Page):
     assert "West" in headers_before
 
     # Open header menu then click "Groups…" nav row → opens GroupManagerDialog.
-    region_header = container.locator("[data-testid='pivot-row-header']").first
+    region_header = container.get_by_test_id("pivot-row-dim-label-Region")
     dialog = _open_group_manager_via_menu(
         page_at_app, region_header, "header-menu-Region"
     )
@@ -212,7 +212,7 @@ def test_ungroup_interactively(page_at_app: Page):
     ), f"Expected East Coast group, got: {headers_before}"
 
     # Open GroupManagerDialog via groups chip in FilterBar.
-    groups_chip = page_at_app.get_by_test_id("groups-chip-Region")
+    groups_chip = container.get_by_test_id("groups-chip-Region")
     expect(groups_chip).to_be_visible(timeout=5000)
     groups_chip.click()
     dialog = page_at_app.get_by_test_id("group-manager-dialog")
@@ -252,7 +252,7 @@ def test_group_selected_requires_two_members(page_at_app: Page):
     container = get_pivot(page_at_app, "test_pivot_member_groups_interactive")
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    region_header = container.locator("[data-testid='pivot-row-header']").first
+    region_header = container.get_by_test_id("pivot-row-dim-label-Region")
     dialog = _open_group_manager_via_menu(
         page_at_app, region_header, "header-menu-Region"
     )
@@ -302,8 +302,10 @@ def test_drilldown_shows_raw_members(page_at_app: Page):
     drilldown = page_at_app.get_by_test_id("drilldown-panel")
     expect(drilldown).to_be_visible(timeout=10000)
 
-    # Panel rows must contain raw Region values, not the group name.
-    drilldown_text = drilldown.text_content() or ""
+    # Data rows must contain raw Region values, not the group name. The panel
+    # context header may still include the grouped label ("East Coast").
+    drilldown_table = drilldown.get_by_test_id("drilldown-table")
+    drilldown_text = drilldown_table.text_content() or ""
     assert (
         "Northeast" in drilldown_text or "Southeast" in drilldown_text
     ), f"Drilldown should show raw Region values; got: {drilldown_text[:200]}"

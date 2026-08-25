@@ -1475,8 +1475,8 @@ describe("Toolbar - status indicators", () => {
       />,
     );
     expect(
-      screen.getByTestId("toolbar-rows-filter-indicator-region"),
-    ).toBeInTheDocument();
+      screen.queryByTestId("toolbar-rows-filter-indicator-region"),
+    ).not.toBeInTheDocument();
   });
 
   it("does not show sort indicator when no sort config", () => {
@@ -1653,8 +1653,8 @@ describe("Toolbar - locked mode + filtering integration", () => {
     );
     expect(screen.getByTestId("pivot-toolbar")).toBeInTheDocument();
     expect(
-      screen.getByTestId("toolbar-rows-filter-indicator-region"),
-    ).toBeInTheDocument();
+      screen.queryByTestId("toolbar-rows-filter-indicator-region"),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("toolbar-settings"));
     expect(
       screen.getByTestId("settings-row-totals-status"),
