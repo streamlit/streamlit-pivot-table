@@ -52,7 +52,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: streamlit_pivot/frontend/bench-baseline.json
-          key: perf-baseline-ts-v2-${{ runner.os }}
+          key: perf-baseline-ts-v3-${{ runner.os }}
 
       - name: Run frontend bench regression check
         run: |
@@ -68,7 +68,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: streamlit_pivot/frontend/bench-baseline.json
-          key: perf-baseline-ts-v2-${{ runner.os }}
+          key: perf-baseline-ts-v3-${{ runner.os }}
 
       - name: Audit frontend licenses
         run: python scripts/audit_frontend_licenses.py

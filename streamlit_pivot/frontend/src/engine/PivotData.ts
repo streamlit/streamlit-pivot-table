@@ -496,6 +496,11 @@ export class PivotData {
    * Used by _applyMemberGroup() in _processRecords() and getUniqueValues().
    */
   private readonly _memberGroupLookup: Map<string, Map<string, string>>;
+  /**
+   * Fast path flag: true when member groups are active, false otherwise.
+   * Checked before expensive group logic to avoid unnecessary Map lookups.
+   */
+  private readonly _hasMemberGroups: boolean;
   /** Precomputed record indexes by field/value for common interaction fields. */
   private readonly _recordIndexesByFieldValue: Map<
     string,
@@ -548,6 +553,7 @@ export class PivotData {
     this._options = options ?? {};
     this._columnTypes = options?.columnTypes;
     this._memberGroupLookup = _buildMemberGroupLookup(config.member_groups);
+    this._hasMemberGroups = this._memberGroupLookup.size > 0;
     if (Array.isArray(input)) {
       const columns =
         input.length > 0 ? Object.keys(input[0] as DataRecord) : [];
@@ -1041,18 +1047,27 @@ export class PivotData {
       // applied: grouped members (e.g. "Northeast", "Southeast") produce the
       // group name ("East Coast") as the key segment, causing them to be
       // aggregated together.
-      const rowKey = this._config.rows.map((r) =>
-        this._resolveAndGroupDimKey(
-          r,
-          this._dataSource.getValue(recordIndex, r),
-        ),
-      );
-      const colKey = this._config.columns.map((c) =>
-        this._resolveAndGroupDimKey(
-          c,
-          this._dataSource.getValue(recordIndex, c),
-        ),
-      );
+      // Fast path: when no groups exist, skip group lookup entirely.
+      const rowKey = this._hasMemberGroups
+        ? this._config.rows.map((r) =>
+            this._resolveAndGroupDimKey(
+              r,
+              this._dataSource.getValue(recordIndex, r),
+            ),
+          )
+        : this._config.rows.map((r) =>
+            this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+          );
+      const colKey = this._hasMemberGroups
+        ? this._config.columns.map((c) =>
+            this._resolveAndGroupDimKey(
+              c,
+              this._dataSource.getValue(recordIndex, c),
+            ),
+          )
+        : this._config.columns.map((c) =>
+            this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+          );
       const rowKeyStr = makeKeyString(rowKey);
       const colKeyStr = makeKeyString(colKey);
 
@@ -1798,18 +1813,26 @@ export class PivotData {
     for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
-      const fullRowKey = rowDims.map((r) =>
-        this._resolveAndGroupDimKey(
-          r,
-          this._dataSource.getValue(recordIndex, r),
-        ),
-      );
-      const colKey = this._config.columns.map((c) =>
-        this._resolveAndGroupDimKey(
-          c,
-          this._dataSource.getValue(recordIndex, c),
-        ),
-      );
+      const fullRowKey = this._hasMemberGroups
+        ? rowDims.map((r) =>
+            this._resolveAndGroupDimKey(
+              r,
+              this._dataSource.getValue(recordIndex, r),
+            ),
+          )
+        : rowDims.map((r) =>
+            this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+          );
+      const colKey = this._hasMemberGroups
+        ? this._config.columns.map((c) =>
+            this._resolveAndGroupDimKey(
+              c,
+              this._dataSource.getValue(recordIndex, c),
+            ),
+          )
+        : this._config.columns.map((c) =>
+            this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+          );
       const colKeyStr = makeKeyString(colKey);
 
       for (let level = 0; level < rowDims.length - 1; level++) {
@@ -2193,18 +2216,26 @@ export class PivotData {
     for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
-      const rowKey = rowDims.map((r) =>
-        this._resolveAndGroupDimKey(
-          r,
-          this._dataSource.getValue(recordIndex, r),
-        ),
-      );
-      const fullColKey = colDims.map((c) =>
-        this._resolveAndGroupDimKey(
-          c,
-          this._dataSource.getValue(recordIndex, c),
-        ),
-      );
+      const rowKey = this._hasMemberGroups
+        ? rowDims.map((r) =>
+            this._resolveAndGroupDimKey(
+              r,
+              this._dataSource.getValue(recordIndex, r),
+            ),
+          )
+        : rowDims.map((r) =>
+            this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+          );
+      const fullColKey = this._hasMemberGroups
+        ? colDims.map((c) =>
+            this._resolveAndGroupDimKey(
+              c,
+              this._dataSource.getValue(recordIndex, c),
+            ),
+          )
+        : colDims.map((c) =>
+            this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+          );
       const rowKeyStr = makeKeyString(rowKey);
 
       for (let level = 0; level < colDims.length - 1; level++) {
@@ -2421,18 +2452,26 @@ export class PivotData {
     for (let recordIndex = 0; recordIndex < numRows; recordIndex++) {
       if (!this._shouldIncludeRow(recordIndex)) continue;
 
-      const rowKey = rowDims.map((r) =>
-        this._resolveAndGroupDimKey(
-          r,
-          this._dataSource.getValue(recordIndex, r),
-        ),
-      );
-      const fullColKey = colDims.map((c) =>
-        this._resolveAndGroupDimKey(
-          c,
-          this._dataSource.getValue(recordIndex, c),
-        ),
-      );
+      const rowKey = this._hasMemberGroups
+        ? rowDims.map((r) =>
+            this._resolveAndGroupDimKey(
+              r,
+              this._dataSource.getValue(recordIndex, r),
+            ),
+          )
+        : rowDims.map((r) =>
+            this._resolveDimKey(r, this._dataSource.getValue(recordIndex, r)),
+          );
+      const fullColKey = this._hasMemberGroups
+        ? colDims.map((c) =>
+            this._resolveAndGroupDimKey(
+              c,
+              this._dataSource.getValue(recordIndex, c),
+            ),
+          )
+        : colDims.map((c) =>
+            this._resolveDimKey(c, this._dataSource.getValue(recordIndex, c)),
+          );
       const rowKeyStr = makeKeyString(rowKey);
 
       for (const tc of temporalCols) {
@@ -2772,7 +2811,7 @@ export class PivotData {
     let cached = this._uniqueValuesCache.get(field);
     if (!cached) {
       const n = this._dataSource.numRows;
-      if (this._memberGroupLookup.has(field)) {
+      if (this._hasMemberGroups && this._memberGroupLookup.has(field)) {
         // When member groups are active for this field, apply the group
         // mapping after resolving each raw value, then deduplicate.
         // Sort order rule (canonical): sort the remapped values with the
@@ -2884,7 +2923,8 @@ export class PivotData {
         // Group names (e.g. "East Coast") are synthetic labels that do not
         // exist in the raw-value index; fall back to scan-based matching where
         // `_resolveAndGroupDimKey` can map raw members to group labels.
-        if (this._memberGroupLookup.has(field)) continue;
+        if (this._hasMemberGroups && this._memberGroupLookup.has(field))
+          continue;
         candidateIndexes = [];
         break;
       }
