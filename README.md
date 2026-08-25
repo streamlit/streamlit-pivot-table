@@ -105,6 +105,7 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `max_height` | `int` | `500` | Maximum auto-size height in pixels. Table becomes scrollable when content exceeds this. |
 | `sticky_headers` | `bool` | `True` | Column headers stick to the top of the scroll container. |
 | `row_layout` | `"table" \| "hierarchy"` | `"table"` | Controls how row dimensions are rendered. `"table"` uses separate row-header columns, while `"hierarchy"` renders a single indented tree column with breadcrumb-level controls. Passing `"hierarchy"` with no explicit `show_subtotals` automatically enables subtotals for all grouping levels. See [Row Layout Modes](#row-layout-modes). |
+| `collapse_row_groups` | `bool` | `False` | Start with all top-level row groups collapsed (same as clicking **Collapse All** in the toolbar). Users can expand interactively; persisted state is restored on reruns as normal. No effect when fewer than 2 row dimensions are present or when collapsible groups do not exist (`show_subtotals=False` and `row_layout` is not `"hierarchy"`). |
 
 #### Interactivity and Callbacks
 
@@ -498,6 +499,7 @@ Behavior notes:
 - Temporal date hierarchies work in both layouts. In `table`, date levels expand into separate row-header columns; in `hierarchy`, those same levels render as nested tree levels within the single hierarchy column.
 - Export parity is preserved. CSV, TSV, clipboard, and XLSX outputs follow the selected row layout, including hierarchy indentation.
 - Execution-mode parity is also preserved. `row_layout` works in both `client_only` and `threshold_hybrid`; the layout mostly affects rendering, not whether hybrid execution is allowed.
+- **Start collapsed:** pass `collapse_row_groups=True` to render the tree with all groups folded on first load. Users can expand interactively, and the toolbar **Expand All** / **Collapse All** buttons work normally. This also applies to `row_layout="table"` with `show_subtotals=True`.
 
 ### Number Format Patterns
 
@@ -1133,6 +1135,7 @@ st_pivot_table(
 - Each group shows a subtotal row with a collapse/expand toggle (+/&minus;).
 - Collapsed groups hide child rows but keep the subtotal visible.
 - Expand All / Collapse All controls are available in the toolbar utility menu.
+- Pass `collapse_row_groups=True` to start with all groups collapsed on first load.
 
 **Grouping vs. leaf dimensions:** When subtotals are on, all dimensions except
 the innermost are *grouping dimensions*.  They define collapsible groups and

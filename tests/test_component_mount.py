@@ -749,6 +749,124 @@ def test_row_layout_table_default_no_subtotals(sample_df, pivot_module, mount_re
 
 
 # ---------------------------------------------------------------------------
+# collapse_row_groups
+# ---------------------------------------------------------------------------
+
+
+def test_collapse_row_groups_hierarchy_seeds_all_sentinel(
+    sample_df, pivot_module, mount_recorder
+):
+    """hierarchy + collapse_row_groups=True → collapsed_groups == ['__ALL__']."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        row_layout="hierarchy",
+        collapse_row_groups=True,
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config.get("collapsed_groups") == ["__ALL__"]
+
+
+def test_collapse_row_groups_table_with_subtotals_seeds_sentinel(
+    sample_df, pivot_module, mount_recorder
+):
+    """table + show_subtotals=True + collapse_row_groups=True → collapsed_groups == ['__ALL__']."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        show_subtotals=True,
+        collapse_row_groups=True,
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert sent_config.get("collapsed_groups") == ["__ALL__"]
+
+
+def test_collapse_row_groups_false_omits_key(sample_df, pivot_module, mount_recorder):
+    """collapse_row_groups=False (default) must not write collapsed_groups."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        row_layout="hierarchy",
+        collapse_row_groups=False,
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert "collapsed_groups" not in sent_config
+
+
+def test_collapse_row_groups_noop_single_row_dim(
+    sample_df, pivot_module, mount_recorder
+):
+    """collapse_row_groups=True with only 1 row dim is a silent no-op."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        row_layout="hierarchy",
+        collapse_row_groups=True,
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert "collapsed_groups" not in sent_config
+
+
+def test_collapse_row_groups_noop_without_subtotals(
+    sample_df, pivot_module, mount_recorder
+):
+    """collapse_row_groups=True in table mode without subtotals is a silent no-op."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region", "Category"],
+        columns=["Year"],
+        values=["Revenue"],
+        show_subtotals=False,
+        collapse_row_groups=True,
+    )
+
+    sent_config = calls[0]["data"]["config"]
+    assert "collapsed_groups" not in sent_config
+
+
+def test_collapse_row_groups_rejects_non_bool(sample_df, pivot_module, mount_recorder):
+    """collapse_row_groups must be a bool."""
+    import pytest
+
+    mount_recorder()
+    with pytest.raises(TypeError, match="collapse_row_groups"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region", "Category"],
+            values=["Revenue"],
+            collapse_row_groups="yes",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Hybrid subtotal sidecar with hierarchy
 # ---------------------------------------------------------------------------
 

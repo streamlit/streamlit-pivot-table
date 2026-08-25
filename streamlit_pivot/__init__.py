@@ -3052,7 +3052,7 @@ def _validate_formula(formula: str) -> list[str]:
 
     if not refs:
         raise ValueError(
-            "Formula must reference at least one field" ' (e.g. \'"Revenue" / "Cost"\')'
+            'Formula must reference at least one field (e.g. \'"Revenue" / "Cost"\')'
         )
 
     return list(dict.fromkeys(refs))
@@ -3280,6 +3280,7 @@ def _default_config(
     value_filters: list[ValueFilterFull] | None = None,
     values_axis: Literal["columns", "rows"] = "columns",
     member_groups: list[MemberGroup] | None = None,
+    collapse_row_groups: bool = False,
 ) -> PivotConfig:
     _rows = rows or []
     _values = values or []
@@ -3341,6 +3342,9 @@ def _default_config(
                 validated, _rows[:-1], "show_subtotals", "rows"
             )
         cfg["show_subtotals"] = validated
+    # Seed collapsed state only when groups exist (2+ row dims, subtotals on).
+    if collapse_row_groups and len(_rows) >= 2 and effective_subtotals:
+        cfg["collapsed_groups"] = ["__ALL__"]
     if repeat_row_labels:
         cfg["repeat_row_labels"] = True
     if show_values_as is not None:
@@ -3559,6 +3563,7 @@ def st_pivot_table(
     dimension_format: str | dict[str, str] | None = None,
     # Phase 5: region-based styling
     style: str | PivotStyle | list[str | PivotStyle] | None = None,
+    collapse_row_groups: bool = False,
 ) -> PivotTableResult:
     """Create a pivot table component.
 
@@ -3732,6 +3737,14 @@ def st_pivot_table(
         dimensions in separate visible columns. ``"hierarchy"`` renders a
         compact tree-style first column with indentation and inline
         expand/collapse controls.
+    collapse_row_groups : bool
+        If ``True``, the pivot starts with all top-level row groups
+        collapsed (same state as clicking **Collapse All** in the toolbar).
+        Users can still expand groups interactively; persisted state is
+        restored on reruns as normal. Has no effect when fewer than 2 row
+        dimensions are configured or when collapsible groups do not exist
+        (i.e. ``show_subtotals`` is ``False`` and ``row_layout`` is not
+        ``"hierarchy"``). Defaults to ``False``.
     show_values_as : dict[str, str] or None
         Per-field display mode. Maps value field names to one of
         ``"raw"``, ``"pct_of_total"``, ``"pct_of_row"``, ``"pct_of_col"``,
@@ -4029,6 +4042,11 @@ def st_pivot_table(
     if show_sections is not None and not isinstance(show_sections, bool):
         raise TypeError(
             f"show_sections must be a bool or None, got {type(show_sections).__name__}"
+        )
+
+    if not isinstance(collapse_row_groups, bool):
+        raise TypeError(
+            f"collapse_row_groups must be a bool, got {type(collapse_row_groups).__name__}"
         )
 
     if filters is not None:
@@ -4847,6 +4865,7 @@ def st_pivot_table(
         top_n_filters=top_n_filters,
         value_filters=value_filters,
         values_axis=values_axis,
+        collapse_row_groups=collapse_row_groups,
     )
 
     # Controlled-state hydration: preserve persisted user config across normal

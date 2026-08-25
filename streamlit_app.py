@@ -2001,7 +2001,7 @@ and the breadcrumb bar makes deep nesting easy to navigate.
     with row_layout_cols[1]:
         st.markdown('**`row_layout="hierarchy"`**')
         st.caption(
-            "All row dimensions in one indented tree column. " "Subtotals auto-enable."
+            "All row dimensions in one indented tree column. Subtotals auto-enable."
         )
         st_pivot_table(
             df_medium,
@@ -2019,6 +2019,32 @@ and the breadcrumb bar makes deep nesting easy to navigate.
         "`show_subtotals` is not explicitly set, subtotals are automatically enabled for "
         "all grouping levels so every group node shows its aggregate. "
         "Pass `show_subtotals=False` to opt out."
+    )
+
+    st.markdown("#### `collapse_row_groups` — start collapsed")
+    st.markdown(
+        """
+Pass `collapse_row_groups=True` to render the pivot with all top-level row groups
+**collapsed on first load** — the same state as clicking **Collapse All** in the toolbar.
+Users can expand groups interactively, and the toolbar Expand All / Collapse All buttons
+continue to work normally. Persisted session state is restored on reruns as usual.
+
+This works in both `row_layout="hierarchy"` (shown below) and `row_layout="table"` when
+`show_subtotals=True`. It has no effect with fewer than 2 row dimensions or when no
+collapsible groups exist.
+"""
+    )
+
+    st_pivot_table(
+        df_medium,
+        key="row_layout_hierarchy_collapsed",
+        rows=["Region", "Category", "Product"],
+        columns=["Year"],
+        values=["Revenue"],
+        aggregation="sum",
+        row_layout="hierarchy",
+        collapse_row_groups=True,
+        max_height=400,
     )
 
     st.markdown("#### Breadcrumb navigation and `repeat_row_labels`")
@@ -2071,6 +2097,17 @@ st_pivot_table(
     values=["Revenue"],
     row_layout="hierarchy",
     show_subtotals=False,   # override the auto-enable
+)
+
+# Start with all groups collapsed — users can expand interactively
+st_pivot_table(
+    df,
+    key="hierarchy_collapsed",
+    rows=["Region", "Category", "Product"],
+    columns=["Year"],
+    values=["Revenue"],
+    row_layout="hierarchy",
+    collapse_row_groups=True,
 )
 """,
             language="python",
