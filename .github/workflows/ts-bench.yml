@@ -1,0 +1,131 @@
+name: TS Benchmarks
+
+on:
+  push:
+    branches:
+      - "main"
+  schedule:
+    # Weekly drift check — every Monday at 09:00 UTC
+    - cron: "0 9 * * 1"
+  # Pull request support kept for future use — if a PR-based workflow is
+  # adopted, bench-push also fires on PRs and compares HEAD vs HEAD~1 of
+  # the merge commit. Add `pull_request:` here to enable.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-ts-bench
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Per-commit regression + drift check
+  #
+  # Fires on every push to main. Runs benchmarks twice in the same job on the
+  # same runner (parent commit, then current commit) — zero runner-variance
+  # for the commit-vs-parent comparison.
+  #
+  # Two comparisons are posted to the GitHub Step Summary:
+  #   1. Commit regression: HEAD vs HEAD~1, threshold 10%
+  #   2. Drift:             HEAD vs release baseline, threshold 25%
+  #      (calibration-normalised to cancel cross-runner speed differences)
+  #
+  # Never blocks (always exits 0). Results are informational.
+  # ──────────────────────────────────────────────────────────────────────────
+  bench-push:
+    name: Commit regression + drift check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout current commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2          # need HEAD and HEAD~1
+          persist-credentials: false
+          submodules: "recursive"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Install frontend dependencies
+        run: |
+          cd streamlit_pivot/frontend
+          npm ci
+
+      - name: Benchmark parent commit (HEAD~1)
+        # Swap only the TypeScript source files to the parent commit.
+        # package.json, node_modules, and bench scripts stay on HEAD.
+        # bench-main.json is gitignored so it survives the src restore.
+        run: |
+          cd streamlit_pivot/frontend
+          git checkout HEAD~1 -- src
+          npm run bench:main
+          git checkout HEAD -- src
+
+      - name: Benchmark current commit (HEAD)
+        run: |
+          cd streamlit_pivot/frontend
+          npm run bench:ci
+
+      - name: Report — commit regression (HEAD vs HEAD~1, 10%)
+        run: |
+          cd streamlit_pivot/frontend
+          npm run bench:inrun
+
+      - name: Report — drift vs release baseline (25%, calibration-normalised)
+        run: |
+          cd streamlit_pivot/frontend
+          npm run bench:drift
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Weekly standalone drift check
+  #
+  # Runs on the Monday schedule independent of pushes. Benchmarks current
+  # main and compares against bench-baseline-release.json with calibration
+  # normalisation. Threshold: 25%. Never blocks.
+  # ──────────────────────────────────────────────────────────────────────────
+  bench-drift-weekly:
+    name: Weekly drift check vs release baseline (25%)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          submodules: "recursive"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Install frontend dependencies
+        run: |
+          cd streamlit_pivot/frontend
+          npm ci
+
+      - name: Benchmark main
+        run: |
+          cd streamlit_pivot/frontend
+          npm run bench:ci
+
+      - name: Report — drift vs release baseline (25%, calibration-normalised)
+        run: |
+          cd streamlit_pivot/frontend
+          npm run bench:drift

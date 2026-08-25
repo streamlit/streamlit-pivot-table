@@ -56,10 +56,12 @@ coverage/
 uv.lock
 htmlcov/
 
-# Benchmark baselines & results (environment-specific, managed by CI cache)
+# Benchmark CI artifacts (generated per-run, never committed)
 bench-baseline.json
 bench-results.json
+bench-main.json
 perf_baseline.json
+# bench-baseline-release.json is intentionally tracked in git
 
 # Local analysis reports
 reports/

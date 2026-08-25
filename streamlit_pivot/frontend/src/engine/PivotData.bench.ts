@@ -117,3 +117,15 @@ describe("PivotData computation benchmarks", () => {
     new PivotData(wide.records, wide.config);
   });
 });
+
+// CPU calibration probe — measures raw arithmetic throughput on this runner.
+// The drift comparison script uses this to normalise timings across machines.
+describe("calibration", () => {
+  bench("__calibration__: arithmetic loop", () => {
+    let x = 1.0;
+    for (let i = 1; i < 2_000_000; i++) {
+      x = (x * 1.0000001 + i * 0.000001) % 999_983;
+    }
+    if (x < 0) throw new Error("unreachable");
+  });
+});

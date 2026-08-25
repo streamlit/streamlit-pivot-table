@@ -14,8 +14,12 @@
     "test:watch": "vitest",
     "bench": "vitest bench --run",
     "bench:ci": "vitest bench --run --outputJson bench-results.json",
+    "bench:main": "vitest bench --run --outputJson bench-main.json",
     "bench:check": "vitest bench --run --outputJson bench-results.json && node scripts/check-bench-regression.mjs",
+    "bench:inrun": "node scripts/check-bench-regression.mjs --mode inrun",
+    "bench:drift": "node scripts/check-bench-regression.mjs --mode drift",
     "bench:save-baseline": "vitest bench --run --outputJson bench-baseline.json",
+    "bench:save-release-baseline": "vitest bench --run --outputJson bench-baseline-release.json",
     "bench:memory": "node --expose-gc scripts/bench-memory.mjs"
   },
   "browserslist": [
