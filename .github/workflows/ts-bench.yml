@@ -25,7 +25,7 @@ jobs:
   #
   # Two comparisons are posted to the GitHub Step Summary:
   #   1. Commit regression: HEAD vs HEAD~1, threshold 10%
-  #   2. Drift:             HEAD vs release baseline, threshold 25%
+  #   2. Drift:             HEAD vs release baseline, threshold 20%
   #      (calibration-normalised to cancel cross-runner speed differences)
   #
   # Never blocks (always exits 0). Results are informational.
@@ -79,7 +79,7 @@ jobs:
           cd streamlit_pivot/frontend
           npm run bench:inrun
 
-      - name: Report — drift vs release baseline (25%, calibration-normalised)
+      - name: Report — drift vs release baseline (20%, calibration-normalised)
         run: |
           cd streamlit_pivot/frontend
           npm run bench:drift
@@ -89,10 +89,10 @@ jobs:
   #
   # Runs on the Monday schedule independent of pushes. Benchmarks current
   # main and compares against bench-baseline-release.json with calibration
-  # normalisation. Threshold: 25%. Never blocks.
+  # normalisation. Threshold: 20%. Never blocks.
   # ──────────────────────────────────────────────────────────────────────────
   bench-drift-weekly:
-    name: Weekly drift check vs release baseline (25%)
+    name: Weekly drift check vs release baseline (20%)
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
 
@@ -125,7 +125,7 @@ jobs:
           cd streamlit_pivot/frontend
           npm run bench:ci
 
-      - name: Report — drift vs release baseline (25%, calibration-normalised)
+      - name: Report — drift vs release baseline (20%, calibration-normalised)
         run: |
           cd streamlit_pivot/frontend
           npm run bench:drift

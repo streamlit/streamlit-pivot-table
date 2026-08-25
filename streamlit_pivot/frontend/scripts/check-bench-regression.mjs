@@ -30,7 +30,7 @@
  *     Compares bench-results.json against bench-baseline-release.json (a
  *     committed file updated at each release). Because the two files may have
  *     been captured on different runners, results are normalised using the
- *     "__calibration__" benchmark median before comparing. Threshold: 25%.
+ *     "__calibration__" benchmark median before comparing. Threshold: 20%.
  *     Always exits 0; posts a step-summary table but never blocks the job.
  *
  * Usage (CI):
@@ -58,7 +58,7 @@ const modeArg = args.find((a) => a.startsWith("--mode="))?.split("=")[1]
 const MODE = modeArg === "drift" ? "drift" : "inrun";
 
 const INRUN_THRESHOLD = 0.10;  // 10% — same-runner comparison, tight
-const DRIFT_THRESHOLD = 0.25;  // 25% — cross-runner, calibration-normalised
+const DRIFT_THRESHOLD = 0.20;  // 20% — cross-runner, calibration-normalised
 
 const CALIBRATION_PREFIX = "__calibration__";
 

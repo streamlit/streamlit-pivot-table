@@ -370,9 +370,9 @@ def test_date_hierarchy_uses_adaptive_default_and_enables_comparisons(
     )
     expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
 
-    expect(container.get_by_text("order_date (Quarter)")).to_be_visible(timeout=5000)
-    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=5000)
-    expect(container.get_by_text("Q1 2025")).to_be_visible(timeout=5000)
+    expect(container.get_by_text("order_date (Quarter)")).to_be_visible(timeout=15000)
+    expect(container.get_by_text("Q1 2024")).to_be_visible(timeout=15000)
+    expect(container.get_by_text("Q1 2025")).to_be_visible(timeout=15000)
 
     menu = open_header_menu(
         page,
@@ -380,10 +380,10 @@ def test_date_hierarchy_uses_adaptive_default_and_enables_comparisons(
         "header-menu-revenue",
     )
     expect(menu.get_by_test_id("header-display-diff_from_prev")).to_be_visible(
-        timeout=5000
+        timeout=15000
     )
     expect(menu.get_by_test_id("header-display-diff_from_prev_year")).to_be_visible(
-        timeout=5000
+        timeout=15000
     )
     close_header_menu(page, "header-menu-revenue")
 

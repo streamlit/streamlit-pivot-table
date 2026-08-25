@@ -18,8 +18,26 @@ concurrency:
 
 jobs:
   playwright-e2e-tests:
+    name: E2E ${{ matrix.group.name }} (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 6 parallel jobs (3 browsers × 2 groups).
+    # Each job: ~95–131 tests on 4 workers ≈ 2–3 min test run + ~4 min setup.
+    timeout-minutes: 15
+
+    strategy:
+      # All 6 combinations must complete — don't cancel siblings on first failure.
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit, firefox]
+        group:
+          # pivot_table_interactions_test.py has 95 tests and renders 25+ pivot
+          # tables per Streamlit session — it dominates the run when batched with
+          # everything else.  Isolating it lets it and the rest group run in
+          # parallel, cutting wall-clock time roughly 3–4×.
+          - name: interactions
+            pytest_args: "pivot_table_interactions_test.py"
+          - name: rest
+            pytest_args: "--ignore=pivot_table_interactions_test.py"
 
     defaults:
       run:
@@ -33,20 +51,24 @@ jobs:
           persist-credentials: false
           submodules: "recursive"
           fetch-depth: 2
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
           cache-dependency-path: "**/package-lock.json"
+
       - name: Install frontend dependencies
         run: |
           cd streamlit_pivot/frontend
           npm ci
+
       - name: Build frontend
         run: |
           cd streamlit_pivot/frontend
@@ -59,18 +81,21 @@ jobs:
           md5sum pyproject.toml >> $GITHUB_WORKSPACE/python_cache_key.md5
           date +%F >> $GITHUB_WORKSPACE/python_cache_key.md5
         shell: bash
+
       - name: Restore virtualenv from cache
         id: cache-virtualenv
         uses: actions/cache@v4
         with:
           path: venv
           key: v1-python-venv-${{ hashFiles('**/python_cache_key.md5') }}
+
       - name: Build the package
         run: |
           python -m venv venv
           source venv/bin/activate
           pip install --upgrade pip setuptools wheel build
           python -m build
+
       - name: Install Python test dependencies
         run: |
           source venv/bin/activate
@@ -84,16 +109,22 @@ jobs:
           # instead of the current checkout. Force-reinstall the local
           # wheel (without deps) so the venv always reflects HEAD.
           pip install --force-reinstall --no-deps dist/streamlit_pivot-*.whl
-          python -m playwright install --with-deps
+          # Only install the browser binary this job needs — avoids fetching
+          # all three (~300 MB) when only one is used.
+          python -m playwright install --with-deps ${{ matrix.browser }}
+
       - name: Run playwright tests
         run: |
           source venv/bin/activate
           cd e2e_playwright
-          pytest --browser webkit --browser chromium --browser firefox --video retain-on-failure --screenshot only-on-failure -n auto --output ./test-results/
+          pytest --browser ${{ matrix.browser }} ${{ matrix.group.pytest_args }} \
+            --video retain-on-failure --screenshot only-on-failure \
+            -n auto --output ./test-results/
+
       - name: Upload failed test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright_test_results
+          name: playwright_test_results_${{ matrix.browser }}_${{ matrix.group.name }}
           path: e2e_playwright/test-results
           if-no-files-found: ignore
