@@ -3635,10 +3635,16 @@ def section_virtualization_alignment() -> None:
     # Both paths use the same 120-month date range so the column structure is
     # identical. The only difference is row count: many states → virtual,
     # few states → non-virtual.
-    use_large = st.toggle(
+    col_left, col_right = st.columns(2)
+    use_large = col_left.toggle(
         "Use large dataset (> 5 000 cells — virtual path)",
         value=True,
         key="virt_alignment_toggle",
+    )
+    hide_warnings = col_right.toggle(
+        "suppress_warnings=True (hide info banners)",
+        value=False,
+        key="virt_alignment_suppress",
     )
 
     if use_large:
@@ -3670,6 +3676,7 @@ def section_virtualization_alignment() -> None:
         sticky_headers=True,
         max_height=400,
         execution_mode="client_only",
+        suppress_warnings=hide_warnings,
     )
 
     # Confirm whether the virtual path is active.
@@ -3697,6 +3704,10 @@ In the virtual path:
 
 2. **Column resizing.** Drag any column handle to resize it. Header, body,
    and Grand Total sections update together and stay aligned.
+
+3. **`suppress_warnings`:** Toggle *suppress_warnings* above to hide the
+   "Virtualization enabled" banner while keeping all warning text in
+   `perf_metrics["warnings"]` for programmatic access.
 
 Toggle to the non-virtual path to compare against a single-table render.
 """

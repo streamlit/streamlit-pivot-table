@@ -2155,6 +2155,9 @@ export interface PivotTableData {
   menu_limit?: number;
   /** Phase 4: enable drill-down detail panel on cell click. */
   enable_drilldown?: boolean;
+  /** When true, informational warning banners (virtualization, perf, hybrid reason) are hidden.
+   *  Data-integrity banners (row truncation, column-cap) are always shown. */
+  suppress_warnings?: boolean;
   /** Base filename (without extension) for exported files. */
   export_filename?: string;
   /** Performance execution mode used for this render path. */

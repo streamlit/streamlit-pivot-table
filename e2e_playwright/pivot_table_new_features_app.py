@@ -116,6 +116,34 @@ def main() -> None:
         interactive=False,
     )
 
+    # ── collapse_row_groups=True: all groups start collapsed ─────────────────
+    st.subheader("Collapse Row Groups – collapsed")
+    st_pivot_table(
+        df,
+        key="test_pivot_collapse_row_groups_true",
+        rows=["Region", "Category"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=False,
+        show_subtotals=True,
+        collapse_row_groups=True,
+        interactive=True,
+    )
+
+    # ── collapse_row_groups=False (default): all groups start expanded ────────
+    st.subheader("Collapse Row Groups – expanded (default)")
+    st_pivot_table(
+        df,
+        key="test_pivot_collapse_row_groups_false",
+        rows=["Region", "Category"],
+        values=["Revenue"],
+        aggregation="sum",
+        show_totals=False,
+        show_subtotals=True,
+        collapse_row_groups=False,
+        interactive=False,
+    )
+
 
 if __name__ == "__main__":
     main()

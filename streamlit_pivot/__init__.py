@@ -3543,6 +3543,7 @@ def st_pivot_table(
     column_alignment: dict[str, str] | None = None,
     # Phase 4 parameters
     enable_drilldown: bool = True,
+    suppress_warnings: bool = False,
     export_filename: str | None = None,
     execution_mode: str = "auto",
     # Report-level filtering (server-side developer-owned)
@@ -3906,6 +3907,16 @@ def st_pivot_table(
         If True (default), clicking a data cell opens an inline
         drill-down panel below the pivot table showing the
         contributing source records. Set to False to disable.
+    suppress_warnings : bool
+        If True, hides informational warning banners shown inside the
+        component: DOM-budget / virtualization notices, compute/render
+        time warnings, and the hybrid execution-mode reason.  Banners
+        that indicate the table is showing incomplete data — row
+        truncation ("Showing X of Y rows…") and column-cardinality
+        cap — are always shown regardless of this flag.  Python
+        ``warnings.warn`` diagnostics emitted for invalid API usage
+        are not affected.  Warning text is still collected in
+        ``result["perf_metrics"]["warnings"]`` for debugging.
     export_filename : str or None
         Base filename (without extension) used when exporting data
         (.xlsx, .csv, .tsv). The date and file extension are appended
@@ -4032,6 +4043,11 @@ def st_pivot_table(
 
     if not isinstance(locked, bool):
         raise TypeError(f"locked must be a bool, got {type(locked).__name__}")
+
+    if not isinstance(suppress_warnings, bool):
+        raise TypeError(
+            f"suppress_warnings must be a bool, got {type(suppress_warnings).__name__}"
+        )
 
     if filter_fields is not None:
         if not isinstance(filter_fields, list) or not all(
@@ -5021,6 +5037,8 @@ def st_pivot_table(
         data_payload["menu_limit"] = menu_limit
     if not enable_drilldown:
         data_payload["enable_drilldown"] = False
+    if suppress_warnings:
+        data_payload["suppress_warnings"] = True
     if export_filename is not None:
         data_payload["export_filename"] = export_filename
 

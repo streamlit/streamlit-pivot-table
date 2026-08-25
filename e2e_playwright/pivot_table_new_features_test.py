@@ -158,3 +158,58 @@ def test_multi_sort_secondary_key_desc_breaks_ties_reverse(page_at_app: Page):
             f"Expected [B, A] pair at position {i}, got {pair}. "
             f"Full label list: {ab_labels}"
         )
+
+
+# ---------------------------------------------------------------------------
+# collapse_row_groups
+# ---------------------------------------------------------------------------
+
+
+def test_collapse_row_groups_true_hides_leaf_rows_on_initial_render(
+    page_at_app: Page,
+):
+    """collapse_row_groups=True: top-level groups start collapsed.
+
+    The Category leaf rows (A, B) must not be visible on initial render.
+    Group toggle buttons must be present so the user can expand groups.
+    """
+    container = get_pivot(page_at_app, "test_pivot_collapse_row_groups_true")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # Leaf category headers must NOT be visible — their parent groups are collapsed.
+    expect(
+        container.get_by_test_id("pivot-row-header").filter(has_text="A")
+    ).to_be_hidden(timeout=5000)
+    expect(
+        container.get_by_test_id("pivot-row-header").filter(has_text="B")
+    ).to_be_hidden(timeout=5000)
+
+    # A group toggle button must exist for each top-level group (East and West).
+    # These let the user expand the collapsed groups interactively.
+    expect(container.locator("[data-testid='pivot-group-toggle-East']")).to_be_visible(
+        timeout=5000
+    )
+    expect(container.locator("[data-testid='pivot-group-toggle-West']")).to_be_visible(
+        timeout=5000
+    )
+
+
+def test_collapse_row_groups_false_shows_leaf_rows_on_initial_render(
+    page_at_app: Page,
+):
+    """collapse_row_groups=False (default): all groups start expanded.
+
+    All Category leaf rows (A, B for both East and West) must be visible on
+    initial render without any user interaction.
+    """
+    container = get_pivot(page_at_app, "test_pivot_collapse_row_groups_false")
+    expect(container.get_by_test_id("pivot-table")).to_be_visible(timeout=15000)
+
+    # All four leaf rows must be immediately visible: East/A, East/B, West/A, West/B.
+    leaf_headers = container.get_by_test_id("pivot-row-header").all()
+    leaf_labels = [(h.text_content() or "").strip() for h in leaf_headers]
+    ab_labels = [lbl for lbl in leaf_labels if lbl in ("A", "B")]
+    assert len(ab_labels) >= 4, (
+        f"Expected at least 4 visible Category leaf rows (A/B × East/West) "
+        f"but got: {leaf_labels}"
+    )

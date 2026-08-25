@@ -227,6 +227,7 @@ Creates a pivot table component. All parameters except `data` are keyword-only. 
 | `on_cell_click` | `Callable[[], None] \| None` | `None` | Fires on data-cell click. Read payload from `st.session_state[key]["cell_click"]`. |
 | `on_config_change` | `Callable[[], None] \| None` | `None` | Fires when the user changes config (toolbar, DnD, Settings Panel, header menu). |
 | `enable_drilldown` | `bool` | `True` | Inline drill-down panel on cell click. |
+| `suppress_warnings` | `bool` | `False` | Hide informational banners (virtualization, perf, hybrid reason). Data-integrity banners (row truncation, column-cap) always show. Warnings still appear in `perf_metrics["warnings"]`. |
 | `locked` | `bool` | `False` | Viewer mode. Config locked; export, expand/collapse, drill-down, header-menu sort/filter remain. |
 | `export_filename` | `str \| None` | `None` | Base filename for exports; date + extension auto-appended. |
 
@@ -669,7 +670,7 @@ All checks produce machine-readable reason codes (`auto:row_ceiling`, `auto:payl
 
 All 10 aggregations are supported in hybrid mode; non-decomposable aggregations use a server-computed sidecar for correct totals. Synthetic measures (including formulas) evaluate client-side, even in hybrid mode.
 
-**Frontend rendering budget:** Independently of execution mode, the frontend applies a 5,000-cell DOM budget (rows × columns × measures). Above this threshold the component switches to a virtualized renderer; column alignment is preserved in both modes. When the non-virtual path would exceed the budget the visible row count is capped and a warning banner is shown: "Showing X of Y rows. Reduce dimensions or apply filters to display all rows." This message also surfaces in `perf_metrics["warnings"]`. Fix by reducing column cardinality, adding `source_filters`, or letting `execution_mode="auto"` pre-aggregate so the post-aggregation cell count stays within budget.
+**Frontend rendering budget:** Independently of execution mode, the frontend applies a 5,000-cell DOM budget (rows × columns × measures). Above this threshold the component switches to a virtualized renderer; column alignment is preserved in both modes. When the non-virtual path would exceed the budget the visible row count is capped and a warning banner is shown: "Showing X of Y rows. Reduce dimensions or apply filters to display all rows." This message also surfaces in `perf_metrics["warnings"]`. Fix by reducing column cardinality, adding `source_filters`, or letting `execution_mode="auto"` pre-aggregate so the post-aggregation cell count stays within budget. To hide informational banners (virtualization notices, hybrid execution-mode reason, perf timing) without hiding data-integrity messages, pass `suppress_warnings=True`.
 
 ### Locked Mode
 

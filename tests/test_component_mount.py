@@ -920,3 +920,58 @@ def test_threshold_hybrid_subtotals_list_generates_all_depths(
     totals = payload["hybrid_totals"]
     assert "subtotals" in totals
     assert len(totals["subtotals"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# suppress_warnings
+# ---------------------------------------------------------------------------
+
+
+def test_suppress_warnings_omitted_by_default(sample_df, pivot_module, mount_recorder):
+    """suppress_warnings is not sent in payload when False (sparse pattern)."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+    )
+
+    payload = calls[0]["data"]
+    assert "suppress_warnings" not in payload
+
+
+def test_suppress_warnings_true_is_sent(sample_df, pivot_module, mount_recorder):
+    """suppress_warnings=True is included in the payload."""
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        suppress_warnings=True,
+    )
+
+    payload = calls[0]["data"]
+    assert payload["suppress_warnings"] is True
+
+
+def test_suppress_warnings_invalid_type_raises(sample_df, pivot_module, mount_recorder):
+    """suppress_warnings must be a bool; other types raise TypeError."""
+    mount_recorder()
+
+    import pytest
+
+    with pytest.raises(TypeError, match="suppress_warnings must be a bool"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            suppress_warnings="yes",
+        )

@@ -26,7 +26,10 @@ export interface BudgetResult {
   needsColumnVirtualization: boolean;
   columnsTruncated: boolean;
   truncatedColumnCount: number;
+  /** Informational warnings: virtualization enabled, DOM-budget notices. Hidden when suppress_warnings is true. */
   warnings: string[];
+  /** Data-integrity warnings: shown even when suppress_warnings is true (e.g. column cardinality cap). */
+  dataIntegrityWarnings: string[];
 }
 
 function exceedsCellBudget(
@@ -50,6 +53,7 @@ export function checkRenderBudget(
   valueCount: number,
 ): BudgetResult {
   const warnings: string[] = [];
+  const dataIntegrityWarnings: string[] = [];
   const needsColumnVirtualization = colCount > COLUMN_VIRTUALIZATION_THRESHOLD;
 
   const maxColCap = DEFAULT_BUDGETS.maxColumnCardinality;
@@ -72,13 +76,15 @@ export function checkRenderBudget(
     columnsTruncated = exceedsHardCap;
 
     if (exceedsHardCap) {
-      warnings.push(
+      // Data integrity: the table is missing columns — always show.
+      dataIntegrityWarnings.push(
         `Column cardinality (${colCount}) exceeds limit (${maxColCap}). ` +
           `Showing first ${maxColCap} columns.`,
       );
     }
 
     if (needsVirtualizationFromCells) {
+      // Informational: virtualization is active, but no data is missing.
       warnings.push(
         `Total cells (${(rowCount * colsAfterHardCap * Math.max(valueCount, 1)).toLocaleString()}) exceeds DOM budget ` +
           `(${DEFAULT_BUDGETS.maxVisibleCells.toLocaleString()}). Virtualization enabled.`,
@@ -95,5 +101,6 @@ export function checkRenderBudget(
     columnsTruncated,
     truncatedColumnCount,
     warnings,
+    dataIntegrityWarnings,
   };
 }

@@ -114,6 +114,7 @@ Returns a `PivotTableResult` dict containing the current `config` state and opti
 | `on_cell_click` | `Callable[[], None] \| None` | `None` | Called when a user clicks a data cell. Read the payload from `st.session_state[key]`. |
 | `on_config_change` | `Callable[[], None] \| None` | `None` | Called when the user changes the pivot config interactively, including toolbar and header-menu actions. |
 | `enable_drilldown` | `bool` | `True` | Show an inline drill-down panel with source records when a cell is clicked. |
+| `suppress_warnings` | `bool` | `False` | Hide informational warning banners shown inside the component (virtualization notices, compute/render time warnings, hybrid execution-mode reason). Banners that indicate the table is showing incomplete data — row truncation and column-cardinality cap — are **always shown** regardless of this flag. Warning text is still collected in `result["perf_metrics"]["warnings"]` for debugging. |
 | `locked` | `bool` | `False` | Viewer mode with exploration enabled. Toolbar config controls are read-only, viewer-safe actions like data export and group expand/collapse remain available, and header-menu sorting/filtering/`Show Values As` plus drill-down still work. |
 | `export_filename` | `str \| None` | `None` | Base filename (without extension) for exported files (.xlsx, .csv, .tsv). Date and extension are appended automatically. Defaults to `"pivot-table"`. |
 
@@ -1248,6 +1249,8 @@ When the cell count is *below* the virtualization threshold but the row count wo
 > Showing X of Y rows. Reduce dimensions or apply filters to display all rows.
 
 This banner also appears in `result["perf_metrics"]["warnings"]`. To display more rows without truncation, reduce column cardinality, add `source_filters`, or let `execution_mode="auto"` pre-aggregate the dataset so the post-aggregation cell count stays within budget.
+
+The component also shows informational banners when virtualization is active or hybrid mode is in use. These can be hidden with `suppress_warnings=True`. Data-integrity banners (row truncation, column-cardinality cap) are always shown regardless of that flag. All warnings remain available in `result["perf_metrics"]["warnings"]` for programmatic access.
 
 #### Aggregation result caching
 

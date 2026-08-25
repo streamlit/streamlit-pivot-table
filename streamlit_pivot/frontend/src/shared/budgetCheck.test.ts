@@ -26,6 +26,7 @@ describe("checkRenderBudget", () => {
     expect(result.columnsTruncated).toBe(false);
     expect(result.needsColumnVirtualization).toBe(false);
     expect(result.warnings).toHaveLength(0);
+    expect(result.dataIntegrityWarnings).toHaveLength(0);
   });
 
   it("enables virtualization when cells exceed budget", () => {
@@ -36,7 +37,9 @@ describe("checkRenderBudget", () => {
       DEFAULT_BUDGETS.maxVisibleCells,
     );
     expect(result.needsVirtualization).toBe(true);
+    // Virtualization message is informational, not a data-integrity warning.
     expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.dataIntegrityWarnings).toHaveLength(0);
   });
 
   it("truncates columns when cardinality exceeds limit", () => {
@@ -45,8 +48,15 @@ describe("checkRenderBudget", () => {
     expect(result.truncatedColumnCount).toBe(
       DEFAULT_BUDGETS.maxColumnCardinality,
     );
+    // Column-cap is data integrity (some columns are hidden) — goes to dataIntegrityWarnings.
+    expect(
+      result.dataIntegrityWarnings.some((w) =>
+        w.includes("Column cardinality"),
+      ),
+    ).toBe(true);
+    // Must NOT appear in informational warnings.
     expect(result.warnings.some((w) => w.includes("Column cardinality"))).toBe(
-      true,
+      false,
     );
   });
 

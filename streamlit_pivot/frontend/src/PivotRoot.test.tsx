@@ -656,3 +656,84 @@ describe("PivotRoot - handleRemoveFilterField", () => {
     ).toEqual({ include: ["A"] });
   });
 });
+
+// ---------------------------------------------------------------------------
+// suppress_warnings
+// ---------------------------------------------------------------------------
+
+describe("PivotRoot - suppress_warnings", () => {
+  it("shows hybrid server_mode_reason in banner by default", async () => {
+    const props = makeBaseProps({
+      execution_mode: "threshold_hybrid" as const,
+      server_mode_reason: "forced:threshold_hybrid — test reason",
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+
+    const banner = document.querySelector("[data-testid=pivot-warning-banner]");
+    expect(banner).not.toBeNull();
+    expect(banner!.textContent).toContain("forced:threshold_hybrid");
+  });
+
+  it("hides hybrid server_mode_reason when suppress_warnings is true", async () => {
+    const props = makeBaseProps({
+      execution_mode: "threshold_hybrid" as const,
+      server_mode_reason: "forced:threshold_hybrid — test reason",
+      suppress_warnings: true,
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+
+    const banner = document.querySelector("[data-testid=pivot-warning-banner]");
+    // Banner must be absent or contain no hybrid text.
+    if (banner) {
+      expect(banner.textContent).not.toContain("forced:threshold_hybrid");
+    }
+  });
+
+  it("perf_metrics still records suppressed virtualization warning", async () => {
+    // Even when suppress_warnings hides informational banners from the UI,
+    // the virtualization warning must remain in perf_metrics for debugging.
+    // 80 regions × 80 years = 6 400 cells — exceeds the 5 000-cell DOM budget.
+    const dataframe = makeBigArrowBytes(80, 80);
+    const config = makeConfig({ show_totals: false });
+
+    let container: HTMLElement;
+    act(() => {
+      const result = render(
+        <PivotRoot
+          config={config}
+          dataframe={dataframe}
+          height={null}
+          max_height={500}
+          execution_mode="client_only"
+          suppress_warnings={true}
+          setStateValue={vi.fn()}
+          setTriggerValue={vi.fn()}
+        />,
+      );
+      container = result.container;
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // Banner must not show the virtualization message.
+    const banner = container!.querySelector(
+      "[data-testid=pivot-warning-banner]",
+    );
+    if (banner) {
+      expect(banner.textContent).not.toContain("Virtualization");
+    }
+
+    // perf_metrics must still record the virtualization warning.
+    const perfEl = container!.querySelector("[data-perf-metrics]");
+    expect(perfEl).not.toBeNull();
+    const metrics = JSON.parse(
+      perfEl!.getAttribute("data-perf-metrics") ?? "{}",
+    );
+    const warningText = ((metrics.warnings as string[]) ?? []).join(" ");
+    expect(warningText).toContain("Virtualization");
+  });
+});

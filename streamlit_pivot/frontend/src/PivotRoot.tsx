@@ -111,6 +111,7 @@ const PivotRoot: FC<PivotRootProps> = ({
   locked,
   menu_limit,
   enable_drilldown,
+  suppress_warnings,
   export_filename,
   execution_mode,
   server_mode_reason,
@@ -519,7 +520,10 @@ const PivotRoot: FC<PivotRootProps> = ({
       warnings: [],
       lastAction,
     };
-    const warnings = [...(budget?.warnings ?? [])];
+    const warnings = [
+      ...(budget?.warnings ?? []),
+      ...(budget?.dataIntegrityWarnings ?? []),
+    ];
     for (const warning of checkBudgets(metrics)) {
       if (!warnings.includes(warning)) warnings.push(warning);
     }
@@ -584,24 +588,29 @@ const PivotRoot: FC<PivotRootProps> = ({
   }, [pivotData, budget, currentConfig]);
 
   const allWarnings = useMemo(() => {
-    const w = [...(budget?.warnings ?? [])];
-    for (const pw of perfWarnings) {
-      if (!w.includes(pw)) w.push(pw);
-    }
-    if (execution_mode === "threshold_hybrid") {
-      const hybridInfo =
-        server_mode_reason?.trim() ||
-        "This table uses server pre-aggregated data for performance.";
-      if (!w.includes(hybridInfo)) w.push(hybridInfo);
-    }
+    // Data-integrity: always shown — table is displaying incomplete data.
+    const integrity: string[] = [...(budget?.dataIntegrityWarnings ?? [])];
     if (safeMaxRows != null && pivotData) {
       const msg =
         `Showing ${safeMaxRows.toLocaleString()} of ` +
         `${pivotData.uniqueRowKeyCount.toLocaleString()} rows. ` +
         `Reduce dimensions or apply filters to display all rows.`;
-      if (!w.includes(msg)) w.push(msg);
+      if (!integrity.includes(msg)) integrity.push(msg);
     }
-    return w;
+
+    // Informational: hidden when suppress_warnings is true.
+    const informational: string[] = [...(budget?.warnings ?? [])];
+    for (const pw of perfWarnings) {
+      if (!informational.includes(pw)) informational.push(pw);
+    }
+    if (execution_mode === "threshold_hybrid") {
+      const hybridInfo =
+        server_mode_reason?.trim() ||
+        "This table uses server pre-aggregated data for performance.";
+      if (!informational.includes(hybridInfo)) informational.push(hybridInfo);
+    }
+
+    return suppress_warnings ? integrity : [...integrity, ...informational];
   }, [
     budget,
     perfWarnings,
@@ -609,6 +618,7 @@ const PivotRoot: FC<PivotRootProps> = ({
     server_mode_reason,
     safeMaxRows,
     pivotData,
+    suppress_warnings,
   ]);
 
   const pendingFlushRef = useRef<PivotConfigV1 | null>(null);

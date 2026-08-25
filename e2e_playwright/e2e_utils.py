@@ -228,6 +228,8 @@ APP_CONFIGS = {
             "test_pivot_rank",
             "test_pivot_multi_sort_asc",
             "test_pivot_multi_sort_desc",
+            "test_pivot_collapse_row_groups_true",
+            "test_pivot_collapse_row_groups_false",
         ],
     },
     "pivot_table_member_groups_test.py": {
