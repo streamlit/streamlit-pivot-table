@@ -62,6 +62,73 @@ export function resolveFieldWidth(
   return undefined;
 }
 
+/** Approximate advance of one character in the table's UI font. */
+const CHAR_WIDTH = 7;
+/** Horizontal padding plus the right border of a row-header cell. */
+const CELL_CHROME = 26;
+/** Indent added per nested level in hierarchy row layout. */
+const LEVEL_INDENT = 16;
+/** A toggle chevron, one per collapsible level of the breadcrumb. */
+const TOGGLE_WIDTH = 18;
+/** Row keys sampled when estimating; enough to be representative, still cheap. */
+const SCAN_LIMIT = 2000;
+
+/** Upper bound on an estimated row-header width, so one outlier label can't
+ * push the data columns off screen. */
+export const ROW_HEADER_WIDTH_CAP = 360;
+
+/**
+ * Estimate a width for each row-header column from the text it must hold.
+ *
+ * Virtualized tables render with `table-layout: fixed`, where the declared
+ * width is final: a column cannot grow to fit its contents the way an
+ * auto-layout table does, so anything longer is truncated or spills over the
+ * neighbouring column. Row headers feel this most, because hierarchy layout
+ * packs every level's labels, their indents, and the breadcrumb of dimension
+ * names into one column.
+ *
+ * This approximates from character counts rather than measuring, since it runs
+ * during render where measuring would force a layout pass. It only supplies a
+ * starting width — a configured `field_widths` entry, a drag, or a double-click
+ * to auto-fit all take precedence.
+ */
+export function estimateRowHeaderWidths(
+  dimLabels: string[],
+  rowKeys: string[][],
+  hierarchy: boolean,
+  minWidth: number,
+): number[] {
+  const clamp = (width: number): number =>
+    Math.min(ROW_HEADER_WIDTH_CAP, Math.max(minWidth, Math.ceil(width)));
+  const scanned = Math.min(rowKeys.length, SCAN_LIMIT);
+  if (dimLabels.length === 0) return [];
+
+  if (hierarchy) {
+    // A single column holds the whole breadcrumb and every level's labels.
+    let widest =
+      dimLabels.join(" / ").length * CHAR_WIDTH +
+      TOGGLE_WIDTH * Math.max(dimLabels.length - 1, 0);
+    for (let i = 0; i < scanned; i++) {
+      const key = rowKeys[i] ?? [];
+      for (let level = 0; level < key.length; level++) {
+        const width =
+          String(key[level] ?? "").length * CHAR_WIDTH + level * LEVEL_INDENT;
+        if (width > widest) widest = width;
+      }
+    }
+    return [clamp(widest + CELL_CHROME)];
+  }
+
+  return dimLabels.map((label, dim) => {
+    let widest = label.length * CHAR_WIDTH + TOGGLE_WIDTH;
+    for (let i = 0; i < scanned; i++) {
+      const width = String(rowKeys[i]?.[dim] ?? "").length * CHAR_WIDTH;
+      if (width > widest) widest = width;
+    }
+    return clamp(widest + CELL_CHROME);
+  });
+}
+
 /**
  * Merge runtime resize widths with config-backed widths: runtime wins.
  * Used as a single lookup helper for header cells.

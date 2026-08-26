@@ -84,19 +84,34 @@ function makeProps(totalCols: number, colWidth: number = 120) {
   };
 }
 
+// Horizontal windowing only engages above COLUMN_VIRTUALIZATION_THRESHOLD
+// (200), so these cases use column counts comfortably past it.
+const WIDE_COLS = 500;
+
 describe("VirtualScroll - column windowing", () => {
   it("renders a subset of columns when content is wider than viewport", () => {
-    const { props } = makeProps(50, 120);
+    const { props } = makeProps(WIDE_COLS, 120);
 
     render(<VirtualScroll {...props} />);
 
     const headers = screen.getAllByTestId("vs-header");
-    expect(headers.length).toBeLessThan(50);
+    expect(headers.length).toBeLessThan(WIDE_COLS);
     expect(headers.length).toBeGreaterThan(0);
   });
 
+  it("renders every column below the virtualization threshold", () => {
+    // A windowed colgroup declares fewer widths than the full-width table, and
+    // `table-layout: fixed` would stretch the rendered columns to close the
+    // gap. Narrow tables therefore render whole, viewport overflow or not.
+    const { props } = makeProps(50, 120);
+
+    render(<VirtualScroll {...props} />);
+
+    expect(screen.getAllByTestId("vs-header").length).toBe(50);
+  });
+
   it("starts at column 0 when not scrolled", () => {
-    const { props, headerCalls } = makeProps(50, 120);
+    const { props, headerCalls } = makeProps(WIDE_COLS, 120);
 
     render(<VirtualScroll {...props} />);
 
@@ -105,7 +120,7 @@ describe("VirtualScroll - column windowing", () => {
   });
 
   it("shifts column range when scrolled horizontally", () => {
-    const { props, rowCalls } = makeProps(50, 120);
+    const { props, rowCalls } = makeProps(WIDE_COLS, 120);
 
     const { container } = render(<VirtualScroll {...props} />);
     const scrollContainer = screen.getByTestId("virtual-scroll-container");
@@ -127,11 +142,11 @@ describe("VirtualScroll - column windowing", () => {
 
     const lastCall = rowCalls[rowCalls.length - 1];
     expect(lastCall.colRange[0]).toBeGreaterThan(0);
-    expect(lastCall.colRange[1]).toBeLessThan(50);
+    expect(lastCall.colRange[1]).toBeLessThan(WIDE_COLS);
   });
 
   it("column headers progress correctly through scroll positions", () => {
-    const { props, headerCalls } = makeProps(100, 120);
+    const { props, headerCalls } = makeProps(WIDE_COLS, 120);
 
     render(<VirtualScroll {...props} />);
     const scrollContainer = screen.getByTestId("virtual-scroll-container");
@@ -327,8 +342,8 @@ describe("VirtualScroll - variable column widths (prefix-sum)", () => {
   });
 
   it("adjusts visible range when scrolled with variable widths", () => {
-    const { props, headerCalls } = makeProps(50, 120);
-    const columnWidths = Array.from({ length: 50 }, () => 100);
+    const { props, headerCalls } = makeProps(WIDE_COLS, 120);
+    const columnWidths = Array.from({ length: WIDE_COLS }, () => 100);
 
     render(<VirtualScroll {...props} columnWidths={columnWidths} />);
     const scrollContainer = screen.getByTestId("virtual-scroll-container");

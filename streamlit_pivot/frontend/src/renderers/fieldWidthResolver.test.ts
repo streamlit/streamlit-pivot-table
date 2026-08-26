@@ -24,6 +24,8 @@ import {
   WIDTH_MAX,
   resolveFieldWidth,
   resolveEffectiveWidth,
+  estimateRowHeaderWidths,
+  ROW_HEADER_WIDTH_CAP,
 } from "./fieldWidthResolver";
 import { makeConfig } from "../test-utils";
 
@@ -125,5 +127,93 @@ describe("resolveEffectiveWidth", () => {
 
   it("treats runtime width of 0 as a valid override (not undefined)", () => {
     expect(resolveEffectiveWidth(0, 150)).toBe(0);
+  });
+});
+
+describe("estimateRowHeaderWidths", () => {
+  const MIN = 120;
+
+  it("returns no widths when there are no row dimensions", () => {
+    expect(estimateRowHeaderWidths([], [], false, MIN)).toEqual([]);
+  });
+
+  it("never goes below the minimum width for short labels", () => {
+    const widths = estimateRowHeaderWidths(["A"], [["x"], ["y"]], false, MIN);
+    expect(widths).toEqual([MIN]);
+  });
+
+  it("widens past the minimum to fit a long dimension label", () => {
+    const [width] = estimateRowHeaderWidths(
+      ["Merchant_State"],
+      [["CA"]],
+      false,
+      MIN,
+    );
+    expect(width).toBeGreaterThan(MIN);
+  });
+
+  it("widens to fit long values even when the label is short", () => {
+    const [width] = estimateRowHeaderWidths(
+      ["City"],
+      [["San Francisco International"]],
+      false,
+      MIN,
+    );
+    expect(width).toBeGreaterThan(MIN);
+  });
+
+  it("gives hierarchy layout a single width covering the whole breadcrumb", () => {
+    const widths = estimateRowHeaderWidths(
+      ["Merchant_State", "Merchant_City"],
+      [["California", "San Francisco"]],
+      true,
+      MIN,
+    );
+    expect(widths).toHaveLength(1);
+    // Both dimension names plus their chevrons have to fit side by side.
+    expect(widths[0]).toBeGreaterThan(
+      estimateRowHeaderWidths(
+        ["Merchant_State"],
+        [["California"]],
+        true,
+        MIN,
+      )[0],
+    );
+  });
+
+  it("accounts for the indent applied to nested hierarchy levels", () => {
+    const nested = estimateRowHeaderWidths(
+      ["a", "b"],
+      [["x", "San Francisco"]],
+      true,
+      MIN,
+    );
+    const flat = estimateRowHeaderWidths(
+      ["a", "b"],
+      [["San Francisco", "x"]],
+      true,
+      MIN,
+    );
+    expect(nested[0]).toBeGreaterThan(flat[0]);
+  });
+
+  it("caps the estimate so one outlier label cannot take over the table", () => {
+    const [width] = estimateRowHeaderWidths(
+      ["City"],
+      [["x".repeat(500)]],
+      false,
+      MIN,
+    );
+    expect(width).toBe(ROW_HEADER_WIDTH_CAP);
+  });
+
+  it("produces one width per dimension in table layout", () => {
+    const widths = estimateRowHeaderWidths(
+      ["Country", "State", "City"],
+      [["US", "CA", "SF"]],
+      false,
+      MIN,
+    );
+    expect(widths).toHaveLength(3);
   });
 });

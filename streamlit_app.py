@@ -3614,8 +3614,10 @@ def section_virtualization_alignment() -> None:
     }
     _rng_virt = np.random.default_rng(seed=99)
     # 10 states × 5 cities = 50 leaf pairs; 120 monthly dates.
-    # checkRenderBudget uses uniqueRowKeyCount (≈60 incl. state subtotals) ×
-    # uniqueColKeyCount (120) = 7 200 > 5 000 → virtual path.
+    # checkRenderBudget uses uniqueRowKeyCount (50) × uniqueColKeyCount (120)
+    # = 6 000 > 5 000 → virtual path. The 120 columns only exist because the
+    # pivot below pins date_grains={"dt": "month"}: this 10-year span would
+    # otherwise adapt to year grain (10 columns, 500 cells, non-virtual).
     _monthly_dates = pd.date_range("2015-01-01", periods=120, freq="MS")
 
     _rows: list[dict] = []
@@ -3670,6 +3672,7 @@ def section_virtualization_alignment() -> None:
         rows=["Merchant_State", "Merchant_City"],
         columns=["dt"],
         values=["Amount"],
+        date_grains={"dt": "month"},
         aggregation="sum",
         row_layout="hierarchy",
         show_totals=True,

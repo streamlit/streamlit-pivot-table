@@ -61,6 +61,11 @@ import {
   type ValueFilter,
   isValuesOnRows,
 } from "../engine/types";
+import {
+  countCollapsibleLevels,
+  normalizeCollapsed,
+  toggleCollapsedGroupNode,
+} from "./collapseState";
 import { renderCellContent } from "./cellRenderer";
 import {
   styleToCSS,
@@ -194,22 +199,6 @@ function DimToggleIcon({ collapsed }: { collapsed: boolean }): ReactElement {
 }
 
 /**
- * Expand the "__ALL__" sentinel into explicit level-0 group keys.
- * Must be called before any mutation to collapsed state.
- */
-function normalizeCollapsed(
-  collapsed: string[],
-  level0Prefixes: string[],
-): Set<string> {
-  const result = new Set(collapsed);
-  if (result.has("__ALL__")) {
-    result.delete("__ALL__");
-    for (const p of level0Prefixes) result.add(p);
-  }
-  return result;
-}
-
-/**
  * Check whether all groups at a given dimension level are collapsed.
  */
 function isDimCollapsed(
@@ -218,13 +207,14 @@ function isDimCollapsed(
   level: number,
 ): boolean {
   if (keys.length === 0) return false;
-  const level0Prefixes = [
-    ...new Set(keys.map((k) => makeKeyString(k.slice(0, 1)))),
-  ];
   const targetPrefixes = [
     ...new Set(keys.map((k) => makeKeyString(k.slice(0, level + 1)))),
   ];
-  const normalized = normalizeCollapsed(collapsedArr, level0Prefixes);
+  const normalized = normalizeCollapsed(
+    collapsedArr,
+    keys,
+    countCollapsibleLevels(keys),
+  );
   return (
     targetPrefixes.length > 0 && targetPrefixes.every((p) => normalized.has(p))
   );
@@ -801,7 +791,11 @@ export function renderColumnHeaders(
     if (th) th.style.zIndex = "";
   };
 
-  const handleDimToggle = (axis: "row" | "col", level: number) => {
+  const handleDimToggle = (
+    axis: "row" | "col",
+    level: number,
+    collapsedOverride?: boolean,
+  ) => {
     if (!onCollapseChange || !pivotData) return;
     const keys =
       axis === "row" ? pivotData.getRowKeys() : pivotData.getColKeys();
@@ -809,21 +803,39 @@ export function renderColumnHeaders(
       axis === "row"
         ? (config.collapsed_groups ?? [])
         : (config.collapsed_col_groups ?? []);
-    const level0Prefixes = [
-      ...new Set(keys.map((k) => makeKeyString(k.slice(0, 1)))),
-    ].sort();
+    const collapsibleLevels = countCollapsibleLevels(keys);
     const targetPrefixes = [
       ...new Set(keys.map((k) => makeKeyString(k.slice(0, level + 1)))),
     ].sort();
 
-    const working = normalizeCollapsed(current, level0Prefixes);
+    const working = normalizeCollapsed(current, keys, collapsibleLevels);
     const isCollapsed =
-      targetPrefixes.length > 0 && targetPrefixes.every((p) => working.has(p));
+      collapsedOverride ??
+      (targetPrefixes.length > 0 &&
+        targetPrefixes.every((p) => working.has(p)));
 
     if (isCollapsed) {
-      for (const p of targetPrefixes) working.delete(p);
+      // A collapsed ancestor can be what hides this level, so clear every level
+      // up to and including this one. Deleting only this level's prefixes would
+      // leave the rows hidden behind the ancestor and look like a dead control.
+      for (let ancestor = 0; ancestor <= level; ancestor++) {
+        for (const key of keys) {
+          working.delete(makeKeyString(key.slice(0, ancestor + 1)));
+        }
+      }
     } else {
-      for (const p of targetPrefixes) working.add(p);
+      // Record this level and every level beneath it. Collapsing hides those
+      // deeper levels either way, and leaving them unrecorded would make the
+      // next expand of this level spring the whole subtree open at once.
+      for (
+        let descendant = level;
+        descendant < Math.max(collapsibleLevels, level + 1);
+        descendant++
+      ) {
+        for (const key of keys) {
+          working.add(makeKeyString(key.slice(0, descendant + 1)));
+        }
+      }
     }
 
     onCollapseChange(axis, [...working].sort());
@@ -840,16 +852,11 @@ export function renderColumnHeaders(
       ...new Set(keys.map((k) => makeKeyString(k.slice(0, level + 1)))),
     ].sort();
   };
-  const rowLevel0Prefixes = pivotData
-    ? [
-        ...new Set(
-          pivotData.getRowKeys().map((k) => makeKeyString(k.slice(0, 1))),
-        ),
-      ].sort()
-    : [];
+  const allRowKeysForCollapse = pivotData ? pivotData.getRowKeys() : [];
   const normalizedCollapsedGroups = normalizeCollapsed(
     config.collapsed_groups ?? [],
-    rowLevel0Prefixes,
+    allRowKeysForCollapse,
+    countCollapsibleLevels(allRowKeysForCollapse),
   );
 
   const getTemporalLevelCollapseKeys = (
@@ -947,12 +954,17 @@ export function renderColumnHeaders(
     });
   };
 
-  const handleRowHeaderLevelToggle = (rowLevel: RowHeaderLevelMapping) => {
+  const handleRowHeaderLevelToggle = (
+    rowLevel: RowHeaderLevelMapping,
+    visuallyCollapsed?: boolean,
+  ) => {
     if (rowLevel.isTemporal && !rowLevel.isLeaf) {
       handleTemporalLevelToggle(rowLevel);
       return;
     }
-    handleDimToggle("row", rowLevel.dimIndex);
+    // The header chevron reflects ancestor state, so the click must resolve
+    // against the same state or the control contradicts its own label.
+    handleDimToggle("row", rowLevel.dimIndex, visuallyCollapsed);
   };
 
   const canDimToggle = !!onCollapseChange && !!pivotData;
@@ -1174,7 +1186,10 @@ export function renderColumnHeaders(
                               label={`all ${label} groups`}
                               dataTestId={`pivot-dim-toggle-row-${rowHeaderIdx}-${slugify(dim)}`}
                               onClick={() =>
-                                handleRowHeaderLevelToggle(rowLevel)
+                                handleRowHeaderLevelToggle(
+                                  rowLevel,
+                                  visualRowDimCollapsed,
+                                )
                               }
                               icon={
                                 <DimToggleIcon
@@ -1363,14 +1378,20 @@ export function renderColumnHeaders(
                           )
                         )
                           return;
-                        handleRowHeaderLevelToggle(rowLevel);
+                        handleRowHeaderLevelToggle(
+                          rowLevel,
+                          visualRowDimCollapsed,
+                        );
                       },
                       role: "button",
                       tabIndex: 0,
                       onKeyDown: (e: KeyboardEvent) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          handleRowHeaderLevelToggle(rowLevel);
+                          handleRowHeaderLevelToggle(
+                            rowLevel,
+                            visualRowDimCollapsed,
+                          );
                         }
                       },
                       "aria-expanded": !visualRowDimCollapsed,
@@ -2327,6 +2348,9 @@ function renderHierarchyRowHeaderCell(
       data-testid={opts?.dataTestId ?? "pivot-row-header"}
       rowSpan={opts?.rowSpan && opts.rowSpan > 1 ? opts.rowSpan : undefined}
       data-dim-index={opts?.dimIndex}
+      // Labels ellipsize when the column is too narrow, so the full text has to
+      // stay reachable. Custom renderers carry their own title or alt text.
+      title={typeof label === "string" ? label : undefined}
     >
       <span
         className={styles.rowHeaderContent}
@@ -2636,6 +2660,9 @@ function renderProjectedRowHeaderCells(
         }
         rowSpan={span > 1 ? span : undefined}
         data-dim-index={mapping.dimIndex}
+        title={
+          typeof renderedContent === "string" ? renderedContent : undefined
+        }
         {...(showGroupToggle
           ? {
               onClick: () =>
@@ -3059,6 +3086,10 @@ export function renderDataRow(
               const isCollapsed = showToggle
                 ? (groupContext.collapsedSet?.has(groupKeyStr) ?? false)
                 : false;
+              const displayText =
+                (part
+                  ? pivotData.formatDimLabel(config.rows[dimIdx] ?? "", part)
+                  : "") || "(empty)";
               const dimClasses = [
                 styles.rowHeaderCell,
                 dimIdx === 0
@@ -3083,6 +3114,7 @@ export function renderDataRow(
                   }
                   rowSpan={span > 1 ? span : undefined}
                   data-dim-index={dimIdx}
+                  title={displayText}
                   {...(showToggle
                     ? {
                         onClick: () => groupContext.onToggleGroup!(groupKeyStr),
@@ -3105,13 +3137,7 @@ export function renderDataRow(
                     <span>
                       {renderCellContent({
                         rawValue: part,
-                        displayText:
-                          (part
-                            ? pivotData.formatDimLabel(
-                                config.rows[dimIdx] ?? "",
-                                part,
-                              )
-                            : "") || "(empty)",
+                        displayText,
                         field: config.rows[dimIdx] ?? "",
                         config,
                         isTotal: false,
@@ -3538,6 +3564,7 @@ export function renderSubtotalRow(
                         ? `pivot-group-toggle-${groupKeyStr}`
                         : undefined
                     }
+                    title={`${dimLabel} Total`}
                   >
                     <span className={styles.rowHeaderContent}>
                       {canToggle && (
@@ -3782,6 +3809,7 @@ export function renderSubtotalRow(
                         ? `pivot-group-toggle-${groupKeyStr}`
                         : undefined
                     }
+                    title={`${label} Total`}
                   >
                     <span className={styles.rowHeaderContent}>
                       {canToggle && (
@@ -4921,10 +4949,11 @@ const TableRenderer: FC<TableRendererProps> = ({
   const collapsedSet = useMemo(() => {
     const raw = config.collapsed_groups ?? [];
     if (raw.includes("__ALL__")) {
-      const level0 = [
-        ...new Set(allRowKeys.map((k) => makeKeyString(k.slice(0, 1)))),
-      ];
-      return normalizeCollapsed(raw, level0);
+      return normalizeCollapsed(
+        raw,
+        allRowKeys,
+        countCollapsibleLevels(allRowKeys),
+      );
     }
     return new Set(raw);
   }, [config.collapsed_groups, allRowKeys]);
@@ -5047,29 +5076,31 @@ const TableRenderer: FC<TableRendererProps> = ({
   const handleToggleGroup = useCallback(
     (groupKeyStr: string) => {
       if (!onCollapseChange) return;
-      const collapsed = new Set(config.collapsed_groups ?? []);
-      if (collapsed.has(groupKeyStr)) {
-        collapsed.delete(groupKeyStr);
-      } else {
-        collapsed.add(groupKeyStr);
-      }
-      onCollapseChange("row", [...collapsed].sort());
+      onCollapseChange(
+        "row",
+        toggleCollapsedGroupNode(
+          config.collapsed_groups ?? [],
+          groupKeyStr,
+          allRowKeys,
+        ),
+      );
     },
-    [config, onCollapseChange],
+    [config, onCollapseChange, allRowKeys],
   );
 
   const handleToggleColGroup = useCallback(
     (groupKeyStr: string) => {
       if (!onCollapseChange) return;
-      const collapsed = new Set(config.collapsed_col_groups ?? []);
-      if (collapsed.has(groupKeyStr)) {
-        collapsed.delete(groupKeyStr);
-      } else {
-        collapsed.add(groupKeyStr);
-      }
-      onCollapseChange("col", [...collapsed].sort());
+      onCollapseChange(
+        "col",
+        toggleCollapsedGroupNode(
+          config.collapsed_col_groups ?? [],
+          groupKeyStr,
+          allColKeys,
+        ),
+      );
     },
-    [config, onCollapseChange],
+    [config, onCollapseChange, allColKeys],
   );
 
   const {

@@ -90,7 +90,7 @@ describe("VirtualizedTableRenderer", () => {
   });
 
   it("renders only a windowed subset of columns for wide datasets", () => {
-    const records = makeRecords(3, 50);
+    const records = makeRecords(3, 300);
     const config = makeConfig({ show_totals: false });
     const pivotData = new PivotData(records, config);
 
@@ -106,7 +106,28 @@ describe("VirtualizedTableRenderer", () => {
     const dataRows = screen.getAllByTestId("pivot-data-row");
     const dataCells = screen.getAllByTestId("pivot-data-cell");
     const cellsPerRow = dataCells.length / dataRows.length;
-    expect(cellsPerRow).toBeLessThan(50);
+    expect(cellsPerRow).toBeLessThan(300);
+  });
+
+  it("renders every column when the count is below the windowing threshold", () => {
+    // Windowed columns only align when the colgroup covers the whole table, so
+    // narrow tables render all of their columns and keep their declared widths.
+    const records = makeRecords(3, 50);
+    const config = makeConfig({ show_totals: false });
+    const pivotData = new PivotData(records, config);
+
+    render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+        columnWidth={120}
+      />,
+    );
+
+    const dataRows = screen.getAllByTestId("pivot-data-row");
+    const dataCells = screen.getAllByTestId("pivot-data-cell");
+    expect(dataCells.length / dataRows.length).toBe(50);
   });
 
   it("respects maxColumns truncation", () => {
@@ -129,7 +150,7 @@ describe("VirtualizedTableRenderer", () => {
   });
 
   it("column windowing with row dims always renders row headers and correct data columns", () => {
-    const records = makeRecords(2, 30);
+    const records = makeRecords(2, 300);
     const config = makeConfig({ show_totals: false });
     const pivotData = new PivotData(records, config);
 
@@ -149,12 +170,12 @@ describe("VirtualizedTableRenderer", () => {
     // Row headers are always rendered (1 per row, since 1 row dim)
     expect(rowHeaders.length).toBe(dataRows.length);
 
-    // Data cells should be windowed: fewer than 30 cols * 2 rows = 60
-    expect(dataCells.length).toBeLessThan(60);
+    // Data cells should be windowed: fewer than 300 cols * 2 rows = 600
+    expect(dataCells.length).toBeLessThan(600);
 
     // Each row should have the same number of data cells
     const cellsPerRow = dataCells.length / dataRows.length;
-    expect(cellsPerRow).toBeLessThan(30);
+    expect(cellsPerRow).toBeLessThan(300);
 
     // First visible data cells should contain actual values (not row header text)
     const firstCell = dataCells[0];
@@ -223,7 +244,7 @@ describe("VirtualizedTableRenderer", () => {
     const records: DataRecord[] = [];
     for (let r = 0; r < 2; r++) {
       for (let s = 0; s < 2; s++) {
-        for (let y = 0; y < 20; y++) {
+        for (let y = 0; y < 300; y++) {
           records.push({
             country: `C${r}`,
             state: `S${s}`,
@@ -259,7 +280,7 @@ describe("VirtualizedTableRenderer", () => {
     // Data cells should be windowed
     const dataCells = screen.getAllByTestId("pivot-data-cell");
     const cellsPerRow = dataCells.length / dataRows.length;
-    expect(cellsPerRow).toBeLessThan(20);
+    expect(cellsPerRow).toBeLessThan(300);
   });
 });
 
@@ -760,6 +781,69 @@ describe("VirtualizedTableRenderer - colgroup column alignment", () => {
     for (const col of dataCols) {
       expect((col as HTMLElement).style.width).toBe("200px");
     }
+  });
+
+  it("widens the row-header column to fit hierarchy labels", () => {
+    // Fixed table layout pins a column to its declared width, so the default
+    // has to account for the breadcrumb and the indented labels beneath it.
+    const records = [
+      {
+        region: "California",
+        category: "San Francisco",
+        year: "2024",
+        revenue: 1,
+      },
+    ];
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_totals: false,
+    });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const firstCol = container.querySelector("colgroup col") as HTMLElement;
+    expect(parseFloat(firstCol.style.width)).toBeGreaterThan(120);
+  });
+
+  it("lets a configured field width override the row-header estimate", () => {
+    const records = [
+      {
+        region: "California",
+        category: "San Francisco",
+        year: "2024",
+        revenue: 1,
+      },
+    ];
+    const config = makeConfig({
+      rows: ["region", "category"],
+      columns: ["year"],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_totals: false,
+      field_widths: { region: 140 },
+    });
+    const pivotData = new PivotData(records, config);
+
+    const { container } = render(
+      <VirtualizedTableRenderer
+        pivotData={pivotData}
+        config={config}
+        containerHeight={400}
+      />,
+    );
+
+    const firstCol = container.querySelector("colgroup col") as HTMLElement;
+    expect(firstCol.style.width).toBe("140px");
   });
 
   it("all colgroups in header, body, and Grand Total tables have identical col widths", () => {

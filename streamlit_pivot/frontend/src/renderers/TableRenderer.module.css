@@ -104,6 +104,13 @@
   border-right: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
   border-bottom: 1px solid var(--pivot-border-color, var(--st-dataframe-border-color));
   white-space: nowrap;
+  /* Labels must not wrap: virtualized rows are positioned at a fixed height, so
+     a second line would desync every row below. With nowrap the only other
+     options are clipping or painting over the neighbouring column, and any
+     explicit width (fixed table layout, field_widths, a drag) makes overflow
+     reachable. Clip and mark it with an ellipsis. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Auto-center cells whose content is a checkbox or image renderer, matching
@@ -419,6 +426,19 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  /* Hierarchy cells add their indent as padding here, so border-box keeps the
+     indent inside the cell instead of pushing the label past its edge. */
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* The label has to be allowed to shrink for the cell's ellipsis to apply to it;
+   toggles and spacers hold their size through flex-shrink: 0. */
+.rowHeaderContent > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* No reserved padding — button is hidden at rest and appears on hover only. */

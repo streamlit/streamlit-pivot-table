@@ -26,6 +26,7 @@ import {
 } from "react";
 import type { PivotData, GroupedRow } from "../engine/PivotData";
 import {
+  getDimensionLabel,
   getRenderedValueFields,
   isSyntheticMeasure,
   isValuesOnRows,
@@ -64,9 +65,18 @@ import {
   toggleTemporalCollapse,
   toggleTemporalRowCollapse,
 } from "./temporalHierarchy";
+import {
+  countCollapsibleLevels,
+  normalizeCollapsed,
+  toggleCollapsedGroupNode,
+} from "./collapseState";
 import { useHeaderMenu } from "./useHeaderMenu";
 import tableStyles from "./TableRenderer.module.css";
-import { resolveEffectiveWidth, resolveFieldWidth } from "./fieldWidthResolver";
+import {
+  estimateRowHeaderWidths,
+  resolveEffectiveWidth,
+  resolveFieldWidth,
+} from "./fieldWidthResolver";
 import {
   styleToCSS,
   densityClass,
@@ -146,6 +156,15 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     startX: number;
     startWidth: number;
   } | null>(null);
+  // Resolves the width a slot *declares* in the colgroup. Populated further
+  // down, once the width maps it reads have been built, and called at drag
+  // time. A drag must never seed from the rendered width: when the column
+  // window is narrower than the axis, `table-layout: fixed` stretches cells to
+  // fill the table, and measuring that would store the stretched value as the
+  // column's intended width.
+  const declaredSlotWidthRef = useRef<(slot: number | string) => number>(
+    () => columnWidth,
+  );
 
   const handleResizeDoubleClick = useCallback(
     (slotIndex: number | string, e: React.MouseEvent<HTMLDivElement>) => {
@@ -249,15 +268,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       if (e.detail >= 2) return;
       e.preventDefault();
       e.stopPropagation();
-      const el = (e.target as HTMLElement).closest("th");
-      let startWidth = el ? el.offsetWidth : columnWidth;
-      const existingWidth =
-        typeof slotIndex === "string"
-          ? valFieldWidthMap.get(slotIndex)
-          : columnWidthMap.get(slotIndex);
-      if (existingWidth != null) {
-        startWidth = existingWidth;
-      }
+      const startWidth = declaredSlotWidthRef.current(slotIndex);
       resizeDragRef.current = { key: slotIndex, startX: e.clientX, startWidth };
       setIsResizing(true);
 
@@ -294,7 +305,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       window.addEventListener("mouseup", cleanup);
       window.addEventListener("mouseleave", cleanup);
     },
-    [columnWidth, columnWidthMap, valFieldWidthMap],
+    [],
   );
 
   useEffect(() => {
@@ -348,6 +359,16 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     () => computeRowHeaderLevels(config, rowTemporalInfos),
     [config, rowTemporalInfos],
   );
+  const estimatedRowHeaderWidths = useMemo(
+    () =>
+      estimateRowHeaderWidths(
+        config.rows.map((field) => getDimensionLabel(config, field)),
+        allRowKeys,
+        config.row_layout === "hierarchy",
+        DEFAULT_COL_WIDTH,
+      ),
+    [config, allRowKeys],
+  );
   const effectiveNumRowDims =
     (config.row_layout === "hierarchy"
       ? 1
@@ -364,13 +385,11 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   const collapsedSet = useMemo(() => {
     const raw = config.collapsed_groups ?? [];
     if (raw.includes("__ALL__")) {
-      const level0 = [
-        ...new Set(allRowKeys.map((k) => makeKeyString(k.slice(0, 1)))),
-      ];
-      const result = new Set(raw);
-      result.delete("__ALL__");
-      for (const p of level0) result.add(p);
-      return result;
+      return normalizeCollapsed(
+        raw,
+        allRowKeys,
+        countCollapsibleLevels(allRowKeys),
+      );
     }
     return new Set(raw);
   }, [config.collapsed_groups, allRowKeys]);
@@ -452,29 +471,31 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
   const handleToggleGroup = useCallback(
     (groupKeyStr: string) => {
       if (!onCollapseChange) return;
-      const collapsed = new Set(config.collapsed_groups ?? []);
-      if (collapsed.has(groupKeyStr)) {
-        collapsed.delete(groupKeyStr);
-      } else {
-        collapsed.add(groupKeyStr);
-      }
-      onCollapseChange("row", [...collapsed].sort());
+      onCollapseChange(
+        "row",
+        toggleCollapsedGroupNode(
+          config.collapsed_groups ?? [],
+          groupKeyStr,
+          allRowKeys,
+        ),
+      );
     },
-    [config, onCollapseChange],
+    [config, onCollapseChange, allRowKeys],
   );
 
   const handleToggleColGroup = useCallback(
     (groupKeyStr: string) => {
       if (!onCollapseChange) return;
-      const collapsed = new Set(config.collapsed_col_groups ?? []);
-      if (collapsed.has(groupKeyStr)) {
-        collapsed.delete(groupKeyStr);
-      } else {
-        collapsed.add(groupKeyStr);
-      }
-      onCollapseChange("col", [...collapsed].sort());
+      onCollapseChange(
+        "col",
+        toggleCollapsedGroupNode(
+          config.collapsed_col_groups ?? [],
+          groupKeyStr,
+          pivotData.getColKeys(),
+        ),
+      );
     },
-    [config, onCollapseChange],
+    [config, onCollapseChange, pivotData],
   );
   const handleTemporalToggle = useCallback(
     (field: string, collapseKey: string) => {
@@ -949,6 +970,32 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
     columnWidth,
   ]);
 
+  // Mirrors the per-segment width contract established by renderColgroup below,
+  // so a drag starts from the same number the column declares.
+  declaredSlotWidthRef.current = (slot: number | string): number => {
+    if (typeof slot === "string") {
+      const vfi = Number(slot.slice(slot.indexOf("-") + 1));
+      const field = renderedValueFields[vfi];
+      return (
+        valFieldWidthMap.get(slot) ??
+        (field != null ? resolveFieldWidth(config, field) : undefined) ??
+        columnWidth
+      );
+    }
+    if (slot < 0) {
+      const rowDimIndex = -slot - 1;
+      return (
+        resolveEffectiveWidth(
+          columnWidthMap.get(slot),
+          resolveFieldWidth(config, config.rows[rowDimIndex]),
+        ) ??
+        estimatedRowHeaderWidths[rowDimIndex] ??
+        DEFAULT_COL_WIDTH
+      );
+    }
+    return variableColumnWidths?.[slot] ?? dataColWidth;
+  };
+
   // Builds a <colgroup> whose <col> elements cover every physical column in the
   // table in three segments:
   //   1. Row-header columns  (effectiveNumRowDims cols, always visible)
@@ -969,7 +1016,9 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
           resolveEffectiveWidth(
             columnWidthMap.get(-(idx + 1)),
             resolveFieldWidth(config, config.rows[idx]),
-          ) ?? DEFAULT_COL_WIDTH;
+          ) ??
+          estimatedRowHeaderWidths[idx] ??
+          DEFAULT_COL_WIDTH;
         cols.push(<col key={key++} style={{ width: w, minWidth: w }} />);
       }
 
@@ -1011,6 +1060,7 @@ const VirtualizedTableRenderer: FC<VirtualizedTableRendererProps> = ({
       effectiveNumRowDims,
       config,
       columnWidthMap,
+      estimatedRowHeaderWidths,
       variableColumnWidths,
       dataColWidth,
       hasMultipleValues,

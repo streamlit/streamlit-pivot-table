@@ -67,6 +67,25 @@ describe("TableRenderer - rendering", () => {
     expect(headers[1]).toHaveTextContent("2024");
   });
 
+  it("exposes the full row label as a tooltip", () => {
+    // Row labels ellipsize once the column is too narrow for them, so the
+    // untruncated text has to stay reachable on hover.
+    const data: DataRecord[] = [
+      { region: "Pacific Northwest Region", year: "2023", revenue: 100 },
+    ];
+    const config = makeConfig({ rows: ["region"], columns: ["year"] });
+    render(
+      <TableRenderer
+        pivotData={createPivotData(data, config)}
+        config={config}
+      />,
+    );
+    expect(screen.getAllByTestId("pivot-row-header")[0]).toHaveAttribute(
+      "title",
+      "Pacific Northwest Region",
+    );
+  });
+
   it("renders row headers", () => {
     const pd = createPivotData();
     render(<TableRenderer pivotData={pd} config={makeConfig()} />);
@@ -1763,7 +1782,64 @@ describe("Dimension toggle - click behavior", () => {
     expect(collapsed).toEqual([]);
   });
 
-  it("keeps parent collapse state when toggling a deeper hierarchy breadcrumb", () => {
+  it("__ALL__ reveals one level per click in a three-level hierarchy", () => {
+    // "Collapse All" stands for every level, so expanding the top level shows
+    // categories while leaving each category collapsed over its products.
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: ["__ALL__"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-0-region"));
+    const collapsed: string[] = onCollapseChange.mock.calls[0][1];
+    expect(collapsed).not.toContain("__ALL__");
+    expect(collapsed).not.toContain("US");
+    expect(collapsed).not.toContain("EU");
+    // What remains is the category level, still collapsed under each region.
+    expect(collapsed.length).toBeGreaterThan(0);
+    expect(
+      collapsed.every((k) => k.startsWith("US") || k.startsWith("EU")),
+    ).toBe(true);
+  });
+
+  it("__ALL__ expands every level when the deeper breadcrumb is clicked", () => {
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: ["__ALL__"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-1-category"));
+    expect(onCollapseChange).toHaveBeenCalledWith("row", []);
+  });
+
+  it("expands through collapsed parents when toggling a deeper hierarchy breadcrumb", () => {
+    // The breadcrumb renders aria-expanded=false whenever an ancestor is
+    // collapsed, so the click must expand — clearing the parent level too.
+    // Only clearing this level would leave the rows hidden behind the parent.
     const onCollapseChange = vi.fn();
     const config = makeConfig({
       rows: ["region", "category", "product"],
@@ -1783,10 +1859,116 @@ describe("Dimension toggle - click behavior", () => {
     );
     fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-1-category"));
     expect(onCollapseChange).toHaveBeenCalledTimes(1);
-    expect(onCollapseChange).toHaveBeenCalledWith("row", expect.any(Array));
+    expect(onCollapseChange).toHaveBeenCalledWith("row", []);
+  });
+
+  it("keeps expanded parents untouched when collapsing a deeper hierarchy breadcrumb", () => {
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: [],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-1-category"));
+    expect(onCollapseChange).toHaveBeenCalledTimes(1);
     const collapsed = onCollapseChange.mock.calls[0][1];
-    expect(collapsed).toEqual(expect.arrayContaining(["EU", "US"]));
-    expect(collapsed.length).toBeGreaterThan(2);
+    expect(collapsed.length).toBeGreaterThan(0);
+    // Region groups stay expanded: no level-0-only keys are added.
+    expect(collapsed).not.toContain("US");
+    expect(collapsed).not.toContain("EU");
+  });
+
+  it("expands a single group row while Collapse All is active", () => {
+    // The sentinel used to survive the click, so it kept collapsing the very
+    // row the chevron was meant to open.
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: ["__ALL__"],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pivot-group-toggle-US"));
+    const collapsed: string[] = onCollapseChange.mock.calls[0][1];
+    expect(collapsed).not.toContain("__ALL__");
+    expect(collapsed).not.toContain("US");
+    // Only the clicked region opened; the other region stays collapsed.
+    expect(collapsed).toContain("EU");
+  });
+
+  it("collapsing a single group row records the groups beneath it", () => {
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: [],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pivot-group-toggle-US"));
+    const collapsed: string[] = onCollapseChange.mock.calls[0][1];
+    expect(collapsed).toContain("US");
+    // Categories under US are recorded; the untouched region is left alone.
+    expect(collapsed.some((k) => k.startsWith("US") && k !== "US")).toBe(true);
+    expect(collapsed.every((k) => k.startsWith("US"))).toBe(true);
+  });
+
+  it("collapsing a level records the levels beneath it", () => {
+    // Otherwise expanding Region again would spring categories and products
+    // open together, since nothing recorded that categories were collapsed.
+    const onCollapseChange = vi.fn();
+    const config = makeConfig({
+      rows: ["region", "category", "product"],
+      columns: [],
+      values: ["revenue"],
+      row_layout: "hierarchy",
+      show_subtotals: true,
+      collapsed_groups: [],
+    });
+    const pd = new PivotData(MULTI_DIM_DATA, config);
+    render(
+      <TableRenderer
+        pivotData={pd}
+        config={config}
+        onCollapseChange={onCollapseChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pivot-dim-toggle-row-0-region"));
+    const collapsed: string[] = onCollapseChange.mock.calls[0][1];
+    expect(collapsed).toContain("US");
+    expect(collapsed).toContain("EU");
+    // The category level is recorded too, keyed under its region.
+    expect(collapsed.some((k) => k.startsWith("US") && k !== "US")).toBe(true);
   });
 });
 

@@ -162,6 +162,14 @@ const VirtualScroll: FC<VirtualScrollProps> = ({
   }, [scrollTop, rowHeight, bodyHeight, totalRows, overscanRows]);
 
   const { startCol, endCol } = useMemo(() => {
+    // All three tables are sized to the full virtual width, while the colgroup
+    // only declares the windowed columns. Under `table-layout: fixed` the
+    // surplus is spread across those columns, so a narrow window renders every
+    // column many times too wide. Below the wide-column threshold, render the
+    // whole axis: the declared widths then add up to the table width exactly.
+    if (totalColumns <= COLUMN_VIRTUALIZATION_THRESHOLD) {
+      return { startCol: 0, endCol: totalColumns };
+    }
     if (colOffsets) {
       const rawStart = Math.max(0, upperBound(colOffsets, scrollLeft) - 1);
       const start = Math.max(0, rawStart - effectiveOverscanColumns);
