@@ -379,6 +379,48 @@ def test_show_sections_invalid_type_raises(sample_df, pivot_module, mount_record
 
 
 # ---------------------------------------------------------------------------
+# show_toolbar — toolbar visibility
+# ---------------------------------------------------------------------------
+
+
+def test_show_toolbar_false_passes_through(sample_df, pivot_module, mount_recorder):
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        values=["Revenue"],
+        show_toolbar=False,
+    )
+    cfg = calls[0]["default"]["config"]
+    assert cfg["show_toolbar"] is False
+
+
+def test_show_toolbar_default_is_omitted(sample_df, pivot_module, mount_recorder):
+    calls = mount_recorder()
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        values=["Revenue"],
+    )
+    cfg = calls[0]["default"]["config"]
+    assert "show_toolbar" not in cfg
+
+
+def test_show_toolbar_invalid_type_raises(sample_df, pivot_module, mount_recorder):
+    mount_recorder()
+    with pytest.raises(TypeError, match="show_toolbar must be a bool"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            values=["Revenue"],
+            show_toolbar="yes",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Interaction: filters are applied to source data in client_only mode
 # ---------------------------------------------------------------------------
 

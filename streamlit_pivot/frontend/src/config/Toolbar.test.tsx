@@ -3164,6 +3164,22 @@ describe("validatePivotConfigV1 - filter_fields and show_sections", () => {
     expect(result.show_sections).toBe(false);
   });
 
+  it("passes through show_toolbar=false", () => {
+    const raw = {
+      version: 1,
+      rows: [],
+      columns: [],
+      values: [],
+      aggregation: {},
+      show_totals: false,
+      empty_cell_value: "",
+      interactive: true,
+      show_toolbar: false,
+    };
+    const result = validatePivotConfigV1(raw);
+    expect(result.show_toolbar).toBe(false);
+  });
+
   it("strips empty filter_fields (not stored when empty)", () => {
     const raw = {
       version: 1,
