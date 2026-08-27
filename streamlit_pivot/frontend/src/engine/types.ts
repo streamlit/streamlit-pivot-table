@@ -247,6 +247,8 @@ export interface PivotConfigV1 {
   /** Whether the toolbar sections (Rows/Columns/Values cards + FilterBar) are expanded.
    *  Defaults to true (expanded). Set to false to collapse to a compact one-line summary. */
   show_sections?: boolean;
+  /** Whether to render the toolbar at all. */
+  show_toolbar?: boolean;
   /**
    * 0.5.0: Top N / Bottom N filters applied to row or column dimension members.
    * Evaluated per-parent after member (include/exclude) filters.
@@ -1771,6 +1773,8 @@ export function validatePivotConfigV1(obj: unknown): PivotConfigV1 {
     result.filter_fields = o.filter_fields as string[];
   if (typeof o.show_sections === "boolean")
     result.show_sections = o.show_sections;
+  if (typeof o.show_toolbar === "boolean")
+    result.show_toolbar = o.show_toolbar;
 
   // top_n_filters and value_filters: structural checks only here (types, enum values).
   // Semantic validation (field/by references against declared dims/measures) is done

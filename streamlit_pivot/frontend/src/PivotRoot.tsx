@@ -1098,7 +1098,7 @@ const PivotRoot: FC<PivotRootProps> = ({
       >
         <WarningBanner messages={allWarnings} />
 
-        {currentConfig.interactive && (
+        {currentConfig.interactive && currentConfig.show_toolbar !== false && (
           <Toolbar
             instanceKey={instanceKey}
             config={currentConfig}
@@ -1130,6 +1130,7 @@ const PivotRoot: FC<PivotRootProps> = ({
         {((currentConfig.filter_fields?.length ?? 0) > 0 ||
           Object.keys(currentConfig.filters ?? {}).length > 0 ||
           (currentConfig.member_groups?.length ?? 0) > 0) &&
+          currentConfig.show_toolbar !== false &&
           currentConfig.show_sections !== false &&
           pivotData && (
             <FilterBar

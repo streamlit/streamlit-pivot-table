@@ -549,6 +549,24 @@ describe("PivotRoot - FilterBar rendering", () => {
     await flush();
     expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
   });
+
+  it("does not render the toolbar when show_toolbar=false", async () => {
+    const props = makeBaseProps({
+      config: makeConfig({
+        rows: ["region"],
+        columns: [],
+        values: ["revenue"],
+        filter_fields: ["category"],
+        show_toolbar: false,
+      }),
+      dataframe: makeSimpleDataframe(),
+      original_column_types: {},
+    });
+    render(<PivotRoot {...props} />);
+    await flush();
+    expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pivot-toolbar")).not.toBeInTheDocument();
+  });
 });
 
 describe("PivotRoot - handleRemoveFilterField", () => {

@@ -456,6 +456,7 @@ class PivotConfig(TypedDict, total=False):
     filters: dict[str, dict[str, list[Any]]]
     filter_fields: list[str]
     show_sections: bool
+    show_toolbar: bool
     top_n_filters: list[TopNFilterFull]
     value_filters: list[ValueFilterFull]
     values_axis: str
@@ -3276,6 +3277,7 @@ def _default_config(
     filters: dict[str, dict[str, list[Any]]] | None = None,
     filter_fields: list[str] | None = None,
     show_sections: bool | None = None,
+    show_toolbar: bool = True,
     top_n_filters: list[TopNFilterFull] | None = None,
     value_filters: list[ValueFilterFull] | None = None,
     values_axis: Literal["columns", "rows"] = "columns",
@@ -3391,6 +3393,8 @@ def _default_config(
         cfg["filter_fields"] = effective_filter_fields
     if show_sections is not None:
         cfg["show_sections"] = show_sections
+    if not show_toolbar:
+        cfg["show_toolbar"] = False
     if top_n_filters:
         cfg["top_n_filters"] = top_n_filters
     if value_filters:
@@ -3552,6 +3556,7 @@ def st_pivot_table(
     filters: dict[str, dict[str, list[Any]]] | None = None,
     filter_fields: list[str] | None = None,
     show_sections: bool | None = None,
+    show_toolbar: bool = True,
     # 0.5.0: analytical filtering
     top_n_filters: list[TopNFilterFull] | None = None,
     value_filters: list[ValueFilterFull] | None = None,
@@ -3676,6 +3681,9 @@ def st_pivot_table(
         toggle the state interactively with the collapse/expand button in the
         toolbar. Pass ``False`` to start in the compact view when screen
         real-estate is limited.
+    show_toolbar : bool
+        Whether to render the interactive toolbar. Defaults to ``True``. Pass
+        ``False`` to hide the toolbar while keeping the pivot table visible.
     null_handling : str or dict[str, str] or None
         How to treat null/NaN values. Global mode ("exclude", "zero",
         "separate") or per-field dict mapping column names to modes.
@@ -4059,6 +4067,8 @@ def st_pivot_table(
         raise TypeError(
             f"show_sections must be a bool or None, got {type(show_sections).__name__}"
         )
+    if not isinstance(show_toolbar, bool):
+        raise TypeError(f"show_toolbar must be a bool, got {type(show_toolbar).__name__}")
 
     if not isinstance(collapse_row_groups, bool):
         raise TypeError(
@@ -4878,6 +4888,7 @@ def st_pivot_table(
         filters=filters,
         filter_fields=filter_fields,
         show_sections=show_sections,
+        show_toolbar=show_toolbar,
         top_n_filters=top_n_filters,
         value_filters=value_filters,
         values_axis=values_axis,
