@@ -490,6 +490,7 @@ function buildTotalCellStyle(
   valField: string,
   config: PivotConfigV1,
   pivotData: PivotData,
+  visibleSubtotalDepth?: number,
 ): React.CSSProperties | undefined {
   const align = getCellAlignment(valField, config);
   const condStyle = config.conditional_formatting
@@ -499,6 +500,7 @@ function buildTotalCellStyle(
         config.conditional_formatting,
         pivotData,
         true,
+        visibleSubtotalDepth,
       )
     : undefined;
   const style: React.CSSProperties = {
@@ -3625,6 +3627,11 @@ export function renderSubtotalRow(
             valField,
             config,
             pivotData,
+            isCollapsed &&
+              !tSlotSub.temporalCollapse &&
+              slot.collapsedLevel === undefined
+              ? dimParentKey.length
+              : undefined,
           );
           return (
             <td
@@ -3887,6 +3894,11 @@ export function renderSubtotalRow(
             valField,
             config,
             pivotData,
+            isCollapsed &&
+              !tSlotSub.temporalCollapse &&
+              slot.collapsedLevel === undefined
+              ? parentKey.length
+              : undefined,
           );
           return (
             <td

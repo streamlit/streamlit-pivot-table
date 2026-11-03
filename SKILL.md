@@ -627,6 +627,8 @@ Color-scale `mid_value` anchors the gradient at a specific raw aggregate (e.g. `
 
 **`include_totals`** (bool, default `False`) — include mid-table subtotal rows in the CF range. Consistent across both `values_axis` modes.
 
+**`visible_level_only`** (bool, default `False`) — format only the deepest visible row level: innermost rows plus subtotals of collapsed groups, scaled per row depth. Expanded parents and row, column, and grand totals stay unformatted. Cannot be combined with `include_totals=True`. On-screen only; XLSX export behaves as if `include_totals` were `False`.
+
 ### Null Handling
 
 `"exclude"` (default; null-dimension rows dropped) · `"zero"` (null measures → 0) · `"separate"` (null dimensions → "(null)" group).

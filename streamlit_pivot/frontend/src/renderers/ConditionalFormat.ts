@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import type { PivotData } from "../engine/PivotData";
+import { makeKeyString, type PivotData } from "../engine/PivotData";
 import type {
   AnyConditionalFormatRule,
   ColorScaleRule,
@@ -68,6 +68,59 @@ export function computeColumnStats(
 
   const stats: ColumnStats = { min, max, range: max - min };
   perField.set(valField, stats);
+  return stats;
+}
+
+const depthStatsCache = new WeakMap<PivotData, Map<string, ColumnStats>>();
+
+/**
+ * Min/max of a value field across the subtotals of every row group at `depth`
+ * (the length of the group's row key prefix). All groups count, collapsed or
+ * not, so expanding one group does not recolor the others.
+ */
+export function computeDepthStats(
+  pivotData: PivotData,
+  valField: string,
+  depth: number,
+): ColumnStats {
+  let perDepth = depthStatsCache.get(pivotData);
+  if (!perDepth) {
+    perDepth = new Map();
+    depthStatsCache.set(pivotData, perDepth);
+  }
+  const cacheKey = `${depth}\x00${valField}`;
+  const cached = perDepth.get(cacheKey);
+  if (cached) return cached;
+
+  let min = Infinity;
+  let max = -Infinity;
+  const colKeys = pivotData.getColKeys();
+  const seen = new Set<string>();
+
+  // With values_axis="rows" the value field is the last key segment, so a prefix
+  // of `depth` dimensions never includes it.
+  for (const rk of pivotData.getRowKeys()) {
+    const parentKey = rk.slice(0, depth);
+    const parentKeyStr = makeKeyString(parentKey);
+    if (seen.has(parentKeyStr)) continue;
+    seen.add(parentKeyStr);
+
+    for (const ck of colKeys) {
+      const v = pivotData
+        .getSubtotalAggregator(parentKey, ck, valField)
+        .value();
+      if (v !== null) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+  }
+
+  if (!isFinite(min)) min = 0;
+  if (!isFinite(max)) max = 0;
+
+  const stats: ColumnStats = { min, max, range: max - min };
+  perDepth.set(cacheKey, stats);
   return stats;
 }
 
@@ -163,6 +216,9 @@ function isThreshold(rule: AnyConditionalFormatRule): rule is ThresholdRule {
 /**
  * Compute inline styles for a data cell based on conditional formatting rules.
  * Returns undefined when no rules apply.
+ *
+ * `visibleSubtotalDepth` is set only for subtotal cells of a collapsed row group,
+ * the one kind of total that `visible_level_only` rules format.
  */
 export function computeCellStyle(
   value: number | null,
@@ -170,6 +226,7 @@ export function computeCellStyle(
   rules: AnyConditionalFormatRule[],
   pivotData: PivotData,
   isTotal: boolean,
+  visibleSubtotalDepth?: number,
 ): React.CSSProperties | undefined {
   if (value === null || rules.length === 0) return undefined;
 
@@ -179,7 +236,11 @@ export function computeCellStyle(
 
   for (const rule of rules) {
     if (rule.apply_to.length > 0 && !rule.apply_to.includes(valField)) continue;
-    if (isTotal && !rule.include_totals) continue;
+    if (rule.visible_level_only) {
+      if (isTotal && visibleSubtotalDepth === undefined) continue;
+    } else if (isTotal && !rule.include_totals) {
+      continue;
+    }
 
     // Threshold rules use absolute values — no stats needed
     if (isThreshold(rule)) {
@@ -224,7 +285,10 @@ export function computeCellStyle(
     }
 
     // Color scale and data bars need column stats (cached per field)
-    const stats = computeColumnStats(pivotData, valField);
+    const stats =
+      rule.visible_level_only && isTotal && visibleSubtotalDepth !== undefined
+        ? computeDepthStats(pivotData, valField, visibleSubtotalDepth)
+        : computeColumnStats(pivotData, valField);
 
     if (isColorScale(rule)) {
       const minC = parseColor(rule.min_color);

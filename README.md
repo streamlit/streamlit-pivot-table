@@ -921,6 +921,37 @@ When `True`, mid-table subtotal rows (not grand totals) are included in the CF
 range. Default `False`. Applies to both `values_axis="columns"` and
 `values_axis="rows"` consistently.
 
+#### `visible_level_only`
+
+When `True`, the rule formats only the deepest row level currently showing, so
+the formatting follows the user as they collapse and expand groups. Default
+`False`.
+
+```python
+{
+    "type": "color_scale",
+    "apply_to": ["Revenue"],
+    "min_color": "#ffffff",
+    "max_color": "#2e7d32",
+    "visible_level_only": True,
+}
+```
+
+| Cell | Formatted? |
+|---|---|
+| Innermost row | Yes |
+| Subtotal of a collapsed row group | Yes |
+| Subtotal of an expanded row group | No |
+| Row totals, column totals, and grand total | No |
+| Collapsed column group or temporal parent column | No |
+
+Subtotals are scaled against every subtotal at the same row depth, whether or
+not it is visible, so expanding one group doesn't recolor the others.
+
+This option can't be combined with `include_totals=True`. It applies on screen
+only: XLSX export can't follow collapse state, so it behaves as if
+`include_totals` were `False`.
+
 Multiple rules can be combined:
 
 ```python
