@@ -748,6 +748,14 @@ export interface ConditionalFormatRule {
   /** Also apply to subtotal/grand total cells? Default false. */
   include_totals?: boolean;
   /**
+   * Format only the deepest visible row level: innermost rows plus subtotals of
+   * collapsed row groups. Expanded parents and row/column/grand totals stay
+   * unformatted, and subtotals are scaled against others at the same row depth.
+   * On-screen only; XLSX export treats the rule as `include_totals: false`.
+   * Default false.
+   */
+  visible_level_only?: boolean;
+  /**
    * Color scale / data bar min–max scope for XLSX export.
    * Has no effect on `threshold` rules (conditions are absolute values).
    *

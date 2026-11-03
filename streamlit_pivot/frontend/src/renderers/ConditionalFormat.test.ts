@@ -26,7 +26,11 @@ import {
   type DataBarsRule,
   type ThresholdRule,
 } from "../engine/types";
-import { computeCellStyle, computeColumnStats } from "./ConditionalFormat";
+import {
+  computeCellStyle,
+  computeColumnStats,
+  computeDepthStats,
+} from "./ConditionalFormat";
 
 type TestConfigOverrides = Partial<Omit<PivotConfigV1, "aggregation">> & {
   aggregation?: AggregationType | AggregationConfig;
@@ -73,6 +77,125 @@ describe("computeColumnStats", () => {
     const s1 = computeColumnStats(pd, "revenue");
     const s2 = computeColumnStats(pd, "revenue");
     expect(s1).toBe(s2);
+  });
+});
+
+describe("visible_level_only", () => {
+  const NESTED_DATA: DataRecord[] = [
+    { region: "US", city: "NYC", year: "2023", revenue: 10 },
+    { region: "US", city: "LA", year: "2023", revenue: 20 },
+    { region: "EU", city: "Paris", year: "2023", revenue: 100 },
+    { region: "EU", city: "Rome", year: "2023", revenue: 200 },
+  ];
+  const WHITE = "rgb(255, 255, 255)";
+  const BLACK = "rgb(0, 0, 0)";
+
+  const rule: ColorScaleRule = {
+    type: "color_scale",
+    apply_to: [],
+    min_color: "#ffffff",
+    max_color: "#000000",
+    visible_level_only: true,
+  };
+
+  function nestedPivot(overrides: TestConfigOverrides = {}): PivotData {
+    return new PivotData(
+      NESTED_DATA,
+      makeConfig({
+        rows: ["region", "city"],
+        show_subtotals: true,
+        ...overrides,
+      }),
+    );
+  }
+
+  it("computes the range from subtotals at the given depth", () => {
+    const stats = computeDepthStats(nestedPivot(), "revenue", 1);
+    expect(stats).toEqual({ min: 30, max: 300, range: 270 });
+  });
+
+  it("computes the same depth range when values are on rows", () => {
+    const pd = nestedPivot({ values_axis: "rows" });
+    expect(computeDepthStats(pd, "revenue", 1)).toEqual({
+      min: 30,
+      max: 300,
+      range: 270,
+    });
+  });
+
+  it("caches depth ranges per pivotData, depth, and field", () => {
+    const pd = nestedPivot();
+    expect(computeDepthStats(pd, "revenue", 1)).toBe(
+      computeDepthStats(pd, "revenue", 1),
+    );
+  });
+
+  it("formats a collapsed subtotal against its own depth", () => {
+    const pd = nestedPivot();
+    const style = (value: number) =>
+      computeCellStyle(value, "revenue", [rule], pd, true, 1)?.backgroundColor;
+    expect(style(30)).toBe(WHITE);
+    expect(style(300)).toBe(BLACK);
+  });
+
+  it("skips totals that are not a collapsed subtotal", () => {
+    const pd = nestedPivot();
+    expect(computeCellStyle(330, "revenue", [rule], pd, true)).toBeUndefined();
+  });
+
+  it("scales body cells by the innermost level", () => {
+    const pd = nestedPivot();
+    const style = (value: number) =>
+      computeCellStyle(value, "revenue", [rule], pd, false)?.backgroundColor;
+    expect(style(10)).toBe(WHITE);
+    expect(style(200)).toBe(BLACK);
+  });
+
+  it("does not format a subtotal unless the rule opts in", () => {
+    const pd = nestedPivot();
+    const plainRule: ColorScaleRule = { ...rule, visible_level_only: false };
+    expect(
+      computeCellStyle(30, "revenue", [plainRule], pd, true, 1),
+    ).toBeUndefined();
+  });
+
+  it("keeps the body-cell range for include_totals rules", () => {
+    const pd = nestedPivot();
+    const totalsRule: ColorScaleRule = {
+      ...rule,
+      visible_level_only: false,
+      include_totals: true,
+    };
+    // 300 is above the body-cell max of 200, so it clamps to max_color; the same
+    // holds for 30, which sits low in the body range instead of at its minimum.
+    expect(
+      computeCellStyle(300, "revenue", [totalsRule], pd, true, 1)
+        ?.backgroundColor,
+    ).toBe(BLACK);
+    expect(
+      computeCellStyle(30, "revenue", [totalsRule], pd, true, 1)
+        ?.backgroundColor,
+    ).not.toBe(WHITE);
+  });
+
+  it("filters data_bars and threshold rules the same way", () => {
+    const pd = nestedPivot();
+    const bars: DataBarsRule = {
+      type: "data_bars",
+      apply_to: [],
+      fill: "solid",
+      visible_level_only: true,
+    };
+    const threshold: ThresholdRule = {
+      type: "threshold",
+      apply_to: [],
+      conditions: [{ operator: "gt", value: 0, bold: true }],
+      visible_level_only: true,
+    };
+    for (const r of [bars, threshold]) {
+      expect(computeCellStyle(300, "revenue", [r], pd, true)).toBeUndefined();
+      expect(computeCellStyle(300, "revenue", [r], pd, true, 1)).toBeDefined();
+    }
   });
 });
 

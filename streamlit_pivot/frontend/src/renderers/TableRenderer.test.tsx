@@ -2712,6 +2712,88 @@ describe("TableRenderer - conditional formatting rendering", () => {
     });
   });
 
+  describe("visible_level_only", () => {
+    const NESTED_DATA: DataRecord[] = [
+      { region: "US", city: "NYC", year: "2023", revenue: 10 },
+      { region: "US", city: "LA", year: "2023", revenue: 20 },
+      { region: "EU", city: "Paris", year: "2023", revenue: 100 },
+      { region: "EU", city: "Rome", year: "2023", revenue: 200 },
+    ];
+
+    function renderNested(
+      collapsed_groups: string[],
+      row_layout: PivotConfigV1["row_layout"] = "hierarchy",
+    ) {
+      const config = makeConfig({
+        rows: ["region", "city"],
+        columns: ["year"],
+        values: ["revenue"],
+        row_layout,
+        show_subtotals: true,
+        collapsed_groups,
+        conditional_formatting: [
+          {
+            type: "color_scale",
+            apply_to: ["revenue"],
+            min_color: "#ffffff",
+            max_color: "#000000",
+            visible_level_only: true,
+          },
+        ],
+      });
+      render(
+        <TableRenderer
+          pivotData={new PivotData(NESTED_DATA, config)}
+          config={config}
+        />,
+      );
+    }
+
+    const styled = (testId: string) =>
+      screen
+        .queryAllByTestId(testId)
+        .filter((cell) => cell.style.backgroundColor !== "");
+
+    it.each(["hierarchy", "table"] as const)(
+      "formats collapsed subtotals but no other totals (%s layout)",
+      (layout) => {
+        renderNested(["__ALL__"], layout);
+
+        const cells = screen.getAllByTestId("pivot-subtotal-cell");
+        expect(cells).toHaveLength(2);
+        expect(styled("pivot-subtotal-cell")).toHaveLength(2);
+        expect(styled("pivot-subtotal-total")).toHaveLength(0);
+        expect(styled("pivot-col-total")).toHaveLength(0);
+        expect(styled("pivot-grand-total")).toHaveLength(0);
+      },
+    );
+
+    it("moves formatting from an expanded subtotal to its children", () => {
+      // EU is expanded and US is collapsed.
+      renderNested(["US"]);
+
+      const subtotals = screen.getAllByTestId("pivot-subtotal-cell");
+      const formatted = styled("pivot-subtotal-cell");
+      expect(subtotals).toHaveLength(2);
+      expect(formatted).toHaveLength(1);
+      expect(formatted[0].textContent).toBe("30");
+      expect(styled("pivot-data-cell")).toHaveLength(2);
+    });
+
+    it("keeps a group's color stable when another group is expanded", () => {
+      renderNested(["EU", "US"]);
+      const color = (label: string) =>
+        styled("pivot-subtotal-cell").find((cell) => cell.textContent === label)
+          ?.style.backgroundColor;
+      const before = color("30");
+      expect(before).toBeTruthy();
+      document.body.innerHTML = "";
+
+      renderNested(["US"]);
+      expect(color("30")).toBe(before);
+    });
+  });
+
   it("applies condFormatted to hierarchy layout data cells", () => {
     const data: DataRecord[] = [
       { region: "US", category: "A", year: "2024", revenue: 100 },

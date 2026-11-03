@@ -566,6 +566,69 @@ def test_color_scale_accepts_mid_value_with_mid_color(
     assert rule["mid_color"] == "#ffffff"
 
 
+def test_visible_level_only_is_sent_to_frontend(
+    pivot_module, sample_df, mount_recorder
+):
+    calls = mount_recorder()
+
+    pivot_module.st_pivot_table(
+        sample_df,
+        key="pivot",
+        rows=["Region"],
+        columns=["Year"],
+        values=["Revenue"],
+        conditional_formatting=[
+            {
+                "type": "color_scale",
+                "apply_to": ["Revenue"],
+                "min_color": "#ffffff",
+                "max_color": "#0000ff",
+                "visible_level_only": True,
+            },
+        ],
+    )
+
+    rule = calls[0]["data"]["config"]["conditional_formatting"][0]
+    assert rule["visible_level_only"] is True
+
+
+def test_visible_level_only_must_be_bool(pivot_module, sample_df):
+    with pytest.raises(TypeError, match="'visible_level_only'\\] must be a bool"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            conditional_formatting=[
+                {
+                    "type": "data_bars",
+                    "apply_to": ["Revenue"],
+                    "visible_level_only": "yes",
+                },
+            ],
+        )
+
+
+def test_visible_level_only_rejects_include_totals(pivot_module, sample_df):
+    with pytest.raises(ValueError, match="cannot be combined with 'include_totals'"):
+        pivot_module.st_pivot_table(
+            sample_df,
+            key="pivot",
+            rows=["Region"],
+            columns=["Year"],
+            values=["Revenue"],
+            conditional_formatting=[
+                {
+                    "type": "data_bars",
+                    "apply_to": ["Revenue"],
+                    "visible_level_only": True,
+                    "include_totals": True,
+                },
+            ],
+        )
+
+
 def test_color_scale_mid_value_requires_mid_color(pivot_module, sample_df):
     with pytest.raises(ValueError, match="'mid_value' requires 'mid_color'"):
         pivot_module.st_pivot_table(

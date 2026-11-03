@@ -3852,6 +3852,14 @@ def st_pivot_table(
         scale across all selected measure rows and data columns (only
         appropriate when all targeted fields share the same units).
         ``"scope": "per_column"`` gives one scale per data column.
+
+        ``"visible_level_only"`` (bool, default ``False``) formats only the
+        deepest visible row level: innermost rows plus subtotals of collapsed
+        row groups. Expanded parents and row, column, and grand totals stay
+        unformatted, and subtotals are scaled against others at the same row
+        depth. Cannot be combined with ``"include_totals": True``. Applies on
+        screen only; XLSX export behaves as if ``"include_totals"`` were
+        ``False``.
     number_format : str or dict[str, str] or None
         Number format pattern(s). A single string applies to all
         value fields; a dict maps field names to patterns. Use
@@ -4579,6 +4587,16 @@ def st_pivot_table(
                 raise ValueError(
                     f"conditional_formatting[{i}]['scope'] must be "
                     f'"global" or "per_column", got {scope!r}'
+                )
+            visible_level_only = rule.get("visible_level_only", False)
+            if not isinstance(visible_level_only, bool):
+                raise TypeError(
+                    f"conditional_formatting[{i}]['visible_level_only'] must be a bool"
+                )
+            if visible_level_only and rule.get("include_totals"):
+                raise ValueError(
+                    f"conditional_formatting[{i}]: 'visible_level_only' cannot be "
+                    "combined with 'include_totals'"
                 )
             if rtype == "color_scale":
                 for color_key in ("min_color", "max_color"):
